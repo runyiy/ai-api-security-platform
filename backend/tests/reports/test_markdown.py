@@ -10,47 +10,52 @@ def build_report() -> SecurityReport:
     return SecurityReport(
         id=1,
         finding_id=1,
-        source_ai_analysis_id=None,
+        target_id=1,
         version=1,
-        title=(
-            "Confirmed BOLA in "
-            "GET /api/projects/{project_id}"
-        ),
-        summary=(
-            "Cross-owner object access "
-            "was confirmed."
-        ),
-        affected_endpoint=(
-            "GET /api/projects/{project_id}"
-        ),
-        prerequisites=(
-            "Two distinct test identities."
-        ),
-        steps_to_reproduce=[
-            "Authenticate as User A.",
-            "Request Project 2001.",
-        ],
-        expected_result=(
-            "Access should be denied."
-        ),
-        actual_result=(
-            "HTTP 200 returned Project 2001."
-        ),
-        security_impact=(
-            "Cross-user data disclosure."
-        ),
-        evidence={
-            "response_status": 200,
-            "request": {
-                "headers": {
-                    "Authorization":
-                        "[REDACTED]"
-                }
+        report_format="markdown",
+        report_data={
+            "source_ai_analysis_id": None,
+            "title": (
+                "Confirmed BOLA in "
+                "GET /api/projects/{project_id}"
+            ),
+            "summary": (
+                "Cross-owner object access "
+                "was confirmed."
+            ),
+            "affected_endpoint": (
+                "GET /api/projects/{project_id}"
+            ),
+            "prerequisites": (
+                "Two distinct test identities."
+            ),
+            "steps_to_reproduce": [
+                "Authenticate as User A.",
+                "Request Project 2001.",
+            ],
+            "expected_result": (
+                "Access should be denied."
+            ),
+            "actual_result": (
+                "HTTP 200 returned Project 2001."
+            ),
+            "security_impact": (
+                "Cross-user data disclosure."
+            ),
+            "evidence": {
+                "response_status": 200,
+                "request": {
+                    "headers": {
+                        "Authorization":
+                            "[REDACTED]"
+                    }
+                },
             },
+            "suggested_fix": (
+                "Validate resource ownership."
+            ),
         },
-        suggested_fix=(
-            "Validate resource ownership."
-        ),
+        markdown_content="",
     )
 
 

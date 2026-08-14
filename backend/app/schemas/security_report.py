@@ -11,26 +11,12 @@ class SecurityReportRead(BaseModel):
     id: int
 
     finding_id: int
-    source_ai_analysis_id: int | None
+    target_id: int
 
     version: int
-
-    title: str
-    summary: str
-
-    affected_endpoint: str
-    prerequisites: str
-
-    steps_to_reproduce: list[str]
-
-    expected_result: str
-    actual_result: str
-
-    security_impact: str
-
-    evidence: dict[str, Any]
-
-    suggested_fix: str
+    report_format: str
+    report_data: dict[str, Any]
+    markdown_content: str
 
     created_at: datetime
 

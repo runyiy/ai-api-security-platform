@@ -11,9 +11,6 @@ from app.db.models.security_report import (
     SecurityReport,
 )
 from app.db.session import get_db
-from app.reports.markdown import (
-    render_security_report_markdown,
-)
 from app.schemas.security_report import (
     SecurityReportMarkdownRead,
     SecurityReportRead,
@@ -117,14 +114,8 @@ def get_security_report_markdown(
             detail="Security report not found.",
         )
 
-    markdown = (
-        render_security_report_markdown(
-            report
-        )
-    )
-
     return SecurityReportMarkdownRead(
         report_id=report.id,
         version=report.version,
-        markdown=markdown,
+        markdown=report.markdown_content,
     )

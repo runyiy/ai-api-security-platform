@@ -8,35 +8,37 @@ from app.db.models.security_report import (
 def render_security_report_markdown(
     report: SecurityReport,
 ) -> str:
+    report_data = report.report_data
+
     steps = "\n".join(
         f"{index}. {step}"
         for index, step in enumerate(
-            report.steps_to_reproduce,
+            report_data["steps_to_reproduce"],
             start=1,
         )
     )
 
     evidence_json = json.dumps(
-        report.evidence,
+        report_data["evidence"],
         indent=2,
         ensure_ascii=False,
     )
 
-    return f"""# {report.title}
+    return f"""# {report_data["title"]}
 
 **Report Version:** {report.version}
 
 ## Summary
 
-{report.summary}
+{report_data["summary"]}
 
 ## Affected Endpoint
 
-`{report.affected_endpoint}`
+`{report_data["affected_endpoint"]}`
 
 ## Prerequisites
 
-{report.prerequisites}
+{report_data["prerequisites"]}
 
 ## Steps To Reproduce
 
@@ -44,17 +46,23 @@ def render_security_report_markdown(
 
 ## Expected Result
 
-{report.expected_result}
+{report_data["expected_result"]}
 
 ## Actual Result
 
-{report.actual_result}
+{report_data["actual_result"]}
 
 ## Security Impact
 
-{report.security_impact}
+{report_data["security_impact"]}
 
 ## Evidence
 
 ```json
 {evidence_json}
+```
+
+## Suggested Fix
+
+{report_data["suggested_fix"]}
+"""

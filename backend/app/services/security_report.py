@@ -16,8 +16,9 @@ from app.db.models.security_report import (
 )
 from app.db.models.test_case import TestCase
 from app.db.models.test_run import TestRun
-
-from app.db.models.test_identity import TestIdentity
+from app.reports.markdown import (
+    render_security_report_markdown,
+)
 
 class SecurityReportError(
     RuntimeError
@@ -299,35 +300,48 @@ class SecurityReportService:
                 ),
             }
 
-        report = SecurityReport(
-            finding_id=finding.id,
-            source_ai_analysis_id=(
+        report_data = {
+            "source_ai_analysis_id": (
                 latest_ai_analysis.id
                 if latest_ai_analysis
                 else None
             ),
-            version=next_version,
-            title=(
+            "title": (
                 f"Confirmed BOLA in "
                 f"{affected_endpoint}"
             ),
-            summary=(
+            "summary": (
                 "A confirmed Broken Object Level "
                 "Authorization issue allows one "
                 "authenticated test identity to "
                 "access a resource owned by "
                 "another identity."
             ),
-            affected_endpoint=(
+            "affected_endpoint": (
                 affected_endpoint
             ),
-            prerequisites=prerequisites,
-            steps_to_reproduce=steps,
-            expected_result=expected_result,
-            actual_result=actual_result,
-            security_impact=security_impact,
-            evidence=evidence,
-            suggested_fix=suggested_fix,
+            "prerequisites": prerequisites,
+            "steps_to_reproduce": steps,
+            "expected_result": expected_result,
+            "actual_result": actual_result,
+            "security_impact": security_impact,
+            "evidence": evidence,
+            "suggested_fix": suggested_fix,
+        }
+
+        report = SecurityReport(
+            finding_id=finding.id,
+            target_id=finding.target_id,
+            version=next_version,
+            report_format="markdown",
+            report_data=report_data,
+            markdown_content="",
+        )
+
+        report.markdown_content = (
+            render_security_report_markdown(
+                report
+            )
         )
 
         self.db.add(report)
