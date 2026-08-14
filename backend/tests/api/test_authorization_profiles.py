@@ -224,6 +224,31 @@ def test_invalid_create_validity_window_is_rejected() -> None:
     assert response.status_code == 422
 
 
+def test_naive_valid_from_on_create_is_rejected() -> None:
+    response = client.post(
+        "/api/authorization-profiles",
+        json={
+            **minimal_payload(),
+            "valid_from": "2026-09-10T00:00:00",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_mixed_aware_and_naive_create_timestamps_are_rejected() -> None:
+    response = client.post(
+        "/api/authorization-profiles",
+        json={
+            **minimal_payload(),
+            "valid_from": "2026-09-10T00:00:00Z",
+            "valid_until": "2026-09-11T00:00:00",
+        },
+    )
+
+    assert response.status_code == 422
+
+
 def test_partial_patch_validates_merged_validity_window() -> None:
     create_response = client.post(
         "/api/authorization-profiles",
@@ -249,6 +274,37 @@ def test_partial_patch_validates_merged_validity_window() -> None:
         )
         assert get_response.status_code == 200
         assert get_response.json()["valid_until"] is None
+    finally:
+        delete_profile(profile["id"])
+
+
+def test_naive_partial_patch_is_rejected_and_profile_is_unchanged() -> None:
+    create_response = client.post(
+        "/api/authorization-profiles",
+        json={
+            **minimal_payload(),
+            "valid_from": "2026-09-10T00:00:00Z",
+        },
+    )
+    assert create_response.status_code == 201
+    profile = create_response.json()
+
+    try:
+        patch_response = client.patch(
+            f"/api/authorization-profiles/{profile['id']}",
+            json={
+                "valid_until": "2026-09-11T00:00:00",
+            },
+        )
+        assert patch_response.status_code == 422
+
+        get_response = client.get(
+            f"/api/authorization-profiles/{profile['id']}"
+        )
+        assert get_response.status_code == 200
+        unchanged = get_response.json()
+        assert unchanged["valid_from"] == profile["valid_from"]
+        assert unchanged["valid_until"] is None
     finally:
         delete_profile(profile["id"])
 

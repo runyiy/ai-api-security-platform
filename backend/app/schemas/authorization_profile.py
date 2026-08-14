@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from pydantic import (
+    AwareDatetime,
     BaseModel,
     ConfigDict,
     Field,
@@ -18,8 +19,8 @@ class AuthorizationProfileCreate(BaseModel):
         default=None,
         max_length=500,
     )
-    valid_from: datetime | None = None
-    valid_until: datetime | None = None
+    valid_from: AwareDatetime | None = None
+    valid_until: AwareDatetime | None = None
     automation_allowed: bool = False
     max_requests_per_second: float = Field(default=1.0, gt=0)
     allow_get: bool = False
@@ -72,8 +73,8 @@ class AuthorizationProfileUpdate(BaseModel):
         default=None,
         max_length=500,
     )
-    valid_from: datetime | None = None
-    valid_until: datetime | None = None
+    valid_from: AwareDatetime | None = None
+    valid_until: AwareDatetime | None = None
     automation_allowed: bool | None = None
     max_requests_per_second: float | None = Field(default=None, gt=0)
     allow_get: bool | None = None
