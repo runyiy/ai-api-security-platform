@@ -12,6 +12,7 @@ from app.scanners.openapi import (
 )
 from app.schemas.openapi import OpenAPIImportRequest
 from tests.scanners.test_openapi import (
+    build_profile,
     build_scope,
     build_target,
 )
@@ -45,7 +46,7 @@ def test_import_returns_502_for_malformed_schema(
         build_scope(),
     ]
     db = Mock(spec=Session)
-    db.get.return_value = build_target()
+    db.get.side_effect = [build_target(), build_profile()]
     db.scalars.return_value = scalar_result
 
     with pytest.raises(HTTPException) as exc_info:
@@ -76,10 +77,12 @@ def test_import_ends_read_transaction_before_scan(
     ]
     db = Mock(spec=Session)
 
-    def get_target(model, object_id):
+    def get_object(model, object_id):
         transaction_active["value"] = True
         events.append("db-read")
-        return build_target()
+        if object_id == 1:
+            return build_target()
+        return build_profile()
 
     def read_scopes(statement):
         transaction_active["value"] = True
@@ -95,7 +98,7 @@ def test_import_ends_read_transaction_before_scan(
         events.append("db-write-query")
         return 1
 
-    db.get.side_effect = get_target
+    db.get.side_effect = get_object
     db.scalars.side_effect = read_scopes
     db.scalar.side_effect = insert_endpoint
     db.commit.side_effect = commit
@@ -104,9 +107,10 @@ def test_import_ends_read_transaction_before_scan(
     )
 
     class OrderingScanner:
-        def scan(self, *, target, scopes):
+        def scan(self, *, target, authorization_profile, scopes):
             events.append("scanner-call")
             assert db.in_transaction() is False
+            assert authorization_profile.id == 100
             return (
                 "https://example.test/openapi.json",
                 [
@@ -134,6 +138,7 @@ def test_import_ends_read_transaction_before_scan(
     )
 
     assert events == [
+        "db-read",
         "db-read",
         "db-read",
         "commit",

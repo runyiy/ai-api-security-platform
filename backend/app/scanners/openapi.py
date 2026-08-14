@@ -2,6 +2,7 @@ import json
 
 import httpx
 
+from app.db.models.authorization_profile import AuthorizationProfile
 from app.db.models.scope import Scope
 from app.db.models.target import Target
 from app.policies.scope_policy import (
@@ -231,6 +232,7 @@ class OpenAPIScanner:
         self,
         *,
         target: Target,
+        authorization_profile: AuthorizationProfile | None,
         scopes: list[Scope],
     ) -> tuple[
         str,
@@ -244,6 +246,7 @@ class OpenAPIScanner:
         decision = (
             self.policy_engine.evaluate(
                 target=target,
+                authorization_profile=authorization_profile,
                 scopes=scopes,
                 request_url=openapi_url,
                 method="GET",

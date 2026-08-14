@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.db.models.authorization_profile import AuthorizationProfile
 from app.db.models.scope import Scope
 from app.db.models.target import Target
 from app.db.session import get_db
@@ -52,6 +53,14 @@ def check_policy(
             detail="Target not found.",
         )
 
+    authorization_profile = None
+
+    if target.authorization_profile_id is not None:
+        authorization_profile = db.get(
+            AuthorizationProfile,
+            target.authorization_profile_id,
+        )
+
     scopes = list(
         db.scalars(
             select(Scope).where(
@@ -64,6 +73,7 @@ def check_policy(
 
     decision = policy_engine.evaluate(
         target=target,
+        authorization_profile=authorization_profile,
         scopes=scopes,
         request_url=payload.url,
         method=payload.method,

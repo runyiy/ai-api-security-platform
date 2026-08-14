@@ -1,7 +1,9 @@
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import ipaddress
 from urllib.parse import unquote, urlsplit
 
+from app.db.models.authorization_profile import AuthorizationProfile
 from app.db.models.scope import Scope
 from app.db.models.target import Target
 
@@ -14,6 +16,14 @@ MVP_HTTP_METHODS = frozenset(
         "DELETE",
     }
 )
+
+
+AUTHORIZATION_METHOD_FIELDS = {
+    "GET": "allow_get",
+    "POST": "allow_post",
+    "PATCH": "allow_patch",
+    "DELETE": "allow_delete",
+}
 
 
 @dataclass(frozen=True)
@@ -203,15 +213,94 @@ class ScopePolicyEngine:
         self,
         *,
         target: Target,
+        authorization_profile: AuthorizationProfile | None,
         scopes: list[Scope],
         request_url: str,
         method: str,
+        evaluation_time: datetime | None = None,
     ) -> PolicyDecision:
         if not target.is_enabled:
             return PolicyDecision(
                 allowed=False,
                 code="target_disabled",
                 reason="Target is disabled.",
+            )
+
+        if target.authorization_profile_id is None:
+            return PolicyDecision(
+                allowed=False,
+                code="authorization_profile_missing",
+                reason=(
+                    "Target has no AuthorizationProfile binding."
+                ),
+            )
+
+        if authorization_profile is None:
+            return PolicyDecision(
+                allowed=False,
+                code="authorization_profile_missing",
+                reason=(
+                    "The bound AuthorizationProfile was not provided."
+                ),
+            )
+
+        if (
+            authorization_profile.id
+            != target.authorization_profile_id
+        ):
+            return PolicyDecision(
+                allowed=False,
+                code="authorization_profile_mismatch",
+                reason=(
+                    "AuthorizationProfile does not match "
+                    "the Target binding."
+                ),
+            )
+
+        current_time = evaluation_time or datetime.now(timezone.utc)
+
+        if current_time.tzinfo is None:
+            raise ValueError("evaluation_time must be timezone-aware")
+
+        current_time = current_time.astimezone(timezone.utc)
+
+        if (
+            authorization_profile.valid_from is not None
+            and current_time < authorization_profile.valid_from
+        ):
+            return PolicyDecision(
+                allowed=False,
+                code="authorization_not_yet_valid",
+                reason="Authorization is not yet valid.",
+            )
+
+        if (
+            authorization_profile.valid_until is not None
+            and current_time >= authorization_profile.valid_until
+        ):
+            return PolicyDecision(
+                allowed=False,
+                code="authorization_expired",
+                reason="Authorization has expired.",
+            )
+
+        if not authorization_profile.automation_allowed:
+            return PolicyDecision(
+                allowed=False,
+                code="automation_not_allowed",
+                reason=(
+                    "AuthorizationProfile does not allow automation."
+                ),
+            )
+
+        if authorization_profile.require_human_execution_approval:
+            return PolicyDecision(
+                allowed=False,
+                code="human_approval_required",
+                reason=(
+                    "AuthorizationProfile requires human execution "
+                    "approval, which is not available."
+                ),
             )
 
         try:
@@ -272,6 +361,18 @@ class ScopePolicyEngine:
                     f"HTTP method "
                     f"{normalized_method!r} "
                     "is not supported by the MVP."
+                ),
+            )
+
+        method_field = AUTHORIZATION_METHOD_FIELDS[normalized_method]
+
+        if not getattr(authorization_profile, method_field):
+            return PolicyDecision(
+                allowed=False,
+                code="authorization_method_not_allowed",
+                reason=(
+                    "AuthorizationProfile does not allow "
+                    f"HTTP method {normalized_method!r}."
                 ),
             )
 

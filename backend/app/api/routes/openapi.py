@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.db.models.authorization_profile import AuthorizationProfile
 from app.db.models.endpoint import Endpoint
 from app.db.models.scope import Scope
 from app.db.models.target import Target
@@ -91,6 +92,14 @@ def import_openapi(
             detail="Target not found.",
         )
 
+    authorization_profile = None
+
+    if target.authorization_profile_id is not None:
+        authorization_profile = db.get(
+            AuthorizationProfile,
+            target.authorization_profile_id,
+        )
+
     scopes = list(
         db.scalars(
             select(Scope).where(
@@ -109,6 +118,7 @@ def import_openapi(
             parsed_endpoints,
         ) = scanner.scan(
             target=target,
+            authorization_profile=authorization_profile,
             scopes=scopes,
         )
 
