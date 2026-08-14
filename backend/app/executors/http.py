@@ -3,6 +3,7 @@ import time
 
 import httpx
 
+from app.db.models.authorization_profile import AuthorizationProfile
 from app.db.models.scope import Scope
 from app.db.models.target import Target
 from app.executors.rate_limit import (
@@ -68,6 +69,7 @@ class PolicyEnforcedHTTPExecutor:
         self,
         *,
         target: Target,
+        authorization_profile: AuthorizationProfile | None,
         scopes: list[Scope],
         method: str,
         url: str,
@@ -91,6 +93,7 @@ class PolicyEnforcedHTTPExecutor:
 
         decision = self.policy_engine.evaluate(
             target=target,
+            authorization_profile=authorization_profile,
             scopes=scopes,
             request_url=url,
             method=normalized_method,

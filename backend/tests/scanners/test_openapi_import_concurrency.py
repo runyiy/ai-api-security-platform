@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql.dml import Insert
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.routes import openapi as openapi_routes
+from app.db.models.authorization_profile import AuthorizationProfile
 from app.db.models.endpoint import Endpoint
 from app.db.models.scope import Scope
 from app.db.models.target import Target
@@ -26,11 +27,22 @@ def openapi_target_id() -> Iterator[int]:
     unique_name = f"openapi-concurrency-{uuid4()}"
 
     with TestSession() as db:
+        profile = AuthorizationProfile(
+            name=f"{unique_name}-authorization",
+            program_name="Self-controlled lab",
+            authorization_type="self_owned",
+            automation_allowed=True,
+            allow_get=True,
+            require_human_execution_approval=False,
+        )
+        db.add(profile)
+        db.flush()
         target = Target(
             name=unique_name,
             base_url="https://example.test",
             environment="test",
             is_enabled=True,
+            authorization_profile_id=profile.id,
         )
         db.add(target)
         db.flush()
@@ -45,6 +57,7 @@ def openapi_target_id() -> Iterator[int]:
         )
         db.commit()
         target_id = target.id
+        profile_id = profile.id
 
     try:
         yield target_id
@@ -54,6 +67,11 @@ def openapi_target_id() -> Iterator[int]:
                 delete(Endpoint).where(Endpoint.target_id == target_id)
             )
             db.execute(delete(Target).where(Target.id == target_id))
+            db.execute(
+                delete(AuthorizationProfile).where(
+                    AuthorizationProfile.id == profile_id
+                )
+            )
             db.commit()
 
 
@@ -120,10 +138,11 @@ def test_concurrent_import_is_endpoint_conflict_safe(
     )
 
     class BarrierScanner:
-        def scan(self, *, target, scopes):
+        def scan(self, *, target, authorization_profile, scopes):
             with sessions_lock:
                 session = sessions[threading.get_ident()]
             assert session.in_transaction() is False
+            assert authorization_profile.id == target.authorization_profile_id
             scan_ready.wait(timeout=10)
             return (
                 "https://example.test/openapi.json",
@@ -196,7 +215,8 @@ def test_sequential_import_preserves_create_unchanged_update_counts(
     current_endpoints = parsed_endpoints()
 
     class MutableScanner:
-        def scan(self, *, target, scopes):
+        def scan(self, *, target, authorization_profile, scopes):
+            assert authorization_profile.id == target.authorization_profile_id
             return (
                 "https://example.test/openapi.json",
                 current_endpoints,

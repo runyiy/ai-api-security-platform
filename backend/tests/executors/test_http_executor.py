@@ -1,6 +1,7 @@
 import httpx
 import pytest
 
+from app.db.models.authorization_profile import AuthorizationProfile
 from app.db.models.scope import Scope
 from app.db.models.target import Target
 from app.executors.http import (
@@ -18,10 +19,23 @@ from app.policies.scope_policy import (
 def build_target() -> Target:
     return Target(
         id=1,
+        authorization_profile_id=100,
         name="Local Lab",
         base_url="http://localhost:8001",
         environment="development",
         is_enabled=True,
+    )
+
+
+def build_profile() -> AuthorizationProfile:
+    return AuthorizationProfile(
+        id=100,
+        name="Local authorization",
+        program_name="Self-controlled lab",
+        authorization_type="self_owned",
+        automation_allowed=True,
+        allow_get=True,
+        require_human_execution_approval=False,
     )
 
 
@@ -80,6 +94,7 @@ def test_executes_allowed_get() -> None:
 
     result = executor.execute(
         target=build_target(),
+        authorization_profile=build_profile(),
         scopes=[
             build_scope(),
         ],
@@ -118,6 +133,7 @@ def test_denies_request_outside_scope() -> None:
     ):
         executor.execute(
             target=build_target(),
+            authorization_profile=build_profile(),
             scopes=[
                 build_scope(),
             ],
@@ -154,6 +170,7 @@ def test_blocks_delete_before_network() -> None:
     ) as exc_info:
         executor.execute(
             target=build_target(),
+            authorization_profile=build_profile(),
             scopes=[
                 build_scope(),
             ],
@@ -196,6 +213,7 @@ def test_does_not_follow_redirect() -> None:
 
     result = executor.execute(
         target=build_target(),
+        authorization_profile=build_profile(),
         scopes=[
             build_scope(),
         ],

@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import delete, func, select
 
+from app.db.models.authorization_profile import AuthorizationProfile
 from app.db.models.endpoint import Endpoint
 from app.db.models.resource import Resource
 from app.db.models.scope import Scope
@@ -68,11 +69,22 @@ def executable_test_case_id() -> Iterator[int]:
     unique_name = f"concurrency-{uuid4()}"
 
     with SessionLocal() as db:
+        profile = AuthorizationProfile(
+            name=f"{unique_name}-authorization",
+            program_name="Self-controlled test",
+            authorization_type="self_owned",
+            automation_allowed=True,
+            allow_get=True,
+            require_human_execution_approval=False,
+        )
+        db.add(profile)
+        db.flush()
         target = Target(
             name=unique_name,
             base_url="https://example.test",
             environment="test",
             is_enabled=True,
+            authorization_profile_id=profile.id,
         )
         db.add(target)
         db.flush()
@@ -140,6 +152,7 @@ def executable_test_case_id() -> Iterator[int]:
         db.commit()
         test_case_id = test_case.id
         target_id = target.id
+        profile_id = profile.id
 
     try:
         yield test_case_id
@@ -159,6 +172,11 @@ def executable_test_case_id() -> Iterator[int]:
             db.execute(
                 delete(Target).where(
                     Target.id == target_id
+                )
+            )
+            db.execute(
+                delete(AuthorizationProfile).where(
+                    AuthorizationProfile.id == profile_id
                 )
             )
             db.commit()

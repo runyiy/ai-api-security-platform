@@ -9,6 +9,7 @@ from app.auth.context import (
     apply_authentication_context,
     build_authentication_context,
 )
+from app.db.models.authorization_profile import AuthorizationProfile
 from app.db.models.endpoint import Endpoint
 from app.db.models.resource import Resource
 from app.db.models.scope import Scope
@@ -217,6 +218,14 @@ class TestExecutionService:
                 "Target not found."
             )
 
+        authorization_profile = None
+
+        if target.authorization_profile_id is not None:
+            authorization_profile = self.db.get(
+                AuthorizationProfile,
+                target.authorization_profile_id,
+            )
+
         if actor.target_id != target.id:
             raise TestExecutionError(
                 "Actor belongs to a different target."
@@ -308,6 +317,7 @@ class TestExecutionService:
         try:
             result = self.executor.execute(
                 target=target,
+                authorization_profile=authorization_profile,
                 scopes=scopes,
                 method=endpoint.method,
                 url=request_url,

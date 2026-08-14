@@ -7,6 +7,7 @@ from sqlalchemy import delete, select
 
 from app.analyzers.bola import AnalysisOutcome
 from app.api.routes.test_cases import generate_bola_cases
+from app.db.models.authorization_profile import AuthorizationProfile
 from app.db.models.endpoint import Endpoint
 from app.db.models.finding import Finding
 from app.db.models.resource import Resource
@@ -42,15 +43,27 @@ def bola_lab(request: pytest.FixtureRequest) -> Iterator[RunningBOLALab]:
         yield lab
 
 
-def _seed_workflow(lab: RunningBOLALab) -> tuple[int, int, int]:
+def _seed_workflow(lab: RunningBOLALab) -> tuple[int, int, int, int]:
     unique_name = f"bola-lab-{lab.mode}-{uuid4()}"
 
     with SessionLocal() as db:
+        authorization_profile = AuthorizationProfile(
+            name=f"{unique_name}-authorization",
+            program_name="Deterministic local BOLA lab",
+            authorization_type="self_owned",
+            automation_allowed=True,
+            allow_get=True,
+            require_human_execution_approval=False,
+        )
+        db.add(authorization_profile)
+        db.flush()
+
         target = Target(
             name=unique_name,
             base_url=lab.base_url,
             environment="test",
             is_enabled=True,
+            authorization_profile_id=authorization_profile.id,
         )
         db.add(target)
         db.flush()
@@ -132,10 +145,15 @@ def _seed_workflow(lab: RunningBOLALab) -> tuple[int, int, int]:
 
         assert owner_case_id is not None
         assert cross_owner_case_id is not None
-        return target.id, owner_case_id, cross_owner_case_id
+        return (
+            target.id,
+            authorization_profile.id,
+            owner_case_id,
+            cross_owner_case_id,
+        )
 
 
-def _delete_workflow(target_id: int) -> None:
+def _delete_workflow(target_id: int, profile_id: int) -> None:
     with SessionLocal() as db:
         test_case_ids = select(StoredCase.id).join(Endpoint).where(
             Endpoint.target_id == target_id
@@ -145,11 +163,21 @@ def _delete_workflow(target_id: int) -> None:
         db.execute(delete(StoredCase).where(StoredCase.id.in_(test_case_ids)))
         db.execute(delete(Resource).where(Resource.target_id == target_id))
         db.execute(delete(Target).where(Target.id == target_id))
+        db.execute(
+            delete(AuthorizationProfile).where(
+                AuthorizationProfile.id == profile_id
+            )
+        )
         db.commit()
 
 
 def test_local_bola_workflow_end_to_end(bola_lab: RunningBOLALab) -> None:
-    target_id, owner_case_id, cross_owner_case_id = _seed_workflow(bola_lab)
+    (
+        target_id,
+        profile_id,
+        owner_case_id,
+        cross_owner_case_id,
+    ) = _seed_workflow(bola_lab)
     policy_engine = RecordingScopePolicyEngine({bola_lab.hostname})
     executor = PolicyEnforcedHTTPExecutor(
         policy_engine=policy_engine,
@@ -186,4 +214,4 @@ def test_local_bola_workflow_end_to_end(bola_lab: RunningBOLALab) -> None:
                 assert analysis.finding is not None
                 assert analysis.finding.status == "potential"
     finally:
-        _delete_workflow(target_id)
+        _delete_workflow(target_id, profile_id)

@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.db.models.authorization_profile import AuthorizationProfile
 from app.db.models.scope import Scope
 from app.db.models.target import Target
 from app.policies.scope_policy import ScopePolicyEngine
@@ -210,10 +211,23 @@ def build_scanner() -> OpenAPIScanner:
 def build_target() -> Target:
     return Target(
         id=1,
+        authorization_profile_id=100,
         name="Example",
         base_url="https://example.test",
         environment="test",
         is_enabled=True,
+    )
+
+
+def build_profile() -> AuthorizationProfile:
+    return AuthorizationProfile(
+        id=100,
+        name="Local authorization",
+        program_name="Self-controlled lab",
+        authorization_type="self_owned",
+        automation_allowed=True,
+        allow_get=True,
+        require_human_execution_approval=False,
     )
 
 
@@ -246,6 +260,7 @@ def test_scanner_wraps_schema_parse_error(
     ) as exc_info:
         scanner.scan(
             target=build_target(),
+            authorization_profile=build_profile(),
             scopes=[build_scope()],
         )
 
