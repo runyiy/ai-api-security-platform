@@ -1,4 +1,13 @@
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from app.db.models.scope import Scope
+from app.db.models.target import Target
+from app.policies.scope_policy import ScopePolicyEngine
 from app.scanners.openapi import (
+    OpenAPIScanError,
+    OpenAPIScanner,
     parse_openapi_schema,
 )
 
@@ -154,4 +163,92 @@ def test_operation_parameter_overrides_path_parameter() -> None:
     assert (
         parameter["description"]
         == "operation version"
+    )
+
+
+def build_scanner() -> OpenAPIScanner:
+    return OpenAPIScanner(
+        ScopePolicyEngine(
+            platform_allowed_hosts={
+                "example.test",
+            }
+        )
+    )
+
+
+def build_target() -> Target:
+    return Target(
+        id=1,
+        name="Example",
+        base_url="https://example.test",
+        environment="test",
+        is_enabled=True,
+    )
+
+
+def build_scope() -> Scope:
+    return Scope(
+        id=1,
+        target_id=1,
+        hostname="example.test",
+        path_pattern="/openapi.json",
+        allowed_methods=["GET"],
+        is_active=True,
+    )
+
+
+def test_scanner_wraps_schema_parse_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scanner = build_scanner()
+    monkeypatch.setattr(
+        scanner,
+        "_fetch_schema",
+        lambda url: {
+            "paths": [],
+        },
+    )
+
+    with pytest.raises(
+        OpenAPIScanError,
+        match="schema structure is invalid",
+    ) as exc_info:
+        scanner.scan(
+            target=build_target(),
+            scopes=[build_scope()],
+        )
+
+    assert isinstance(
+        exc_info.value.__cause__,
+        ValueError,
+    )
+
+
+def test_fetch_schema_disables_environment_proxy() -> None:
+    scanner = build_scanner()
+    response = MagicMock()
+    response.__enter__.return_value = response
+    response.iter_bytes.return_value = [
+        b'{"paths": {}}',
+    ]
+    client = MagicMock()
+    client.__enter__.return_value = client
+    client.stream.return_value = response
+
+    with patch(
+        "app.scanners.openapi.httpx.Client",
+        return_value=client,
+    ) as client_class:
+        schema = scanner._fetch_schema(
+            "https://example.test/openapi.json"
+        )
+
+    assert schema == {
+        "paths": {},
+    }
+    assert (
+        client_class.call_args.kwargs[
+            "trust_env"
+        ]
+        is False
     )

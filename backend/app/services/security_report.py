@@ -38,9 +38,12 @@ class SecurityReportService:
         *,
         finding_id: int,
     ) -> SecurityReport:
-        finding = self.db.get(
-            Finding,
-            finding_id,
+        finding = self.db.scalar(
+            select(Finding)
+            .where(
+                Finding.id == finding_id
+            )
+            .with_for_update()
         )
 
         if finding is None:

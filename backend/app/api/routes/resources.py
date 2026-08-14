@@ -5,6 +5,7 @@ from fastapi import (
     status,
 )
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.models.resource import Resource
@@ -94,7 +95,29 @@ def create_resource(
     )
 
     db.add(resource)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        constraint_name = getattr(
+            getattr(exc.orig, "diag", None),
+            "constraint_name",
+            None,
+        )
+        if (
+            getattr(exc.orig, "sqlstate", None)
+            == "23505"
+            and constraint_name
+            == "uq_resource_target_type_external_id"
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Resource already exists "
+                    "for this target."
+                ),
+            ) from exc
+        raise
     db.refresh(resource)
 
     return resource

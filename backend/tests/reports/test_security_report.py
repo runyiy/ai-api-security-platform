@@ -89,7 +89,6 @@ def test_generates_and_stores_security_report() -> None:
     )
 
     objects = {
-        (Finding, 20): finding,
         (StoredRun, 50): test_run,
         (StoredCase, 60): test_case,
         (Endpoint, 40): endpoint,
@@ -101,7 +100,11 @@ def test_generates_and_stores_security_report() -> None:
             (model, object_id)
         )
     )
-    db.scalar.side_effect = [None, None]
+    db.scalar.side_effect = [
+        finding,
+        None,
+        None,
+    ]
 
     def refresh(report: SecurityReport) -> None:
         report.id = 10

@@ -5,6 +5,7 @@ from fastapi import (
     status,
 )
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -100,6 +101,8 @@ def import_openapi(
         ).all()
     )
 
+    db.commit()
+
     try:
         (
             openapi_url,
@@ -133,6 +136,32 @@ def import_openapi(
     unchanged = 0
 
     for parsed in parsed_endpoints:
+        endpoint_values = {
+            "target_id": target.id,
+            "path": parsed.path,
+            "method": parsed.method,
+            "operation_id": parsed.operation_id,
+            "requires_auth": parsed.requires_auth,
+            "parameters": parsed.parameters,
+            "request_body": parsed.request_body,
+            "security": parsed.security,
+        }
+
+        inserted_id = db.scalar(
+            insert(Endpoint)
+            .values(endpoint_values)
+            .on_conflict_do_nothing(
+                constraint=(
+                    "uq_endpoint_target_path_method"
+                )
+            )
+            .returning(Endpoint.id)
+        )
+
+        if inserted_id is not None:
+            created += 1
+            continue
+
         endpoint = db.scalar(
             select(Endpoint).where(
                 Endpoint.target_id
@@ -145,31 +174,9 @@ def import_openapi(
         )
 
         if endpoint is None:
-            endpoint = Endpoint(
-                target_id=target.id,
-                path=parsed.path,
-                method=parsed.method,
-                operation_id=(
-                    parsed.operation_id
-                ),
-                requires_auth=(
-                    parsed.requires_auth
-                ),
-                parameters=(
-                    parsed.parameters
-                ),
-                request_body=(
-                    parsed.request_body
-                ),
-                security=(
-                    parsed.security
-                ),
+            raise RuntimeError(
+                "Endpoint conflict row not found."
             )
-
-            db.add(endpoint)
-
-            created += 1
-            continue
 
         if not endpoint_changed(
             endpoint,

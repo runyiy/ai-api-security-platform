@@ -5,6 +5,7 @@ from fastapi import (
     status,
 )
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.models.target import Target
@@ -87,7 +88,29 @@ def create_test_identity(
     )
 
     db.add(identity)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        constraint_name = getattr(
+            getattr(exc.orig, "diag", None),
+            "constraint_name",
+            None,
+        )
+        if (
+            getattr(exc.orig, "sqlstate", None)
+            == "23505"
+            and constraint_name
+            == "uq_test_identity_target_name"
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Test identity with this name "
+                    "already exists for the target."
+                ),
+            ) from exc
+        raise
     db.refresh(identity)
 
     return identity

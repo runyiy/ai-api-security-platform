@@ -261,11 +261,16 @@ class OpenAPIScanner:
             openapi_url
         )
 
-        endpoints = (
-            parse_openapi_schema(
-                schema
+        try:
+            endpoints = (
+                parse_openapi_schema(
+                    schema
+                )
             )
-        )
+        except ValueError as exc:
+            raise OpenAPIScanError(
+                "OpenAPI schema structure is invalid"
+            ) from exc
 
         return (
             openapi_url,
@@ -284,6 +289,7 @@ class OpenAPIScanner:
             with httpx.Client(
                 timeout=timeout,
                 follow_redirects=False,
+                trust_env=False,
             ) as client:
                 with client.stream(
                     "GET",

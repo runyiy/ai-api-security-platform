@@ -5,6 +5,7 @@ from fastapi import (
     status,
 )
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.db.models.endpoint import Endpoint
@@ -87,52 +88,42 @@ def generate_bola_cases(
         )
     )
 
+    rows = [
+        {
+            "endpoint_id": candidate.endpoint_id,
+            "actor_identity_id": (
+                candidate.actor_identity_id
+            ),
+            "resource_id": candidate.resource_id,
+            "test_type": candidate.test_type,
+            "ownership_relation": (
+                candidate.ownership_relation
+            ),
+            "expected_statuses": list(
+                candidate.expected_statuses
+            ),
+            "status": "pending",
+        }
+        for candidate in generated
+    ]
+
     created = 0
-    existing = 0
 
-    for candidate in generated:
-        test_case = db.scalar(
-            select(TestCase).where(
-                TestCase.endpoint_id
-                == candidate.endpoint_id,
-                TestCase.actor_identity_id
-                == candidate.actor_identity_id,
-                TestCase.resource_id
-                == candidate.resource_id,
-                TestCase.test_type
-                == candidate.test_type,
+    if rows:
+        inserted_ids = db.scalars(
+            insert(TestCase)
+            .values(rows)
+            .on_conflict_do_nothing(
+                constraint=(
+                    "uq_test_case_endpoint_"
+                    "actor_resource_type"
+                )
             )
-        )
+            .returning(TestCase.id)
+        ).all()
+        created = len(inserted_ids)
 
-        if test_case is not None:
-            existing += 1
-            continue
-
-        db.add(
-            TestCase(
-                endpoint_id=(
-                    candidate.endpoint_id
-                ),
-                actor_identity_id=(
-                    candidate.actor_identity_id
-                ),
-                resource_id=(
-                    candidate.resource_id
-                ),
-                test_type=(
-                    candidate.test_type
-                ),
-                ownership_relation=(
-                    candidate.ownership_relation
-                ),
-                expected_statuses=list(
-                    candidate.expected_statuses
-                ),
-                status="pending",
-            )
-        )
-
-        created += 1
+    existing = len(generated) - created
 
     db.commit()
 

@@ -103,8 +103,9 @@ def redact_headers(
 
     return result
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.auth.context import (
     AuthenticationContextError,
@@ -173,6 +174,14 @@ class TestExecutionService:
         if test_case is None:
             raise TestExecutionError(
                 "TestCase not found."
+            )
+
+        observed_status = test_case.status
+
+        if observed_status == "running":
+            self.db.commit()
+            raise TestExecutionError(
+                "TestCase is already running."
             )
 
         endpoint = self.db.get(
@@ -274,7 +283,30 @@ class TestExecutionService:
             "resource_id": resource.id,
         }
 
-        test_case.status = "running"
+        acquired_test_case_id = self.db.scalar(
+            update(TestCase)
+            .where(
+                TestCase.id == test_case.id,
+                TestCase.status == observed_status,
+            )
+            .values(status="running")
+            .returning(TestCase.id)
+            .execution_options(
+                synchronize_session=False
+            )
+        )
+
+        if acquired_test_case_id is None:
+            self.db.commit()
+            raise TestExecutionError(
+                "TestCase execution state changed."
+            )
+
+        set_committed_value(
+            test_case,
+            "status",
+            "running",
+        )
 
         # 关闭 SELECT 阶段开启的事务，
         # 不要拿着数据库事务等待网络。

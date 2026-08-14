@@ -137,6 +137,8 @@ class AIAnalysisService:
             ),
         )
 
+        self.db.commit()
+
         result = self.provider.analyze(
             evidence=evidence
         )
