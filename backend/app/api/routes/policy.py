@@ -86,4 +86,8 @@ def check_policy(
         matched_scope_id=(
             decision.matched_scope_id
         ),
+        authorization_profile_id=(
+            decision.authorization_profile_id
+        ),
+        evaluated_at=decision.evaluated_at,
     )

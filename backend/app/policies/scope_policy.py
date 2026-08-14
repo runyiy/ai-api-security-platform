@@ -38,6 +38,8 @@ class PolicyDecision:
     allowed: bool
     code: str
     reason: str
+    authorization_profile_id: int | None
+    evaluated_at: datetime
     matched_scope_id: int | None = None
 
 
@@ -219,15 +221,43 @@ class ScopePolicyEngine:
         method: str,
         evaluation_time: datetime | None = None,
     ) -> PolicyDecision:
-        if not target.is_enabled:
+        evaluated_at = evaluation_time or datetime.now(timezone.utc)
+
+        if evaluated_at.tzinfo is None:
+            raise ValueError("evaluation_time must be timezone-aware")
+
+        evaluated_at = evaluated_at.astimezone(timezone.utc)
+        authorization_profile_id = (
+            authorization_profile.id
+            if authorization_profile is not None
+            else None
+        )
+
+        def decision(
+            *,
+            allowed: bool,
+            code: str,
+            reason: str,
+            matched_scope_id: int | None = None,
+        ) -> PolicyDecision:
             return PolicyDecision(
+                allowed=allowed,
+                code=code,
+                reason=reason,
+                authorization_profile_id=authorization_profile_id,
+                evaluated_at=evaluated_at,
+                matched_scope_id=matched_scope_id,
+            )
+
+        if not target.is_enabled:
+            return decision(
                 allowed=False,
                 code="target_disabled",
                 reason="Target is disabled.",
             )
 
         if target.authorization_profile_id is None:
-            return PolicyDecision(
+            return decision(
                 allowed=False,
                 code="authorization_profile_missing",
                 reason=(
@@ -236,7 +266,7 @@ class ScopePolicyEngine:
             )
 
         if authorization_profile is None:
-            return PolicyDecision(
+            return decision(
                 allowed=False,
                 code="authorization_profile_missing",
                 reason=(
@@ -248,7 +278,7 @@ class ScopePolicyEngine:
             authorization_profile.id
             != target.authorization_profile_id
         ):
-            return PolicyDecision(
+            return decision(
                 allowed=False,
                 code="authorization_profile_mismatch",
                 reason=(
@@ -257,18 +287,11 @@ class ScopePolicyEngine:
                 ),
             )
 
-        current_time = evaluation_time or datetime.now(timezone.utc)
-
-        if current_time.tzinfo is None:
-            raise ValueError("evaluation_time must be timezone-aware")
-
-        current_time = current_time.astimezone(timezone.utc)
-
         if (
             authorization_profile.valid_from is not None
-            and current_time < authorization_profile.valid_from
+            and evaluated_at < authorization_profile.valid_from
         ):
-            return PolicyDecision(
+            return decision(
                 allowed=False,
                 code="authorization_not_yet_valid",
                 reason="Authorization is not yet valid.",
@@ -276,16 +299,16 @@ class ScopePolicyEngine:
 
         if (
             authorization_profile.valid_until is not None
-            and current_time >= authorization_profile.valid_until
+            and evaluated_at >= authorization_profile.valid_until
         ):
-            return PolicyDecision(
+            return decision(
                 allowed=False,
                 code="authorization_expired",
                 reason="Authorization has expired.",
             )
 
         if not authorization_profile.automation_allowed:
-            return PolicyDecision(
+            return decision(
                 allowed=False,
                 code="automation_not_allowed",
                 reason=(
@@ -294,7 +317,7 @@ class ScopePolicyEngine:
             )
 
         if authorization_profile.require_human_execution_approval:
-            return PolicyDecision(
+            return decision(
                 allowed=False,
                 code="human_approval_required",
                 reason=(
@@ -308,7 +331,7 @@ class ScopePolicyEngine:
                 request_url
             )
         except PolicyValidationError as exc:
-            return PolicyDecision(
+            return decision(
                 allowed=False,
                 code="invalid_request_url",
                 reason=str(exc),
@@ -318,7 +341,7 @@ class ScopePolicyEngine:
             request_origin.hostname
             not in self.platform_allowed_hosts
         ):
-            return PolicyDecision(
+            return decision(
                 allowed=False,
                 code="host_not_in_platform_allowlist",
                 reason=(
@@ -333,14 +356,14 @@ class ScopePolicyEngine:
                 target.base_url
             )
         except PolicyValidationError as exc:
-            return PolicyDecision(
+            return decision(
                 allowed=False,
                 code="invalid_target_url",
                 reason=str(exc),
             )
 
         if request_origin != target_origin:
-            return PolicyDecision(
+            return decision(
                 allowed=False,
                 code="target_origin_mismatch",
                 reason=(
@@ -354,7 +377,7 @@ class ScopePolicyEngine:
         )
 
         if normalized_method not in MVP_HTTP_METHODS:
-            return PolicyDecision(
+            return decision(
                 allowed=False,
                 code="unsupported_http_method",
                 reason=(
@@ -367,7 +390,7 @@ class ScopePolicyEngine:
         method_field = AUTHORIZATION_METHOD_FIELDS[normalized_method]
 
         if not getattr(authorization_profile, method_field):
-            return PolicyDecision(
+            return decision(
                 allowed=False,
                 code="authorization_method_not_allowed",
                 reason=(
@@ -381,7 +404,7 @@ class ScopePolicyEngine:
                 request_url
             )
         except PolicyValidationError as exc:
-            return PolicyDecision(
+            return decision(
                 allowed=False,
                 code="unsafe_request_path",
                 reason=str(exc),
@@ -430,7 +453,7 @@ class ScopePolicyEngine:
             if not path_matches:
                 continue
 
-            return PolicyDecision(
+            return decision(
                 allowed=True,
                 code="allowed_by_scope",
                 reason=(
@@ -439,7 +462,7 @@ class ScopePolicyEngine:
                 matched_scope_id=scope.id,
             )
 
-        return PolicyDecision(
+        return decision(
             allowed=False,
             code="no_matching_scope",
             reason=(

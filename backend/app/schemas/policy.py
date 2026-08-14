@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
@@ -12,3 +14,5 @@ class PolicyCheckResponse(BaseModel):
     code: str
     reason: str
     matched_scope_id: int | None
+    authorization_profile_id: int | None
+    evaluated_at: datetime

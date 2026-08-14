@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import httpx
 import pytest
 
@@ -255,6 +257,8 @@ def test_revalidates_policy_after_rate_limit_wait() -> None:
                     allowed=True,
                     code="allowed_by_scope",
                     reason="Request matches an active scope.",
+                    authorization_profile_id=100,
+                    evaluated_at=datetime.now(timezone.utc),
                     matched_scope_id=1,
                 )
 
@@ -262,6 +266,8 @@ def test_revalidates_policy_after_rate_limit_wait() -> None:
                 allowed=False,
                 code="authorization_expired",
                 reason="Authorization has expired.",
+                authorization_profile_id=100,
+                evaluated_at=datetime.now(timezone.utc),
             )
 
     class RecordingRateLimiter:
