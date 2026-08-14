@@ -8,6 +8,7 @@ from app.db.models.scope import Scope
 from app.db.models.target import Target
 from app.executors.rate_limit import (
     InMemoryRateLimiter,
+    RateLimitConfigurationError,
 )
 from app.policies.scope_policy import (
     PolicyDecision,
@@ -103,9 +104,21 @@ class PolicyEnforcedHTTPExecutor:
             decision
         )
 
-        self.rate_limiter.wait(
-            key=f"target:{target.id}"
-        )
+        try:
+            self.rate_limiter.wait(
+                key=f"target:{target.id}",
+                requested_requests_per_second=(
+                    authorization_profile.max_requests_per_second
+                ),
+            )
+        except RateLimitConfigurationError as exc:
+            raise ExecutionBlockedError(
+                code="invalid_authorization_rate_limit",
+                reason=(
+                    "AuthorizationProfile request rate limit "
+                    "must be finite and greater than zero."
+                ),
+            ) from exc
 
         decision = self.policy_engine.evaluate(
             target=target,

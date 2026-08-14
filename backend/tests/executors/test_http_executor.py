@@ -6,6 +6,8 @@ from app.db.models.scope import Scope
 from app.db.models.target import Target
 from app.executors.http import (
     ExecutionBlockedError,
+    HTTPExecutionError,
+    MAX_RESPONSE_BYTES,
     PolicyEnforcedHTTPExecutor,
 )
 from app.executors.rate_limit import (
@@ -35,7 +37,11 @@ def build_profile() -> AuthorizationProfile:
         program_name="Self-controlled lab",
         authorization_type="self_owned",
         automation_allowed=True,
+        max_requests_per_second=1000.0,
         allow_get=True,
+        allow_post=True,
+        allow_patch=True,
+        allow_delete=True,
         require_human_execution_approval=False,
     )
 
@@ -48,6 +54,7 @@ def build_scope() -> Scope:
         path_pattern="/api/projects/*",
         allowed_methods=[
             "GET",
+            "POST",
             "PATCH",
             "DELETE",
         ],
@@ -149,7 +156,8 @@ def test_denies_request_outside_scope() -> None:
     assert called is False
 
 
-def test_blocks_delete_before_network() -> None:
+@pytest.mark.parametrize("method", ["POST", "PATCH", "DELETE"])
+def test_blocks_mutating_methods_before_network(method: str) -> None:
     called = False
 
     def handler(
@@ -175,7 +183,7 @@ def test_blocks_delete_before_network() -> None:
             scopes=[
                 build_scope(),
             ],
-            method="DELETE",
+            method=method,
             url=(
                 "http://localhost:8001"
                 "/api/projects/2001"
@@ -259,10 +267,19 @@ def test_revalidates_policy_after_rate_limit_wait() -> None:
     class RecordingRateLimiter:
         def __init__(self) -> None:
             self.keys: list[str] = []
+            self.requested_rates: list[float] = []
 
-        def wait(self, *, key: str) -> None:
+        def wait(
+            self,
+            *,
+            key: str,
+            requested_requests_per_second: float,
+        ) -> None:
             events.append("rate-limit")
             self.keys.append(key)
+            self.requested_rates.append(
+                requested_requests_per_second
+            )
 
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal transport_called
@@ -290,6 +307,72 @@ def test_revalidates_policy_after_rate_limit_wait() -> None:
 
     assert policy_engine.evaluation_count == 2
     assert rate_limiter.keys == ["target:1"]
+    assert rate_limiter.requested_rates == [1000.0]
     assert events == ["policy", "rate-limit", "policy"]
     assert exc_info.value.code == "authorization_expired"
+    assert transport_called is False
+
+
+def test_timeout_behavior_remains_bounded() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    with pytest.raises(HTTPExecutionError, match="HTTP request failed"):
+        build_executor(handler).execute(
+            target=build_target(),
+            authorization_profile=build_profile(),
+            scopes=[build_scope()],
+            method="GET",
+            url="http://localhost:8001/api/projects/2001",
+            headers={},
+        )
+
+
+def test_response_size_cap_remains_enforced() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=b"x" * (MAX_RESPONSE_BYTES + 1),
+        )
+
+    with pytest.raises(HTTPExecutionError, match="maximum allowed size"):
+        build_executor(handler).execute(
+            target=build_target(),
+            authorization_profile=build_profile(),
+            scopes=[build_scope()],
+            method="GET",
+            url="http://localhost:8001/api/projects/2001",
+            headers={},
+        )
+
+
+@pytest.mark.parametrize(
+    "invalid_rate",
+    [0.0, -1.0, float("nan"), float("inf")],
+)
+def test_invalid_profile_rate_fails_closed_before_network(
+    invalid_rate: float,
+) -> None:
+    transport_called = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal transport_called
+        transport_called = True
+        return httpx.Response(200)
+
+    profile = build_profile()
+    profile.max_requests_per_second = invalid_rate
+    executor = build_executor(handler)
+
+    with pytest.raises(ExecutionBlockedError) as exc_info:
+        executor.execute(
+            target=build_target(),
+            authorization_profile=profile,
+            scopes=[build_scope()],
+            method="GET",
+            url="http://localhost:8001/api/projects/2001",
+            headers={},
+        )
+
+    assert exc_info.value.code == "invalid_authorization_rate_limit"
     assert transport_called is False
