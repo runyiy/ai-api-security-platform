@@ -14,9 +14,7 @@ from app.executors.http import (
     ExecutionBlockedError,
     PolicyEnforcedHTTPExecutor,
 )
-from app.executors.rate_limit import (
-    InMemoryRateLimiter,
-)
+from app.executors.runtime import platform_rate_limiter
 from app.policies.scope_policy import (
     ScopePolicyEngine,
 )
@@ -42,14 +40,9 @@ policy_engine = ScopePolicyEngine(
 )
 
 
-rate_limiter = InMemoryRateLimiter(
-    requests_per_second=2.0
-)
-
-
 executor = PolicyEnforcedHTTPExecutor(
     policy_engine=policy_engine,
-    rate_limiter=rate_limiter,
+    rate_limiter=platform_rate_limiter,
 )
 
 

@@ -14,6 +14,7 @@ from app.db.models.endpoint import Endpoint
 from app.db.models.scope import Scope
 from app.db.models.target import Target
 from app.db.session import get_db
+from app.executors.runtime import platform_rate_limiter
 from app.policies.scope_policy import (
     ScopePolicyEngine,
 )
@@ -45,7 +46,8 @@ policy_engine = ScopePolicyEngine(
 
 
 scanner = OpenAPIScanner(
-    policy_engine=policy_engine
+    policy_engine=policy_engine,
+    rate_limiter=platform_rate_limiter,
 )
 
 

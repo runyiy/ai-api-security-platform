@@ -5,6 +5,10 @@ import httpx
 from app.db.models.authorization_profile import AuthorizationProfile
 from app.db.models.scope import Scope
 from app.db.models.target import Target
+from app.executors.rate_limit import (
+    InMemoryRateLimiter,
+    RateLimitConfigurationError,
+)
 from app.policies.scope_policy import (
     PolicyDecision,
     ScopePolicyEngine,
@@ -225,8 +229,10 @@ class OpenAPIScanner:
     def __init__(
         self,
         policy_engine: ScopePolicyEngine,
+        rate_limiter: InMemoryRateLimiter,
     ) -> None:
         self.policy_engine = policy_engine
+        self.rate_limiter = rate_limiter
 
     def scan(
         self,
@@ -242,6 +248,40 @@ class OpenAPIScanner:
             f"{target.base_url.rstrip('/')}"
             "/openapi.json"
         )
+
+        decision = (
+            self.policy_engine.evaluate(
+                target=target,
+                authorization_profile=authorization_profile,
+                scopes=scopes,
+                request_url=openapi_url,
+                method="GET",
+            )
+        )
+
+        if not decision.allowed:
+            raise OpenAPIPolicyDenied(
+                decision
+            )
+
+        try:
+            self.rate_limiter.wait(
+                key=f"target:{target.id}",
+                requested_requests_per_second=(
+                    authorization_profile.max_requests_per_second
+                ),
+            )
+        except RateLimitConfigurationError as exc:
+            raise OpenAPIPolicyDenied(
+                PolicyDecision(
+                    allowed=False,
+                    code="invalid_authorization_rate_limit",
+                    reason=(
+                        "AuthorizationProfile request rate limit "
+                        "must be finite and greater than zero."
+                    ),
+                )
+            ) from exc
 
         decision = (
             self.policy_engine.evaluate(

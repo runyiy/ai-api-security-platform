@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.routes import openapi as openapi_routes
+from app.executors.rate_limit import InMemoryRateLimiter
 from app.policies.scope_policy import ScopePolicyEngine
 from app.scanners.openapi import (
     OpenAPIScanner,
@@ -26,7 +27,8 @@ def test_import_returns_502_for_malformed_schema(
             platform_allowed_hosts={
                 "example.test",
             }
-        )
+        ),
+        InMemoryRateLimiter(requests_per_second=1000.0),
     )
     monkeypatch.setattr(
         scanner,
