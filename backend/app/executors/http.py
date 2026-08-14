@@ -107,6 +107,18 @@ class PolicyEnforcedHTTPExecutor:
             key=f"target:{target.id}"
         )
 
+        decision = self.policy_engine.evaluate(
+            target=target,
+            authorization_profile=authorization_profile,
+            scopes=scopes,
+            request_url=url,
+            method=normalized_method,
+        )
+
+        self._raise_if_denied(
+            decision
+        )
+
         return self._send(
             method=normalized_method,
             url=url,

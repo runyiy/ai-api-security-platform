@@ -190,7 +190,7 @@ def test_local_bola_workflow_end_to_end(bola_lab: RunningBOLALab) -> None:
             owner_run = execution.execute(test_case_id=owner_case_id)
             cross_owner_run = execution.execute(test_case_id=cross_owner_case_id)
 
-            assert policy_engine.evaluation_count == 2
+            assert policy_engine.evaluation_count == 4
             assert owner_run.response_status == 200
             assert json.loads(owner_run.response_body or "null")["id"] == 1001
             assert owner_run.request_data["headers"]["Authorization"] == "[REDACTED]"
