@@ -1,5 +1,8 @@
 from fastapi import FastAPI
 
+from app.api.routes.authorization_profiles import (
+    router as authorization_profiles_router,
+)
 from app.api.routes.openapi import (
     router as openapi_router,
 )
@@ -45,6 +48,11 @@ def health_check() -> dict[str, str]:
         "status": "ok",
     }
 
+
+app.include_router(
+    authorization_profiles_router,
+    prefix="/api",
+)
 
 app.include_router(
     targets_router,
