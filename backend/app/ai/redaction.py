@@ -19,6 +19,9 @@ SENSITIVE_KEYS = {
 
 
 REDACTED = "[REDACTED]"
+NON_JSON_RESPONSE_REDACTED = (
+    "[NON_JSON_RESPONSE_REDACTED]"
+)
 
 
 def is_sensitive_key(
@@ -68,7 +71,7 @@ def sanitize_response_body(
     try:
         parsed = json.loads(body)
     except json.JSONDecodeError:
-        return body[:16_000]
+        return NON_JSON_RESPONSE_REDACTED
 
     sanitized = redact_json_value(
         parsed
