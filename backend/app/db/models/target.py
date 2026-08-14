@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+from app.db.models.authorization_profile import AuthorizationProfile
 
 
 class Target(Base):
@@ -11,6 +14,23 @@ class Target(Base):
 
     id: Mapped[int] = mapped_column(
         primary_key=True,
+    )
+
+    authorization_profile_id: Mapped[int | None] = mapped_column(
+        ForeignKey(
+            "authorization_profiles.id",
+            name=(
+                "fk_targets_authorization_profile_id_"
+                "authorization_profiles"
+            ),
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    authorization_profile: Mapped[AuthorizationProfile | None] = relationship(
+        back_populates="targets",
     )
 
     name: Mapped[str] = mapped_column(
