@@ -1,3 +1,4 @@
+from app.db.models.authorization_profile import AuthorizationProfile
 from app.db.models.endpoint import Endpoint
 from app.db.models.finding import Finding
 from app.db.models.finding_ai_analysis import FindingAIAnalysis
@@ -11,6 +12,7 @@ from app.db.models.test_run import TestRun
 
 
 __all__ = [
+    "AuthorizationProfile",
     "Target",
     "Scope",
     "Endpoint",
