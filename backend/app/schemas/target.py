@@ -9,8 +9,13 @@ class TargetCreate(BaseModel):
     environment: str = "development"
 
 
+class TargetAuthorizationProfileUpdate(BaseModel):
+    authorization_profile_id: int | None
+
+
 class TargetRead(BaseModel):
     id: int
+    authorization_profile_id: int | None
     name: str
     base_url: str
     environment: str
