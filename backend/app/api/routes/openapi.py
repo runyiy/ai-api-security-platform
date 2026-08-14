@@ -1,0 +1,250 @@
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    status,
+)
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
+from app.db.models.endpoint import Endpoint
+from app.db.models.scope import Scope
+from app.db.models.target import Target
+from app.db.session import get_db
+from app.policies.scope_policy import (
+    ScopePolicyEngine,
+)
+from app.scanners.openapi import (
+    OpenAPIPolicyDenied,
+    OpenAPIScanError,
+    OpenAPIScanner,
+    ParsedEndpoint,
+)
+from app.schemas.endpoint import (
+    EndpointRead,
+)
+from app.schemas.openapi import (
+    OpenAPIImportRequest,
+    OpenAPIImportResponse,
+)
+
+
+router = APIRouter(
+    tags=["openapi"],
+)
+
+
+policy_engine = ScopePolicyEngine(
+    platform_allowed_hosts=(
+        settings.allowed_target_host_set
+    )
+)
+
+
+scanner = OpenAPIScanner(
+    policy_engine=policy_engine
+)
+
+
+def endpoint_changed(
+    endpoint: Endpoint,
+    parsed: ParsedEndpoint,
+) -> bool:
+    return any(
+        (
+            endpoint.operation_id
+            != parsed.operation_id,
+
+            endpoint.requires_auth
+            != parsed.requires_auth,
+
+            endpoint.parameters
+            != parsed.parameters,
+
+            endpoint.request_body
+            != parsed.request_body,
+
+            endpoint.security
+            != parsed.security,
+        )
+    )
+
+
+@router.post(
+    "/openapi/import",
+    response_model=OpenAPIImportResponse,
+)
+def import_openapi(
+    payload: OpenAPIImportRequest,
+    db: Session = Depends(get_db),
+) -> OpenAPIImportResponse:
+    target = db.get(
+        Target,
+        payload.target_id,
+    )
+
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Target not found.",
+        )
+
+    scopes = list(
+        db.scalars(
+            select(Scope).where(
+                Scope.target_id
+                == target.id,
+                Scope.is_active.is_(True),
+            )
+        ).all()
+    )
+
+    try:
+        (
+            openapi_url,
+            parsed_endpoints,
+        ) = scanner.scan(
+            target=target,
+            scopes=scopes,
+        )
+
+    except OpenAPIPolicyDenied as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": (
+                    exc.decision.code
+                ),
+                "reason": (
+                    exc.decision.reason
+                ),
+            },
+        ) from exc
+
+    except OpenAPIScanError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+
+    created = 0
+    updated = 0
+    unchanged = 0
+
+    for parsed in parsed_endpoints:
+        endpoint = db.scalar(
+            select(Endpoint).where(
+                Endpoint.target_id
+                == target.id,
+                Endpoint.path
+                == parsed.path,
+                Endpoint.method
+                == parsed.method,
+            )
+        )
+
+        if endpoint is None:
+            endpoint = Endpoint(
+                target_id=target.id,
+                path=parsed.path,
+                method=parsed.method,
+                operation_id=(
+                    parsed.operation_id
+                ),
+                requires_auth=(
+                    parsed.requires_auth
+                ),
+                parameters=(
+                    parsed.parameters
+                ),
+                request_body=(
+                    parsed.request_body
+                ),
+                security=(
+                    parsed.security
+                ),
+            )
+
+            db.add(endpoint)
+
+            created += 1
+            continue
+
+        if not endpoint_changed(
+            endpoint,
+            parsed,
+        ):
+            unchanged += 1
+            continue
+
+        endpoint.operation_id = (
+            parsed.operation_id
+        )
+
+        endpoint.requires_auth = (
+            parsed.requires_auth
+        )
+
+        endpoint.parameters = (
+            parsed.parameters
+        )
+
+        endpoint.request_body = (
+            parsed.request_body
+        )
+
+        endpoint.security = (
+            parsed.security
+        )
+
+        updated += 1
+
+    db.commit()
+
+    return OpenAPIImportResponse(
+        target_id=target.id,
+        openapi_url=openapi_url,
+        discovered=len(
+            parsed_endpoints
+        ),
+        created=created,
+        updated=updated,
+        unchanged=unchanged,
+    )
+
+
+@router.get(
+    "/targets/{target_id}/endpoints",
+    response_model=list[EndpointRead],
+)
+def list_target_endpoints(
+    target_id: int,
+    db: Session = Depends(get_db),
+) -> list[Endpoint]:
+    target = db.get(
+        Target,
+        target_id,
+    )
+
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Target not found.",
+        )
+
+    endpoints = list(
+        db.scalars(
+            select(Endpoint)
+            .where(
+                Endpoint.target_id
+                == target_id
+            )
+            .order_by(
+                Endpoint.path,
+                Endpoint.method,
+            )
+        ).all()
+    )
+
+    return endpoints
