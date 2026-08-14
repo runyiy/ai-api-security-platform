@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -57,6 +58,12 @@ def test_policy_check_denies_unbound_target() -> None:
             response.json()["code"]
             == "authorization_profile_missing"
         )
+        assert response.json()["authorization_profile_id"] is None
+        evaluated_at = datetime.fromisoformat(
+            response.json()["evaluated_at"]
+        )
+        assert evaluated_at.tzinfo is not None
+        assert evaluated_at.utcoffset() == timedelta(0)
     finally:
         delete_policy_rows(target_id=target_id)
 
@@ -106,6 +113,15 @@ def test_policy_check_uses_loaded_authorization_profile() -> None:
         assert denied_response.status_code == 200
         assert denied_response.json()["allowed"] is False
         assert denied_response.json()["code"] == "automation_not_allowed"
+        assert (
+            denied_response.json()["authorization_profile_id"]
+            == profile_id
+        )
+        denied_evaluated_at = datetime.fromisoformat(
+            denied_response.json()["evaluated_at"]
+        )
+        assert denied_evaluated_at.tzinfo is not None
+        assert denied_evaluated_at.utcoffset() == timedelta(0)
 
         with SessionLocal() as db:
             stored_profile = db.get(AuthorizationProfile, profile_id)
@@ -119,5 +135,22 @@ def test_policy_check_uses_loaded_authorization_profile() -> None:
         assert allowed_response.json()["allowed"] is True
         assert allowed_response.json()["code"] == "allowed_by_scope"
         assert allowed_response.json()["matched_scope_id"] is not None
+        assert (
+            allowed_response.json()["authorization_profile_id"]
+            == profile_id
+        )
+        allowed_evaluated_at = datetime.fromisoformat(
+            allowed_response.json()["evaluated_at"]
+        )
+        assert allowed_evaluated_at.tzinfo is not None
+        assert allowed_evaluated_at.utcoffset() == timedelta(0)
+        assert set(allowed_response.json()) == {
+            "allowed",
+            "code",
+            "reason",
+            "matched_scope_id",
+            "authorization_profile_id",
+            "evaluated_at",
+        }
     finally:
         delete_policy_rows(target_id=target_id, profile_id=profile_id)

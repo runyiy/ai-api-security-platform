@@ -77,6 +77,9 @@ def test_allows_valid_profile_and_matching_scope() -> None:
 
     assert decision.allowed is True
     assert decision.code == "allowed_by_scope"
+    assert decision.authorization_profile_id == 100
+    assert decision.evaluated_at == NOW
+    assert decision.evaluated_at.tzinfo is timezone.utc
     assert decision.matched_scope_id == 10
 
 
@@ -109,12 +112,17 @@ def test_denies_missing_explicit_profile() -> None:
     )
 
     assert decision.code == "authorization_profile_missing"
+    assert decision.authorization_profile_id is None
+    assert decision.evaluated_at == NOW
+    assert decision.evaluated_at.tzinfo is timezone.utc
 
 
 def test_denies_mismatched_profile() -> None:
     decision = evaluate(profile=build_profile(id=101))
 
     assert decision.code == "authorization_profile_mismatch"
+    assert decision.authorization_profile_id == 101
+    assert decision.matched_scope_id is None
 
 
 def test_valid_from_is_inclusive() -> None:
@@ -129,6 +137,8 @@ def test_valid_from_is_inclusive() -> None:
 def test_valid_until_is_exclusive() -> None:
     decision = evaluate(profile=build_profile(valid_until=NOW))
     assert decision.code == "authorization_expired"
+    assert decision.authorization_profile_id == 100
+    assert decision.evaluated_at == NOW
 
     assert evaluate(
         profile=build_profile(valid_until=NOW + timedelta(seconds=1))
@@ -147,10 +157,58 @@ def test_requires_timezone_aware_evaluation_time() -> None:
         )
 
 
+def test_normalizes_evaluation_time_to_utc() -> None:
+    evaluation_time = datetime(
+        2026,
+        8,
+        14,
+        17,
+        30,
+        tzinfo=timezone(timedelta(hours=5, minutes=30)),
+    )
+
+    decision = build_engine().evaluate(
+        target=build_target(),
+        authorization_profile=build_profile(),
+        scopes=[build_scope()],
+        request_url="http://localhost:8001/api/projects/2001",
+        method="GET",
+        evaluation_time=evaluation_time,
+    )
+
+    assert decision.evaluated_at == evaluation_time.astimezone(timezone.utc)
+    assert decision.evaluated_at.tzinfo is timezone.utc
+
+
+def test_validity_and_metadata_use_same_evaluation_instant() -> None:
+    evaluation_time = datetime(
+        2026,
+        8,
+        14,
+        8,
+        0,
+        tzinfo=timezone(timedelta(hours=-4)),
+    )
+    boundary = evaluation_time.astimezone(timezone.utc)
+
+    decision = build_engine().evaluate(
+        target=build_target(),
+        authorization_profile=build_profile(valid_until=boundary),
+        scopes=[build_scope()],
+        request_url="http://localhost:8001/api/projects/2001",
+        method="GET",
+        evaluation_time=evaluation_time,
+    )
+
+    assert decision.code == "authorization_expired"
+    assert decision.evaluated_at == boundary
+
+
 def test_denies_when_automation_is_not_allowed() -> None:
     decision = evaluate(profile=build_profile(automation_allowed=False))
 
     assert decision.code == "automation_not_allowed"
+    assert decision.authorization_profile_id == 100
 
 
 def test_denies_when_human_approval_is_required() -> None:
@@ -165,12 +223,15 @@ def test_denies_when_profile_disallows_method() -> None:
     decision = evaluate(profile=build_profile(allow_get=False))
 
     assert decision.code == "authorization_method_not_allowed"
+    assert decision.authorization_profile_id == 100
 
 
 def test_profile_cannot_bypass_scope() -> None:
     decision = evaluate(scopes=[])
 
     assert decision.code == "no_matching_scope"
+    assert decision.authorization_profile_id == 100
+    assert decision.matched_scope_id is None
 
 
 def test_denies_wrong_scope_method() -> None:

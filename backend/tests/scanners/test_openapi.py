@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -344,6 +345,8 @@ def allowed_decision() -> PolicyDecision:
         allowed=True,
         code="allowed_by_scope",
         reason="Request matches an active scope.",
+        authorization_profile_id=100,
+        evaluated_at=datetime.now(timezone.utc),
         matched_scope_id=1,
     )
 
@@ -353,6 +356,8 @@ def denied_decision(code: str) -> PolicyDecision:
         allowed=False,
         code=code,
         reason="Request denied for test.",
+        authorization_profile_id=100,
+        evaluated_at=datetime.now(timezone.utc),
     )
 
 

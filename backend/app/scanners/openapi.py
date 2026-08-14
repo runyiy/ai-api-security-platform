@@ -280,6 +280,10 @@ class OpenAPIScanner:
                         "AuthorizationProfile request rate limit "
                         "must be finite and greater than zero."
                     ),
+                    authorization_profile_id=(
+                        decision.authorization_profile_id
+                    ),
+                    evaluated_at=decision.evaluated_at,
                 )
             ) from exc
 
