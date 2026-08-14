@@ -1,39 +1,79 @@
+from collections.abc import Callable
+import math
 import threading
 import time
+
+
+class RateLimitConfigurationError(ValueError):
+    pass
+
+
+def validate_requests_per_second(
+    value: float,
+    *,
+    field_name: str,
+) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+        or value <= 0
+    ):
+        raise RateLimitConfigurationError(
+            f"{field_name} must be finite and greater than zero"
+        )
+
+    return float(value)
 
 
 class InMemoryRateLimiter:
     def __init__(
         self,
         requests_per_second: float,
+        *,
+        monotonic: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
-        if requests_per_second <= 0:
-            raise ValueError(
-                "requests_per_second must be > 0"
+        self._platform_requests_per_second = (
+            validate_requests_per_second(
+                requests_per_second,
+                field_name="requests_per_second",
             )
-
-        self._minimum_interval = (
-            1.0 / requests_per_second
         )
 
-        self._next_allowed_at: dict[str, float] = {}
+        self._last_reserved_at: dict[str, float] = {}
 
         self._lock = threading.Lock()
+        self._monotonic = monotonic
+        self._sleep = sleep
 
     def wait(
         self,
         *,
         key: str,
+        requested_requests_per_second: float,
     ) -> None:
-        with self._lock:
-            now = time.monotonic()
+        requested_rate = validate_requests_per_second(
+            requested_requests_per_second,
+            field_name="requested_requests_per_second",
+        )
+        effective_rate = min(
+            self._platform_requests_per_second,
+            requested_rate,
+        )
+        minimum_interval = 1.0 / effective_rate
 
-            next_allowed = (
-                self._next_allowed_at.get(
+        with self._lock:
+            now = self._monotonic()
+
+            last_reserved = (
+                self._last_reserved_at.get(
                     key,
-                    now,
+                    now - minimum_interval,
                 )
             )
+
+            next_allowed = last_reserved + minimum_interval
 
             delay = max(
                 0.0,
@@ -45,10 +85,7 @@ class InMemoryRateLimiter:
                 next_allowed,
             )
 
-            self._next_allowed_at[key] = (
-                reserved_time
-                + self._minimum_interval
-            )
+            self._last_reserved_at[key] = reserved_time
 
         if delay > 0:
-            time.sleep(delay)
+            self._sleep(delay)

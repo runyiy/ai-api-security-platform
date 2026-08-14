@@ -52,6 +52,7 @@ def _seed_workflow(lab: RunningBOLALab) -> tuple[int, int, int, int]:
             program_name="Deterministic local BOLA lab",
             authorization_type="self_owned",
             automation_allowed=True,
+            max_requests_per_second=1000.0,
             allow_get=True,
             require_human_execution_approval=False,
         )
