@@ -17,6 +17,7 @@ from app.schemas.finding import (
 )
 from app.services.finding_analysis import (
     FindingAnalysisError,
+    FindingAnalysisNotFoundError,
     FindingAnalysisService,
 )
 
@@ -42,6 +43,12 @@ def analyze_test_run(
         outcome = service.analyze_test_run(
             test_run_id=test_run_id
         )
+
+    except FindingAnalysisNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
 
     except FindingAnalysisError as exc:
         raise HTTPException(

@@ -26,6 +26,12 @@ class FindingAnalysisError(
     pass
 
 
+class FindingAnalysisNotFoundError(
+    FindingAnalysisError
+):
+    pass
+
+
 @dataclass(frozen=True)
 class FindingAnalysisOutcome:
     analysis: BOLAAnalysisResult
@@ -51,7 +57,7 @@ class FindingAnalysisService:
         )
 
         if test_run is None:
-            raise FindingAnalysisError(
+            raise FindingAnalysisNotFoundError(
                 "TestRun not found."
             )
 
@@ -61,7 +67,7 @@ class FindingAnalysisService:
         )
 
         if test_case is None:
-            raise FindingAnalysisError(
+            raise FindingAnalysisNotFoundError(
                 "TestCase not found."
             )
 
@@ -95,12 +101,12 @@ class FindingAnalysisService:
         )
 
         if endpoint is None:
-            raise FindingAnalysisError(
+            raise FindingAnalysisNotFoundError(
                 "Endpoint not found."
             )
 
         if resource is None:
-            raise FindingAnalysisError(
+            raise FindingAnalysisNotFoundError(
                 "Resource not found."
             )
 

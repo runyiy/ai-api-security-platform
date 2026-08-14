@@ -17,6 +17,7 @@ from app.schemas.security_report import (
 )
 from app.services.security_report import (
     SecurityReportError,
+    SecurityReportNotFoundError,
     SecurityReportService,
 )
 
@@ -43,6 +44,12 @@ def generate_security_report(
         return service.generate(
             finding_id=finding_id
         )
+
+    except SecurityReportNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
 
     except SecurityReportError as exc:
         raise HTTPException(

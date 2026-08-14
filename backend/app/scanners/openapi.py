@@ -13,13 +13,11 @@ from dataclasses import dataclass
 from typing import Any
 
 
-SUPPORTED_METHODS = frozenset(
-    {
-        "get",
-        "post",
-        "patch",
-        "delete",
-    }
+SUPPORTED_METHODS = (
+    "get",
+    "post",
+    "patch",
+    "delete",
 )
 
 MAX_OPENAPI_RESPONSE_BYTES = 1_000_000

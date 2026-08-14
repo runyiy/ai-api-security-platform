@@ -24,6 +24,12 @@ class AIAnalysisServiceError(
     pass
 
 
+class AIAnalysisNotFoundError(
+    AIAnalysisServiceError
+):
+    pass
+
+
 class AIAnalysisService:
     def __init__(
         self,
@@ -45,7 +51,7 @@ class AIAnalysisService:
         )
 
         if finding is None:
-            raise AIAnalysisServiceError(
+            raise AIAnalysisNotFoundError(
                 "Finding not found."
             )
 
@@ -65,7 +71,7 @@ class AIAnalysisService:
         )
 
         if test_run is None:
-            raise AIAnalysisServiceError(
+            raise AIAnalysisNotFoundError(
                 "TestRun not found."
             )
 
@@ -75,7 +81,7 @@ class AIAnalysisService:
         )
 
         if test_case is None:
-            raise AIAnalysisServiceError(
+            raise AIAnalysisNotFoundError(
                 "TestCase not found."
             )
 
@@ -90,12 +96,12 @@ class AIAnalysisService:
         )
 
         if endpoint is None:
-            raise AIAnalysisServiceError(
+            raise AIAnalysisNotFoundError(
                 "Endpoint not found."
             )
 
         if resource is None:
-            raise AIAnalysisServiceError(
+            raise AIAnalysisNotFoundError(
                 "Resource not found."
             )
 

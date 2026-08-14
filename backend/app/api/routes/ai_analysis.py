@@ -18,6 +18,7 @@ from app.schemas.ai_analysis import (
     FindingAIAnalysisRead,
 )
 from app.services.ai_analysis import (
+    AIAnalysisNotFoundError,
     AIAnalysisService,
     AIAnalysisServiceError,
 )
@@ -48,6 +49,12 @@ def analyze_finding_with_ai(
         return service.analyze_finding(
             finding_id=finding_id
         )
+
+    except AIAnalysisNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
 
     except AIAnalysisServiceError as exc:
         raise HTTPException(

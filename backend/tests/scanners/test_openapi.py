@@ -74,6 +74,37 @@ def test_ignores_unsupported_methods() -> None:
     assert endpoints[0].method == "GET"
 
 
+def test_parses_methods_in_deterministic_order() -> None:
+    schema = {
+        "paths": {
+            "/first": {
+                "delete": {},
+                "patch": {},
+                "post": {},
+                "get": {},
+            },
+            "/second": {
+                "post": {},
+                "get": {},
+            },
+        }
+    }
+
+    endpoints = parse_openapi_schema(schema)
+
+    assert [
+        (endpoint.path, endpoint.method)
+        for endpoint in endpoints
+    ] == [
+        ("/first", "GET"),
+        ("/first", "POST"),
+        ("/first", "PATCH"),
+        ("/first", "DELETE"),
+        ("/second", "GET"),
+        ("/second", "POST"),
+    ]
+
+
 def test_inherits_root_security() -> None:
     schema = {
         "security": [

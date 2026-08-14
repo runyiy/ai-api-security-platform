@@ -1,14 +1,40 @@
 from urllib.parse import quote
 
+from sqlalchemy import select, update
+from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
+
+from app.auth.context import (
+    AuthenticationContextError,
+    apply_authentication_context,
+    build_authentication_context,
+)
 from app.db.models.endpoint import Endpoint
 from app.db.models.resource import Resource
+from app.db.models.scope import Scope
 from app.db.models.target import Target
+from app.db.models.test_case import TestCase
+from app.db.models.test_identity import (
+    TestIdentity,
+)
+from app.db.models.test_run import TestRun
+from app.executors.http import (
+    ExecutionBlockedError,
+    HTTPExecutionError,
+    PolicyEnforcedHTTPExecutor,
+)
 from app.generators.bola import (
     detect_resource_binding,
 )
 
 
 class TestExecutionError(RuntimeError):
+    pass
+
+
+class TestExecutionNotFoundError(
+    TestExecutionError
+):
     pass
 
 
@@ -103,41 +129,8 @@ def redact_headers(
 
     return result
 
-from sqlalchemy import select, update
-from sqlalchemy.orm import Session
-from sqlalchemy.orm.attributes import set_committed_value
-
-from app.auth.context import (
-    AuthenticationContextError,
-    apply_authentication_context,
-    build_authentication_context,
-)
-from app.db.models.endpoint import Endpoint
-from app.db.models.resource import Resource
-from app.db.models.scope import Scope
-from app.db.models.target import Target
-from app.db.models.test_case import TestCase
-from app.db.models.test_identity import (
-    TestIdentity,
-)
-from app.db.models.test_run import TestRun
-from app.executors.http import (
-    ExecutionBlockedError,
-    HTTPExecutionError,
-    PolicyEnforcedHTTPExecutor,
-)
-
 
 MAX_STORED_RESPONSE_BYTES = 64_000
-
-
-class TestExecutionError(RuntimeError):
-    pass
-
-
-# 保留前面定义的：
-# build_test_case_url()
-# redact_headers()
 
 
 def decode_response_body(
@@ -172,7 +165,7 @@ class TestExecutionService:
         )
 
         if test_case is None:
-            raise TestExecutionError(
+            raise TestExecutionNotFoundError(
                 "TestCase not found."
             )
 
@@ -200,17 +193,17 @@ class TestExecutionService:
         )
 
         if endpoint is None:
-            raise TestExecutionError(
+            raise TestExecutionNotFoundError(
                 "Endpoint not found."
             )
 
         if actor is None:
-            raise TestExecutionError(
+            raise TestExecutionNotFoundError(
                 "Actor identity not found."
             )
 
         if resource is None:
-            raise TestExecutionError(
+            raise TestExecutionNotFoundError(
                 "Resource not found."
             )
 
@@ -220,7 +213,7 @@ class TestExecutionService:
         )
 
         if target is None:
-            raise TestExecutionError(
+            raise TestExecutionNotFoundError(
                 "Target not found."
             )
 

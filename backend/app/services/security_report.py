@@ -25,6 +25,11 @@ class SecurityReportError(
 ):
     pass
 
+class SecurityReportNotFoundError(
+    SecurityReportError
+):
+    pass
+
 class SecurityReportService:
     def __init__(
         self,
@@ -47,7 +52,7 @@ class SecurityReportService:
         )
 
         if finding is None:
-            raise SecurityReportError(
+            raise SecurityReportNotFoundError(
                 "Finding not found."
             )
 
@@ -63,7 +68,7 @@ class SecurityReportService:
         )
 
         if test_run is None:
-            raise SecurityReportError(
+            raise SecurityReportNotFoundError(
                 "TestRun not found."
             )
 
@@ -73,7 +78,7 @@ class SecurityReportService:
         )
 
         if test_case is None:
-            raise SecurityReportError(
+            raise SecurityReportNotFoundError(
                 "TestCase not found."
             )
 
@@ -88,12 +93,12 @@ class SecurityReportService:
         )
 
         if endpoint is None:
-            raise SecurityReportError(
+            raise SecurityReportNotFoundError(
                 "Endpoint not found."
             )
 
         if resource is None:
-            raise SecurityReportError(
+            raise SecurityReportNotFoundError(
                 "Resource not found."
             )
 

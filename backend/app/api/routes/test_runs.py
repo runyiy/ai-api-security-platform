@@ -25,6 +25,7 @@ from app.schemas.test_run import (
 )
 from app.services.test_execution import (
     TestExecutionError,
+    TestExecutionNotFoundError,
     TestExecutionService,
 )
 
@@ -77,6 +78,12 @@ def execute_test_case(
                 "code": exc.code,
                 "reason": exc.reason,
             },
+        ) from exc
+
+    except TestExecutionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
         ) from exc
 
     except TestExecutionError as exc:
