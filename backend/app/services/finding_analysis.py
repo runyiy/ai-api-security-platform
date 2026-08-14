@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.analyzers.bola import (
@@ -156,15 +157,6 @@ class FindingAnalysisService:
                 finding=None,
             )
 
-        existing = self.db.scalar(
-            select(Finding).where(
-                Finding.test_run_id
-                == test_run.id,
-                Finding.category
-                == "BOLA",
-            )
-        )
-
         title = (
             f"Potential BOLA in "
             f"{endpoint.method} "
@@ -180,47 +172,66 @@ class FindingAnalysisService:
             "resource. Human review is required."
         )
 
-        if existing is not None:
-            existing.severity = (
-                result.severity
-                or "unknown"
+        finding_id = self.db.scalar(
+            insert(Finding)
+            .values(
+                target_id=endpoint.target_id,
+                endpoint_id=endpoint.id,
+                test_run_id=test_run.id,
+                category="BOLA",
+                severity=(
+                    result.severity
+                    or "unknown"
+                ),
+                confidence=(
+                    result.confidence
+                    or 0.0
+                ),
+                status="potential",
+                title=title,
+                description=description,
             )
-
-            existing.confidence = (
-                result.confidence
-                or 0.0
+            .on_conflict_do_nothing(
+                constraint=(
+                    "uq_finding_test_run_category"
+                )
             )
-
-            existing.title = title
-            existing.description = description
-
-            self.db.commit()
-            self.db.refresh(existing)
-
-            return FindingAnalysisOutcome(
-                analysis=result,
-                finding=existing,
-            )
-
-        finding = Finding(
-            target_id=endpoint.target_id,
-            endpoint_id=endpoint.id,
-            test_run_id=test_run.id,
-            category="BOLA",
-            severity=(
-                result.severity
-                or "unknown"
-            ),
-            confidence=(
-                result.confidence
-                or 0.0
-            ),
-            status="potential",
-            title=title,
-            description=description,
+            .returning(Finding.id)
         )
 
-        self.db.add(finding)
+        if finding_id is not None:
+            finding = self.db.get(
+                Finding,
+                finding_id,
+            )
+        else:
+            finding = self.db.scalar(
+                select(Finding).where(
+                    Finding.test_run_id
+                    == test_run.id,
+                    Finding.category
+                    == "BOLA",
+                )
+            )
+
+        if finding is None:
+            raise RuntimeError(
+                "Finding conflict row not found."
+            )
+
+        if finding_id is None:
+            finding.severity = (
+                result.severity
+                or "unknown"
+            )
+
+            finding.confidence = (
+                result.confidence
+                or 0.0
+            )
+
+            finding.title = title
+            finding.description = description
 
         self.db.commit()
         self.db.refresh(finding)
