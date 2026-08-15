@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import (
     Boolean,
@@ -10,9 +12,13 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+
+
+if TYPE_CHECKING:
+    from app.db.models.credential_binding import CredentialBinding
 
 
 class TestIdentity(Base):
@@ -78,4 +84,9 @@ class TestIdentity(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+    credential_bindings: Mapped[list[CredentialBinding]] = relationship(
+        back_populates="test_identity",
+        passive_deletes="all",
     )
