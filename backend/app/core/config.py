@@ -1,8 +1,10 @@
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     database_url: str
+    credential_secret_encryption_key: SecretStr | None = None
 
     allowed_target_hosts: str = "localhost,127.0.0.1,::1"
 
