@@ -1,425 +1,299 @@
 # AI API Security Testing Platform — Level 3 Roadmap
 
-## 1. Goal
+## 1. Goal and source of truth
 
-Build an authorization-aware API object-level authorization testing platform for localhost, self-owned labs, self-owned servers, and explicitly authorized environments such as bug bounty or SRC programs.
+Build an authorization-aware API object-level authorization testing platform for self-controlled labs and, only after a dedicated release gate, explicitly authorized public SRC or bug bounty targets.
 
-The Level 3 product is not a general-purpose website attack scanner. Its primary workflow is:
+This roadmap is governed by:
+
+- [`architecture-decisions.md`](architecture-decisions.md), which records approved product and architecture constraints;
+- [`security-model.md`](security-model.md), which records mandatory security invariants.
+
+The product is not a general-purpose website attack scanner. It remains focused on BOLA/IDOR until the authorization, execution, network, ownership, and evidence boundaries are safe and complete.
+
+## 2. Current deployment safety status
+
+Execution-capable v1 currently assumes:
+
+- one trusted operator;
+- one execution process;
+- self-hosted local/private lab usage.
+
+Public SRC or bug-bounty execution is currently unsupported, is not an approved deployment mode, and is operationally prohibited. Completion of Milestones 0–2 does not provide public readiness. The current codebase does not yet provide the complete machine-enforced public-network readiness boundary and must not be assumed to prevent every possible public destination if configured with a public hostname. No real public SRC request may be intentionally executed until the Public SRC Readiness controls are implemented and satisfied. The target architecture must provide a machine-enforced release and execution gate before public use.
+
+Do not enable multiple execution workers while rate limiting and coordination remain in memory.
+
+## 3. Non-negotiable principles
+
+1. Authorization beats automation; default deny.
+2. Trusted operator, Target existence, and wildcard matches do not prove authorization to execute.
+3. Every execution selects exactly one authorization revision; grants are never implicitly unioned.
+4. Scope and platform safety policy may narrow authorization but never widen it.
+5. Policy and network safety are re-evaluated immediately before every request.
+6. Automatic execution remains GET-only until a separately reviewed milestone changes it.
+7. AI never owns or controls credentials, approval, policy, or HTTP execution.
+8. Authentication material originates only from the constrained AuthenticationContext/credential-provider boundary.
+9. Human approval binds an immutable bounded plan and never bypasses policy.
+10. Generators and discovery metadata never execute requests.
+11. Findings require human review before confirmation; only confirmed findings produce formal reports.
+12. Secrets never appear in logs, evidence, findings, AI input, audit records, or reports.
+13. Evidence retention is minimized, structured, bounded, and redacted by default.
+
+## 4. Completed historical milestones
+
+### Milestone 0 — Stable local MVP regression
+
+Completed:
+
+- deterministic local BOLA lab with secure and vulnerable modes;
+- owner-baseline and cross-owner integration regression;
+- reproducible pytest CI gate;
+- regression coverage for current policy and executor safety behavior.
+
+### Milestone 1 — AuthorizationProfile and Target binding
+
+Completed:
+
+- AuthorizationProfile model and CRUD;
+- explicit Target binding and unbinding;
+- fail-closed defaults.
+
+The current mutable profile is an MVP predecessor to the immutable revision model in Milestone 4.
+
+### Milestone 2 — Authorization-aware policy engine
+
+Completed:
+
+- AuthorizationProfile validity and automation checks;
+- Scope enforcement;
+- platform host allowlist and exact Target origin enforcement;
+- safe path validation;
+- automatic GET-only execution;
+- execution-time policy revalidation;
+- profile and shared per-Target rate limiting across execution and OpenAPI import;
+- PolicyDecision authorization-profile and evaluation-time metadata.
+
+These controls are necessary but do not establish public SRC readiness.
+
+The requirement that every revision-aware ExecutionPlan and execution select exactly one immutable authorization revision is a target-state invariant and is mandatory before public execution. Until Milestone 4 is complete, the local/private-lab MVP uses the current mutable AuthorizationProfile as a transitional authorization object and does not claim immutable revision-level historical reproducibility.
+
+## 5. Revised implementation milestones
+
+### Milestone 3 — Credential domain
+
+Separate identity from authentication mechanism without prematurely building a complex provider framework.
+
+#### M3-01 — CredentialBinding domain foundation
+
+Goal: separate `TestIdentity` from credential mechanism using only non-sensitive credential metadata.
+
+The accepted conceptual boundary is:
 
 ```text
-Authorization Program / Rules
-        ↓
-Authorization Profile
-        ↓
-Target
-        ↓
-Scope
-        ↓
-API Import / Discovery
-        ↓
-Endpoint
-        ↓
-Test Identity
-        ↓
-Authentication Context
-        ↓
-Resource Discovery
-        ↓
-Resource Ownership
-        ↓
-BOLA Test Generator
-        ↓
-TestCase
-        ↓
-Execution Plan / Human Approval
-        ↓
-Policy Engine
-        ↓
-Authorized HTTP Executor
-        ↓
-TestRun
-        ↓
-Rule-Based Analyzer
-        ↓
-Potential Finding
-        ↓
-AI-Assisted Analysis
-        ↓
-Human Review
-        ↓
-Confirmed Finding
-        ↓
-Security Report
+TestIdentity
+    -> CredentialBinding
 ```
 
-The MVP remains focused on BOLA / IDOR. New vulnerability classes are lower priority until the BOLA workflow is safe, complete, and externally usable in explicitly authorized environments.
-
-## 2. Non-Negotiable Principles
+CredentialBinding may eventually include fields equivalent to an identity reference, authentication type, source type, active state, and timestamps. Exact schema names belong in the implementation plan.
 
-1. Authorization beats automation.
-2. Default deny.
-3. Target existence does not imply authorization.
-4. Policy is re-evaluated at execution time.
-5. AI never owns or controls the HTTP executor.
-6. Authorization material comes only from AuthenticationContext.
-7. Automatic execution remains GET-only until a later milestone explicitly changes this policy.
-8. Findings require human review before confirmation.
-9. Only confirmed findings may generate formal reports.
-10. Secrets must never appear in logs, findings, AI prompts, or reports.
+Initially expected values may include `auth_type = bearer` and `source_type = stored_secret`. CredentialSource may remain a small service/domain abstraction.
 
-## 3. Milestones
+Explicitly out of scope:
 
-### Milestone 0 — Stabilize the Existing MVP
+- encryption or ciphertext storage;
+- migration of existing bearer tokens;
+- AuthenticationContext changes;
+- API keys, cookies, or sessions;
+- dynamic login/session acquisition;
+- Vault/KMS;
+- AuthorizationRevision, ExecutionPlan, or NetworkGateway.
 
-Goal: establish a reliable regression baseline for the current Target → Scope → OpenAPI → Endpoint → Identity → Resource → TestCase → TestRun → Finding → Report chain.
+#### M3-02 — Encrypted PostgreSQL stored-secret provider
 
-Required work:
+Goal: add authenticated encrypted secret storage behind the CredentialBinding/source boundary.
 
-- Add an official local BOLA lab with at least two test users.
-- Add a secure mode and a deliberately vulnerable mode.
-- Add end-to-end integration tests for owner baseline and cross-owner access.
-- Add regression coverage for scope denial, invalid credentials, redirects, timeout, response-size limit, and rate limiting.
+Use vetted authenticated encryption, randomized nonces, external key material, a versioned envelope, and fail-closed tamper/wrong-key handling. PostgreSQL encrypted storage is the first provider, not the whole credential domain.
 
-Done when:
+#### M3-03 — Bearer migration
 
-- secure mode produces PASS for cross-owner access;
-- vulnerable mode produces POTENTIAL_BOLA;
-- the finding can be human-confirmed;
-- a confirmed finding can generate a security report;
-- the existing test suite remains green.
+Goal: create, update, and resolve bearer credentials through CredentialBinding and remove the plaintext bearer execution path after a safe migration/backfill path.
 
-### Milestone 1 — Authorization Profile
+The existing `TestIdentity.credentials` JSONB field is transitional and must not remain the long-term credential model.
 
-Introduce an AuthorizationProfile model representing the source and limits of permission to test a target.
+GitHub Issue #23 is superseded as written. Do not implement its orphan CredentialSecret shape or reuse its implementation branch for the replacement M3-01.
 
-Candidate fields:
+### Milestone 4 — Authorization revisions
 
-- id
-- name
-- program_name
-- program_url
-- authorization_type
-- authorization_reference
-- valid_from
-- valid_until
-- automation_allowed
-- max_requests_per_second
-- allow_get
-- allow_post
-- allow_patch
-- allow_put
-- allow_delete
-- require_human_execution_approval
-- notes
-- created_at
-- updated_at
+Add immutable authorization revisions with explicit lifecycle state. A Target may have historical and future revisions, but each ExecutionPlan and execution selects exactly one revision. Never union permissions from separate grants or revisions. Scope only narrows the selected revision.
 
-Targets must belong to an AuthorizationProfile before external execution is allowed.
+Historical plans and runs must be able to identify the exact revision that permitted the action.
 
-### Milestone 2 — Program Policy Engine
+### Milestone 5 — Execution planning and minimal safety audit
 
-Extend policy evaluation beyond hostname/path/method scope.
+Add:
 
-Execution must validate:
+- immutable bounded ExecutionPlan;
+- bounded PlanAction/request snapshots;
+- stable plan digest;
+- selected authorization revision and relevant policy context;
+- minimal append-oriented records for plan, policy, and execution safety decisions.
 
-- authorization profile exists and is valid;
-- target is enabled;
-- host is in the platform allowlist;
-- request origin matches the target;
-- hostname/path/method are allowed by active scope;
-- automation is permitted;
-- rate limits are respected;
-- human approval is present when required.
+TestCase remains reusable test intent. ExecutionPlan freezes the concrete action set. Full audit query/export is a later product capability.
 
-PolicyDecision should be auditable and include at minimum:
+### Milestone 6 — Network safety boundary
 
-- allowed
-- code
-- reason
-- matched_scope_id
-- authorization_profile_id
-- timestamp or equivalent execution record linkage
+Introduce:
 
-### Milestone 3 — Secret and Authentication System
+- explicit `private/local` and `external/public-authorized` modes;
+- one centralized outbound NetworkGateway used by all network paths;
+- canonical URL, scheme, origin, and port enforcement;
+- DNS resolution and IPv4/IPv6 address classification;
+- mode-specific private, loopback, link-local, metadata, reserved, and public address policy;
+- DNS rebinding and policy-to-connect TOCTOU protection;
+- actual destination/peer validation;
+- global and per-Target kill switches;
+- bounded connection concurrency;
+- separate maximum network-response and stored-evidence limits.
 
-Expand AuthenticationContext support to:
+This milestone is a blocker for public SRC execution. Hostname/origin checks alone are not sufficient.
 
-- anonymous
-- bearer
-- API key
-- cookie/session
-- constrained custom header authentication
+### Milestone 7 — Human approval
 
-Do not permit arbitrary Authorization header injection.
+Bind human approval to the exact immutable plan digest and bounded action set. Material mutation invalidates approval.
 
-Move long-lived credentials away from plain application-visible JSON storage into an encrypted secret design. Database records should store references and non-sensitive metadata where possible.
+Approval is necessary when configured but never sufficient. Every action still undergoes immediate pre-network authorization, Scope, Target, credential, rate, kill-switch, and network validation.
 
-Secrets must be redacted from:
+### Milestone 8 — Shared execution coordination
 
-- logs
-- API responses
-- errors
-- findings
-- AI input
-- reports
+Use PostgreSQL-first coordination for:
 
-### Milestone 4 — API Import and Discovery
+- process-safe rate reservations;
+- execution claims and leases;
+- idempotency;
+- stuck-work recovery and cancellation semantics;
+- multi-process execution readiness.
 
-Support safe endpoint ingestion through:
+Do not enable multiple execution workers or claim multi-worker safety until this milestone is complete and tested across OS processes. Redis is not required for v1.
 
-1. configurable OpenAPI URL import;
-2. offline OpenAPI JSON/YAML file import;
-3. HAR import for endpoint discovery;
-4. Postman collection import.
+### Milestone 9 — API discovery
 
-Imports should create or update endpoint metadata. They must not automatically replay arbitrary requests.
+Add safe discovery features:
 
-### Milestone 5 — Endpoint Intelligence
+- explicit OpenAPI source URL;
+- anonymous retrieval by default;
+- optional explicitly selected documentation CredentialBinding later;
+- no automatic TestIdentity or credential selection;
+- versioned document/import provenance;
+- bounded compressed/decompressed size, parser complexity, depth, endpoint count, and reference behavior;
+- metadata import only, with no automatic request replay.
 
-Expand resource binding beyond only `{resource_id}` forms.
+All remote retrieval uses the same policy, credential, rate, and NetworkGateway boundaries as other outbound requests. Authentication never widens authorization or safety policy.
 
-Examples to support over time:
+### Milestone 10 — Wildcard asset enrollment
 
-- `/orders/{order_id}`
-- `/orders/{id}`
-- `/orders/{uuid}`
-- `/orders?id=123`
-- nested resource paths
-
-Introduce a ResourceBinding concept with fields such as:
-
-- location
-- parameter_name
-- resource_type
-- confidence
-
-Low-confidence bindings require human review before execution.
-
-### Milestone 6 — Resource Discovery
-
-Support:
-
-- manually registered resources;
-- observed candidate resources;
-- API-discovered candidate resources.
-
-Discovered ownership must begin as a candidate state. The platform must not silently promote uncertain ownership inference into trusted Resource records.
-
-### Milestone 7 — BOLA Test Matrix
-
-Expand generated cases to cover:
-
-- owner baseline;
-- cross-owner access;
-- anonymous access;
-- role-boundary access.
-
-The generator only creates plans. It must never send HTTP requests.
-
-### Milestone 8 — Execution Plan and Human Approval
-
-Add an ExecutionPlan layer between generated test cases and HTTP execution.
-
-Before execution the user should be able to review:
-
-- method
-- URL
-- identity
-- target resource
-- expected result
-- scope decision
-- authorization profile
-
-When required by policy, execution must remain blocked until approved.
-
-### Milestone 9 — Executor Hardening
-
-Preserve current protections:
-
-- no automatic redirects;
-- timeout;
-- response-size limit;
-- rate limiting;
-- execution-time scope checks;
-- GET-only automatic execution.
-
-Add over time:
-
-- DNS/IP validation;
-- private/public network policy;
-- connection and concurrency limits;
-- global kill switch;
-- per-target kill switch;
-- execution audit IDs;
-- request fingerprints.
-
-### Milestone 10 — Evidence Engine
-
-Do not treat HTTP 200 alone as proof of BOLA.
-
-Evidence should consider:
-
-- owner baseline success;
-- cross-owner response;
-- target resource identifier;
-- status differences;
-- relevant JSON fields;
-- response similarity;
-- semantic evidence;
-- confidence and explainable rule output.
-
-### Milestone 11 — AI-Assisted Analysis
-
-AI is a Finding Assistant only.
-
-Allowed responsibilities:
-
-- explain the suspected issue;
-- summarize security impact;
-- estimate false-positive risk;
-- suggest severity;
-- suggest remediation;
-- improve report wording.
-
-AI input must pass through a redaction layer.
-
-AI must not:
-
-- execute HTTP;
-- expand scope;
-- provide authorization material;
-- confirm findings;
-- bypass human approval.
-
-### Milestone 12 — Human Review Console
-
-Finding states should support at least:
+Support program wildcard rules and exclusions through a candidate workflow:
 
 ```text
-potential → reviewing → confirmed
-                     ↘ false_positive
+program wildcard rule
+    -> discovered asset candidate
+    -> inclusion/exclusion validation
+    -> CNAME and DNS/network validation
+    -> human enrollment
+    -> explicit Target
 ```
 
-Reviewers should see the endpoint, actor, resource owner, resource identifier, baseline, cross-owner result, analyzer reasoning, evidence, confidence, and optional AI analysis.
+Every executable hostname must become an explicit Target. Wildcard matches never directly authorize execution.
 
-### Milestone 13 — SRC / Bug Bounty Report Output
+### Milestone 11 — Endpoint and resource-binding intelligence
 
-Only confirmed findings may produce formal reports.
+Support reviewed bindings for path, query, nested, and multiple resource identifiers. Bindings carry provenance and confidence. Low-confidence bindings do not silently become executable actions.
 
-Reports should include:
+### Milestone 12 — Resource access assertions
 
-- title
-- summary
-- affected endpoint
-- prerequisites
-- reproduction steps
-- expected result
-- actual result
-- security impact
-- evidence
-- suggested fix
+Replace single timeless ownership truth with assertions carrying:
 
-Authentication secrets must always be omitted.
+- provenance: `human_verified`, `target_fixture`, `observed_baseline`, or `inferred_candidate`;
+- confidence;
+- verification state;
+- asserted/observed time and relevant validity information;
+- expected access relation or decision.
 
-Support Markdown and structured JSON first. PDF is a later concern.
+Observed access never silently proves exclusive ownership or expected denial for another identity.
 
-### Milestone 14 — Audit System
+### Milestone 13 — Evidence engine
 
-Introduce immutable or append-oriented audit records for important actions, including:
+Introduce:
 
-- execution allowed / denied;
-- execution started / finished / failed;
-- finding confirmed;
-- report generated.
+- explicitly paired baseline/probe provenance;
+- structured selected evidence;
+- bounded redacted excerpts;
+- response hashes/fingerprints and similarity metadata;
+- extractor/rule provenance and timestamps;
+- an explicit retention policy.
 
-Audit records must not contain secrets.
+Full third-party response bodies are not retained by default. Potentially sensitive identifiers, PII, and business data are stored only when materially necessary to prove a finding. Secrets are never evidence.
 
-### Milestone 15 — External Authorized Testing Readiness
+### Milestone 14 — BOLA matrix expansion
 
-Before any real external target is used, require a readiness gate covering:
+Expand pure plan generation only after resource assertions and evidence foundations exist. Add owner, cross-subject, anonymous, role/shared-access, nested-resource, query-binding, and multiple-parameter cases. Generators never send HTTP requests or supply credentials.
 
-- valid AuthorizationProfile;
-- explicit scope;
-- unexpired authorization;
-- automation policy understood;
-- host allowlist configured;
-- rate limit configured;
-- dedicated test accounts prepared;
-- credential storage hardened;
-- GET-only policy functioning;
-- redirects disabled;
-- timeout and response-size limits functioning;
-- kill switch functioning;
-- audit logging functioning;
-- redaction functioning;
-- human approval functioning.
+## 6. Later product maturity
 
-If any required check fails, external execution remains disabled.
+After the safety and BOLA foundations:
 
-## 4. Completion Gates
+- human review console and audited review transitions;
+- AI advisory analysis with redacted allowlisted evidence;
+- confirmed-finding reports;
+- full audit query/export and retention management;
+- additional offline/import formats;
+- mutating execution only after a separate architecture and threat review.
 
-### Gate A — Local Lab
+## 7. Public SRC Readiness release gate
 
-All core workflows and safety failures are reproducible with pytest/integration tests against a self-controlled lab.
+Public SRC or bug-bounty execution is unsupported and operationally prohibited until all applicable controls are implemented and tested. The completed architecture must enforce this release and execution gate in the machine boundary before public use. Required controls include:
 
-### Gate B — Self-Owned External Server
+- one valid immutable authorization revision selected per plan/execution;
+- explicit Target and Scope;
+- external/public network mode;
+- centralized NetworkGateway with DNS, IPv4/IPv6, prohibited-address, rebinding/TOCTOU, port, and actual-peer enforcement;
+- valid credential binding with no plaintext execution path;
+- immutable bounded plan and required approval;
+- immediate pre-network policy revalidation;
+- rate and concurrency enforcement appropriate to the deployment topology;
+- global and per-Target kill switches;
+- minimal safety audit records;
+- structured bounded redacted evidence and tested secret redaction;
+- GET-only, redirects-disabled, bounded-timeout, bounded-response behavior;
+- a successful self-owned public-server readiness exercise before third-party use.
 
-Run the platform against a publicly reachable API owned by the developer and validate TLS, DNS, policy, rate limiting, authentication, audit, and redaction behavior.
+Failure of any mandatory check results in denial.
 
-### Gate C — Explicitly Authorized Program
+## 8. Completion gates
 
-Only after Gate A and Gate B pass should the platform be used in a real authorized bug bounty/SRC environment, and only within the exact program rules and scope.
+### Gate A — Local lab
 
-## 5. Codex Development Workflow
+All core workflows and safety failures are reproducible against self-controlled fixtures. This is the only currently supported execution environment.
 
-Do not ask Codex to implement Level 3 in one task.
+### Gate B — Self-owned public server
 
-Use:
+After all mandatory Public SRC Readiness controls applicable to the exercise are implemented and tested, validate the external/public network path against a public server owned and controlled by the operator. Readiness is determined by required security capabilities, not milestone number alone; unrelated capabilities are not prerequisites when they do not apply to the exercise.
+
+### Gate C — Explicitly authorized public program
+
+Only after Gate A, Gate B, and all applicable Public SRC Readiness requirements pass may the platform test an explicitly authorized third-party SRC/bug-bounty Target, within the exact selected authorization revision and Scope.
+
+## 9. Development workflow
+
+Implement one small reviewed issue at a time:
 
 ```text
 Milestone
-  ↓
-Small GitHub Issue / Task
-  ↓
-Codex implementation
-  ↓
-pytest / integration tests
-  ↓
-Self-review and diff review
-  ↓
-Human review
-  ↓
-Merge
+  -> small issue
+  -> implementation and focused tests
+  -> full regression suite
+  -> self-review and diff review
+  -> human review
+  -> CI and merge
 ```
 
-Each task must define:
-
-- context;
-- one concrete goal;
-- security constraints;
-- files to inspect;
-- required tests;
-- done-when criteria.
-
-A good task changes one logical capability at a time.
-
-## 6. Product Positioning
-
-Preferred description:
-
-> Authorized API Object-Level Authorization Security Testing Platform
-
-or:
-
-> AI-Assisted BOLA / IDOR Security Testing Platform for Authorized API Environments
-
-Core characteristics:
-
-- authorization-aware;
-- scope-aware;
-- identity-aware;
-- resource-aware;
-- policy-enforced;
-- evidence-driven;
-- human-reviewed;
-- AI-assisted.
+Each issue defines one concrete goal, security constraints, explicit exclusions, required tests, and done criteria. Architecture changes require human review before implementation.
