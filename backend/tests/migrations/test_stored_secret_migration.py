@@ -6,7 +6,8 @@ from sqlalchemy import inspect
 from app.db.session import engine
 
 
-HEAD_REVISION = "e7a5b4c3d2f1"
+HEAD_REVISION = "f8c6d5e4b3a2"
+STORED_SECRET_REVISION = "e7a5b4c3d2f1"
 PARENT_REVISION = "d6f4a3b2c1e0"
 
 
@@ -20,6 +21,9 @@ def test_stored_secret_migration_round_trip() -> None:
 
     try:
         assert current_revision() == HEAD_REVISION
+        command.downgrade(alembic_config, STORED_SECRET_REVISION)
+
+        assert current_revision() == STORED_SECRET_REVISION
         tables_at_head = set(inspect(engine).get_table_names())
         assert "credential_secret_versions" in tables_at_head
 
@@ -32,9 +36,9 @@ def test_stored_secret_migration_round_trip() -> None:
         }
         assert tables_after_downgrade - tables_at_head == set()
 
-        command.upgrade(alembic_config, "head")
+        command.upgrade(alembic_config, STORED_SECRET_REVISION)
 
-        assert current_revision() == HEAD_REVISION
+        assert current_revision() == STORED_SECRET_REVISION
         inspector = inspect(engine)
         assert set(inspector.get_table_names()) == tables_at_head
         assert {
