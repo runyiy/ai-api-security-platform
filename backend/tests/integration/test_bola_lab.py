@@ -1,13 +1,19 @@
 from collections.abc import Iterator
+import base64
 import json
 from uuid import uuid4
 
 import pytest
+from pydantic import SecretStr
 from sqlalchemy import delete, select
 
 from app.analyzers.bola import AnalysisOutcome
 from app.api.routes.test_cases import generate_bola_cases
+from app.core.config import settings
+from app.credentials.bearer import BearerCredentialService
 from app.db.models.authorization_profile import AuthorizationProfile
+from app.db.models.credential_binding import CredentialBinding
+from app.db.models.credential_secret_version import CredentialSecretVersion
 from app.db.models.endpoint import Endpoint
 from app.db.models.finding import Finding
 from app.db.models.resource import Resource
@@ -23,7 +29,10 @@ from app.generators.bola import BOLA_CROSS_OWNER, OWNER_BASELINE
 from app.policies.scope_policy import ScopePolicyEngine
 from app.schemas.test_case import GenerateBOLATestCasesRequest
 from app.services.finding_analysis import FindingAnalysisService
-from app.services.test_execution import TestExecutionService as ExecutionService
+from app.services.test_execution import (
+    TestExecutionError,
+    TestExecutionService as ExecutionService,
+)
 from tests.labs.bola_lab import BOLALabMode, RunningBOLALab, run_bola_lab
 
 
@@ -37,13 +46,28 @@ class RecordingScopePolicyEngine(ScopePolicyEngine):
         return super().evaluate(**kwargs)
 
 
+@pytest.fixture(autouse=True)
+def credential_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    encoded_key = base64.urlsafe_b64encode(b"l" * 32).decode("ascii")
+    monkeypatch.setattr(
+        settings,
+        "credential_encryption_key",
+        SecretStr(encoded_key),
+    )
+    monkeypatch.setattr(settings, "credential_encryption_key_version", "lab-v1")
+
+
 @pytest.fixture(params=[BOLALabMode.SECURE, BOLALabMode.VULNERABLE])
 def bola_lab(request: pytest.FixtureRequest) -> Iterator[RunningBOLALab]:
     with run_bola_lab(request.param) as lab:
         yield lab
 
 
-def _seed_workflow(lab: RunningBOLALab) -> tuple[int, int, int, int]:
+def _seed_workflow(
+    lab: RunningBOLALab,
+    *,
+    provision_credentials: bool = True,
+) -> tuple[int, int, int, int]:
     unique_name = f"bola-lab-{lab.mode}-{uuid4()}"
 
     with SessionLocal() as db:
@@ -81,7 +105,11 @@ def _seed_workflow(lab: RunningBOLALab) -> tuple[int, int, int, int]:
             name="Alice",
             role="customer",
             auth_type="bearer",
-            credentials={"access_token": "alice-token"},
+            credentials=(
+                None
+                if provision_credentials
+                else {"access_token": "legacy-alice-token"}
+            ),
             is_active=True,
         )
         bob = StoredIdentity(
@@ -89,7 +117,11 @@ def _seed_workflow(lab: RunningBOLALab) -> tuple[int, int, int, int]:
             name="Bob",
             role="customer",
             auth_type="bearer",
-            credentials={"access_token": "bob-token"},
+            credentials=(
+                None
+                if provision_credentials
+                else {"access_token": "legacy-bob-token"}
+            ),
             is_active=True,
         )
         endpoint = Endpoint(
@@ -104,6 +136,16 @@ def _seed_workflow(lab: RunningBOLALab) -> tuple[int, int, int, int]:
         )
         db.add_all([scope, alice, bob, endpoint])
         db.flush()
+        if provision_credentials:
+            credential_service = BearerCredentialService(db=db)
+            credential_service.provision(
+                identity=alice,
+                token=SecretStr("alice-token"),
+            )
+            credential_service.provision(
+                identity=bob,
+                token=SecretStr("bob-token"),
+            )
 
         alice_order = Resource(
             target_id=target.id,
@@ -163,6 +205,17 @@ def _delete_workflow(target_id: int, profile_id: int) -> None:
         db.execute(delete(StoredRun).where(StoredRun.test_case_id.in_(test_case_ids)))
         db.execute(delete(StoredCase).where(StoredCase.id.in_(test_case_ids)))
         db.execute(delete(Resource).where(Resource.target_id == target_id))
+        binding_ids = select(CredentialBinding.id).join(StoredIdentity).where(
+            StoredIdentity.target_id == target_id
+        )
+        db.execute(
+            delete(CredentialSecretVersion).where(
+                CredentialSecretVersion.credential_binding_id.in_(binding_ids)
+            )
+        )
+        db.execute(
+            delete(CredentialBinding).where(CredentialBinding.id.in_(binding_ids))
+        )
         db.execute(delete(Target).where(Target.id == target_id))
         db.execute(
             delete(AuthorizationProfile).where(
@@ -187,7 +240,13 @@ def test_local_bola_workflow_end_to_end(bola_lab: RunningBOLALab) -> None:
 
     try:
         with SessionLocal() as db:
+            class TransactionCheckingExecutor:
+                def execute(self, **kwargs):
+                    assert db.in_transaction() is False
+                    return executor.execute(**kwargs)
+
             execution = ExecutionService(db=db, executor=executor)
+            execution.executor = TransactionCheckingExecutor()
             owner_run = execution.execute(test_case_id=owner_case_id)
             cross_owner_run = execution.execute(test_case_id=cross_owner_case_id)
 
@@ -214,5 +273,35 @@ def test_local_bola_workflow_end_to_end(bola_lab: RunningBOLALab) -> None:
                 assert analysis.analysis.outcome == AnalysisOutcome.POTENTIAL_BOLA
                 assert analysis.finding is not None
                 assert analysis.finding.status == "potential"
+    finally:
+        _delete_workflow(target_id, profile_id)
+
+
+def test_legacy_plaintext_only_bearer_identity_fails_closed(
+    bola_lab: RunningBOLALab,
+) -> None:
+    (
+        target_id,
+        profile_id,
+        owner_case_id,
+        _,
+    ) = _seed_workflow(bola_lab, provision_credentials=False)
+
+    class NeverCalledExecutor:
+        def execute(self, **kwargs):
+            raise AssertionError("network execution must not occur")
+
+    try:
+        with SessionLocal() as db:
+            with pytest.raises(
+                TestExecutionError,
+                match="Bearer credential is unavailable",
+            ) as raised:
+                ExecutionService(
+                    db=db,
+                    executor=NeverCalledExecutor(),
+                ).execute(test_case_id=owner_case_id)
+
+            assert "legacy-alice-token" not in str(raised.value)
     finally:
         _delete_workflow(target_id, profile_id)

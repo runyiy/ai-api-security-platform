@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import delete, inspect, select
 from sqlalchemy.exc import IntegrityError
 
-from app.auth.context import build_authentication_context
+from app.auth.context import AuthenticationContextError, build_authentication_context
 from app.db.base import Base
 from app.db.models import CredentialBinding
 from app.db.models.target import Target
@@ -148,11 +148,8 @@ def test_credential_binding_metadata_update_preserves_identity_authentication() 
             assert loaded_identity.credentials == {
                 "access_token": "transitional-test-token"
             }
-            assert build_authentication_context(
-                loaded_identity
-            ).headers == {
-                "Authorization": "Bearer transitional-test-token"
-            }
+            with pytest.raises(AuthenticationContextError):
+                build_authentication_context(loaded_identity)
     finally:
         if target_id is not None:
             with SessionLocal() as db:

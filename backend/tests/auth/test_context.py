@@ -1,4 +1,5 @@
 import pytest
+from pydantic import SecretStr
 
 from app.auth.context import (
     AuthenticationContextError,
@@ -42,7 +43,10 @@ def test_builds_bearer_context() -> None:
 
     context = (
         build_authentication_context(
-            identity
+            identity,
+            bearer_token=SecretStr(
+                "resolved-dev-user-a-token"
+            ),
         )
     )
 
@@ -50,7 +54,7 @@ def test_builds_bearer_context() -> None:
         context.headers[
             "Authorization"
         ]
-        == "Bearer dev-user-a-token"
+        == "Bearer resolved-dev-user-a-token"
     )
 
 
@@ -83,14 +87,22 @@ def test_denies_inactive_identity() -> None:
 def test_bearer_requires_token() -> None:
     identity = build_bearer_identity()
 
-    identity.credentials = {}
-
     with pytest.raises(
         AuthenticationContextError
     ):
         build_authentication_context(
-            identity
+            identity,
+            bearer_token=None,
         )
+
+
+def test_bearer_never_uses_legacy_plaintext_credentials() -> None:
+    identity = build_bearer_identity()
+
+    with pytest.raises(AuthenticationContextError) as raised:
+        build_authentication_context(identity)
+
+    assert "dev-user-a-token" not in str(raised.value)
 
 
 def test_rejects_manual_authorization_header() -> None:
@@ -98,7 +110,10 @@ def test_rejects_manual_authorization_header() -> None:
 
     context = (
         build_authentication_context(
-            identity
+            identity,
+            bearer_token=SecretStr(
+                "resolved-dev-user-a-token"
+            ),
         )
     )
 
@@ -119,7 +134,10 @@ def test_applies_identity_authentication() -> None:
 
     context = (
         build_authentication_context(
-            identity
+            identity,
+            bearer_token=SecretStr(
+                "resolved-dev-user-a-token"
+            ),
         )
     )
 
@@ -140,7 +158,7 @@ def test_applies_identity_authentication() -> None:
 
     assert (
         headers["Authorization"]
-        == "Bearer dev-user-a-token"
+        == "Bearer resolved-dev-user-a-token"
     )
 
 
@@ -149,13 +167,16 @@ def test_context_repr_does_not_contain_token() -> None:
 
     context = (
         build_authentication_context(
-            identity
+            identity,
+            bearer_token=SecretStr(
+                "resolved-dev-user-a-token"
+            ),
         )
     )
 
     result = repr(context)
 
     assert (
-        "dev-user-a-token"
+        "resolved-dev-user-a-token"
         not in result
     )
