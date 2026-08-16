@@ -8,6 +8,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.credentials.bearer import (
+    BearerCredentialError,
+    BearerCredentialService,
+    BearerIdentityNotFoundError,
+    BearerIdentityTypeError,
+)
 from app.db.models.target import Target
 from app.db.models.test_identity import (
     TestIdentity,
@@ -63,33 +69,31 @@ def create_test_identity(
             ),
         )
 
-    credentials = None
-
-    if payload.auth_type == "bearer":
-        assert (
-            payload.access_token
-            is not None
-        )
-
-        credentials = {
-            "access_token": (
-                payload.access_token
-                .get_secret_value()
-            )
-        }
-
     identity = TestIdentity(
         target_id=payload.target_id,
         name=payload.name,
         role=payload.role,
         auth_type=payload.auth_type,
-        credentials=credentials,
+        credentials=None,
         is_active=True,
     )
 
     db.add(identity)
     try:
+        db.flush()
+        if payload.auth_type == "bearer":
+            assert payload.access_token is not None
+            BearerCredentialService(db=db).provision(
+                identity=identity,
+                token=payload.access_token,
+            )
         db.commit()
+    except BearerCredentialError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
     except IntegrityError as exc:
         db.rollback()
         constraint_name = getattr(
@@ -110,6 +114,9 @@ def create_test_identity(
                     "already exists for the target."
                 ),
             ) from exc
+        raise
+    except Exception:
+        db.rollback()
         raise
     db.refresh(identity)
 
@@ -160,34 +167,27 @@ def update_bearer_token(
     payload: BearerTokenUpdate,
     db: Session = Depends(get_db),
 ) -> TestIdentity:
-    identity = db.get(
-        TestIdentity,
-        identity_id,
-    )
-
-    if identity is None:
+    try:
+        identity = BearerCredentialService(db=db).update(
+            identity_id=identity_id,
+            token=payload.access_token,
+        )
+        db.commit()
+    except BearerIdentityNotFoundError as exc:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Test identity not found.",
-        )
-
-    if identity.auth_type != "bearer":
+            detail=str(exc),
+        ) from exc
+    except (BearerIdentityTypeError, BearerCredentialError) as exc:
+        db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Only bearer identities "
-                "can receive a bearer token."
-            ),
-        )
-
-    identity.credentials = {
-        "access_token": (
-            payload.access_token
-            .get_secret_value()
-        )
-    }
-
-    db.commit()
+            detail=str(exc),
+        ) from exc
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(identity)
 
     return identity

@@ -2,6 +2,7 @@ from dataclasses import (
     dataclass,
     field,
 )
+from pydantic import SecretStr
 
 from app.db.models.test_identity import (
     TestIdentity,
@@ -27,6 +28,8 @@ class AuthenticationContext:
 
 def build_authentication_context(
     identity: TestIdentity,
+    *,
+    bearer_token: SecretStr | None = None,
 ) -> AuthenticationContext:
     if not identity.is_active:
         raise AuthenticationContextError(
@@ -42,20 +45,13 @@ def build_authentication_context(
         )
 
     if identity.auth_type == "bearer":
-        credentials = (
-            identity.credentials
-            or {}
-        )
-
-        token = credentials.get(
-            "access_token"
-        )
-
-        if not isinstance(token, str):
+        if bearer_token is None:
             raise AuthenticationContextError(
                 "bearer identity has no "
                 "valid access token"
             )
+
+        token = bearer_token.get_secret_value()
 
         if not token.strip():
             raise AuthenticationContextError(
@@ -66,6 +62,11 @@ def build_authentication_context(
             raise AuthenticationContextError(
                 "bearer access token contains "
                 "invalid newline characters"
+            )
+
+        if token.lower().startswith("bearer "):
+            raise AuthenticationContextError(
+                "bearer access token must be raw"
             )
 
         return AuthenticationContext(

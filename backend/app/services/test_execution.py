@@ -9,6 +9,7 @@ from app.auth.context import (
     apply_authentication_context,
     build_authentication_context,
 )
+from app.credentials.bearer import BearerCredentialError, BearerCredentialService
 from app.db.models.authorization_profile import AuthorizationProfile
 from app.db.models.endpoint import Endpoint
 from app.db.models.resource import Resource
@@ -252,9 +253,14 @@ class TestExecutionService:
         )
 
         try:
+            bearer_token = None
+            if actor.auth_type == "bearer":
+                bearer_token = BearerCredentialService(db=self.db).resolve(actor)
+
             auth_context = (
                 build_authentication_context(
-                    actor
+                    actor,
+                    bearer_token=bearer_token,
                 )
             )
 
@@ -267,7 +273,7 @@ class TestExecutionService:
                 )
             )
 
-        except AuthenticationContextError as exc:
+        except (AuthenticationContextError, BearerCredentialError) as exc:
             test_case.status = "blocked"
             self.db.commit()
 
