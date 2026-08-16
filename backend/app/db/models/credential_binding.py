@@ -10,11 +10,17 @@ from app.db.base import Base
 
 
 if TYPE_CHECKING:
+    from app.db.models.credential_secret_version import CredentialSecretVersion
     from app.db.models.test_identity import TestIdentity
 
 
 class CredentialBinding(Base):
     __tablename__ = "credential_bindings"
+
+    secret_versions: Mapped[list[CredentialSecretVersion]] = relationship(
+        back_populates="credential_binding",
+        passive_deletes="all",
+    )
 
     id: Mapped[int] = mapped_column(
         primary_key=True,

@@ -1,3 +1,4 @@
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -5,6 +6,9 @@ class Settings(BaseSettings):
     database_url: str
 
     allowed_target_hosts: str = "localhost,127.0.0.1,::1"
+
+    credential_encryption_key: SecretStr | None = None
+    credential_encryption_key_version: str = "v1"
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -6,7 +6,8 @@ from sqlalchemy import inspect
 from app.db.session import engine
 
 
-HEAD_REVISION = "d6f4a3b2c1e0"
+LATEST_REVISION = "e7a5b4c3d2f1"
+BINDING_REVISION = "d6f4a3b2c1e0"
 PARENT_REVISION = "c4b8219e6d72"
 
 
@@ -19,24 +20,27 @@ def test_credential_binding_migration_round_trip() -> None:
     alembic_config = Config("alembic.ini")
 
     try:
-        assert current_revision() == HEAD_REVISION
-        tables_at_head = set(inspect(engine).get_table_names())
-        assert "credential_bindings" in tables_at_head
+        assert current_revision() == LATEST_REVISION
+        command.downgrade(alembic_config, BINDING_REVISION)
+
+        assert current_revision() == BINDING_REVISION
+        tables_at_binding_revision = set(inspect(engine).get_table_names())
+        assert "credential_bindings" in tables_at_binding_revision
 
         command.downgrade(alembic_config, PARENT_REVISION)
 
         assert current_revision() == PARENT_REVISION
         tables_after_downgrade = set(inspect(engine).get_table_names())
-        assert tables_at_head - tables_after_downgrade == {
+        assert tables_at_binding_revision - tables_after_downgrade == {
             "credential_bindings"
         }
-        assert tables_after_downgrade - tables_at_head == set()
+        assert tables_after_downgrade - tables_at_binding_revision == set()
 
-        command.upgrade(alembic_config, "head")
+        command.upgrade(alembic_config, BINDING_REVISION)
 
-        assert current_revision() == HEAD_REVISION
+        assert current_revision() == BINDING_REVISION
         inspector = inspect(engine)
-        assert set(inspector.get_table_names()) == tables_at_head
+        assert set(inspector.get_table_names()) == tables_at_binding_revision
         assert {
             column["name"]
             for column in inspector.get_columns("credential_bindings")
