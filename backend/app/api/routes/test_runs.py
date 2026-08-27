@@ -27,6 +27,11 @@ from app.services.test_execution import (
     TestExecutionNotFoundError,
     TestExecutionService,
 )
+from app.services.plan_execution import (
+    PlanExecutionError,
+    PlanExecutionNotFoundError,
+    PlanExecutionService,
+)
 
 
 router = APIRouter(
@@ -46,6 +51,35 @@ executor = PolicyEnforcedHTTPExecutor(
     rate_limiter=platform_rate_limiter,
     network_gateway=network_gateway,
 )
+
+
+@router.post(
+    "/execution-plans/{execution_plan_id}/execute",
+    response_model=TestRunRead,
+)
+def execute_execution_plan(
+    execution_plan_id: int,
+    db: Session = Depends(get_db),
+) -> TestRun:
+    try:
+        return PlanExecutionService(db=db, executor=executor).execute(
+            execution_plan_id=execution_plan_id
+        )
+    except ExecutionBlockedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": exc.code, "reason": exc.reason},
+        ) from exc
+    except PlanExecutionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except PlanExecutionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
 
 
 @router.post(

@@ -36,7 +36,7 @@ def build_authentication_context(
             "test identity is inactive"
         )
 
-    if identity.auth_type == "anonymous":
+    if identity.auth_type in {"none", "anonymous"}:
         return AuthenticationContext(
             identity_id=identity.id,
             identity_name=identity.name,
