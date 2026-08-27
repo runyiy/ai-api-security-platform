@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.orm import Session
-from sqlalchemy.orm.attributes import set_committed_value
 
 from app.auth.context import (
     AuthenticationContextError,
@@ -226,23 +225,9 @@ class PlanExecutionService:
                 reason="ExecutionPlan claim coordination failed.",
             )
 
-        observed_status = test_case.status
-        if observed_status == "running":
-            self.db.commit()
-            self.claim_service.release(claim_handle)
-            raise PlanExecutionError("TestCase is already running.")
-        acquired = self.db.scalar(
-            update(TestCase)
-            .where(TestCase.id == test_case.id, TestCase.status == observed_status)
-            .values(status="running")
-            .returning(TestCase.id)
-            .execution_options(synchronize_session=False)
-        )
-        if acquired is None:
-            self.db.commit()
-            self.claim_service.release(claim_handle)
-            raise PlanExecutionError("TestCase execution state changed.")
-        set_committed_value(test_case, "status", "running")
+        # ExecutionPlanClaim is the ownership boundary. TestCase status is only
+        # compatibility/UI state and may be stale after a worker disappears.
+        test_case.status = "running"
 
         request_data = {
             "method": action.method,
@@ -371,6 +356,42 @@ class PlanExecutionService:
             except ExecutionClaimLostError:
                 # A stale owner must not alter the successor's durable claim.
                 pass
+            except ExecutionClaimCoordinationError:
+                # The execution outcome is already durable. Cleanup is
+                # best-effort and the finite lease safely expires on failure.
+                self._audit_claim_cleanup_failure(
+                    target_id=target_id,
+                    revision_id=revision_id,
+                    test_case_id=test_case.id,
+                    plan_id=plan_id,
+                    action_id=action_id,
+                )
+
+    def _audit_claim_cleanup_failure(
+        self,
+        *,
+        target_id: int,
+        revision_id: int,
+        test_case_id: int,
+        plan_id: int,
+        action_id: int,
+    ) -> None:
+        try:
+            with Session(bind=self.db.get_bind(), expire_on_commit=False) as audit_db:
+                SafetyAuditService(audit_db).append_execution_outcome(
+                    outcome="failed",
+                    target_id=target_id,
+                    authorization_revision_id=revision_id,
+                    test_case_id=test_case_id,
+                    execution_plan_id=plan_id,
+                    plan_action_id=action_id,
+                    code="execution_plan_claim_cleanup_failed",
+                    reason="ExecutionPlan claim cleanup could not be completed.",
+                )
+                audit_db.commit()
+        except Exception:
+            # Cleanup diagnostics must never replace the original result/error.
+            pass
 
     def _raise_preflight_blocked(
         self,
