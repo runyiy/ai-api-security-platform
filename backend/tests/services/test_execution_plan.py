@@ -185,6 +185,11 @@ def test_plan_action_bounds_reject_outside_limits(db: Session, count: int) -> No
         PlanActionInput("GET", "https://example.test/api/../admin"),
         PlanActionInput("GET", "https://example.test/api/%2fadmin"),
         PlanActionInput("GET", "https://example.test/api/items?access_token=secret"),
+        PlanActionInput("GET", "https://example.test/api/items?refresh_token=secret"),
+        PlanActionInput("GET", "https://example.test/api/items?client_secret=secret"),
+        PlanActionInput("GET", "https://example.test/api/items?api_key=secret"),
+        PlanActionInput("GET", "https://example.test/api/items?session_token=secret"),
+        PlanActionInput("GET", "https://example.test/api/items?password=secret"),
         PlanActionInput("GET", "https://example.test/api/items#secret"),
     ],
 )
@@ -239,6 +244,9 @@ def test_actor_and_credential_must_belong_to_selected_graph(db: Session) -> None
 
     with pytest.raises(ExecutionPlanValidationError):
         create_plan(db, graph, actor_identity_id=other_actor.id)
+    actor = graph["actor"]
+    assert isinstance(actor, StoredTestIdentity)
+    actor.auth_type = "bearer"
     with pytest.raises(ExecutionPlanValidationError):
         create_plan(db, graph, credential_binding_id=other_binding.id)
     binding.is_active = False
@@ -257,6 +265,33 @@ def test_authenticated_actor_requires_exact_credential_binding(db: Session) -> N
         create_plan(db, graph)
     plan = create_plan(db, graph, credential_binding_id=binding.id)
     assert plan.credential_binding_id == binding.id
+
+
+@pytest.mark.parametrize("auth_type", ["none", "anonymous"])
+def test_anonymous_actor_rejects_credential_binding(
+    db: Session,
+    auth_type: str,
+) -> None:
+    graph = build_graph(db)
+    actor = graph["actor"]
+    binding = graph["binding"]
+    assert isinstance(actor, StoredTestIdentity)
+    assert isinstance(binding, CredentialBinding)
+    actor.auth_type = auth_type
+    with pytest.raises(ExecutionPlanValidationError):
+        create_plan(db, graph, credential_binding_id=binding.id)
+
+
+def test_authenticated_actor_rejects_wrong_auth_type_binding(db: Session) -> None:
+    graph = build_graph(db)
+    actor = graph["actor"]
+    binding = graph["binding"]
+    assert isinstance(actor, StoredTestIdentity)
+    assert isinstance(binding, CredentialBinding)
+    actor.auth_type = "bearer"
+    binding.auth_type = "api_key"
+    with pytest.raises(ExecutionPlanValidationError):
+        create_plan(db, graph, credential_binding_id=binding.id)
 
 
 def test_provenance_must_belong_to_target_and_url_remains_snapshot(db: Session) -> None:
@@ -415,10 +450,19 @@ def test_each_material_plan_change_changes_digest(change: dict[str, object]) -> 
     "context",
     [
         {"Authorization": "Bearer secret"},
+        {"authorization_header": "secret"},
         {"headers": {"Cookie": "session=secret"}},
+        {"headers": {"cookie_header": "session=secret"}},
+        {"headers": {"Set-Cookie": "session=secret"}},
         {"x-api-key": "secret"},
+        {"api_key_value": "secret"},
         {"bearer": "secret"},
         {"access_token": "secret"},
+        {"refresh_token": "secret"},
+        {"client_secret": "secret"},
+        {"session_token": "secret"},
+        {"password": "secret"},
+        {"passwd": "secret"},
         {"note": "Bearer secret"},
     ],
 )
@@ -429,6 +473,20 @@ def test_secret_bearing_policy_context_is_rejected(
     with pytest.raises(ExecutionPlanValidationError):
         create_plan(db, graph, policy_context=context)
     assert db.query(ExecutionPlan).count() == 0
+
+
+def test_safe_policy_provenance_identifiers_are_accepted(db: Session) -> None:
+    graph = build_graph(db)
+    plan = create_plan(
+        db,
+        graph,
+        policy_context={
+            "authorization_revision_id": 1,
+            "credential_binding_id": None,
+            "scope_ids": [1, 2],
+        },
+    )
+    assert plan.policy_context["authorization_revision_id"] == 1
 
 
 def test_policy_context_must_be_json_and_is_size_bounded(db: Session) -> None:

@@ -41,17 +41,55 @@ class PlanActionInput:
 
 
 _SECRET_KEY = re.compile(r"[^a-z0-9]+")
-_FORBIDDEN_CONTEXT_KEYS = frozenset(
+_SECRET_KEY_BASES = frozenset(
     {
         "authorization",
         "cookie",
+        "setcookie",
         "apikey",
         "xapikey",
         "bearer",
         "bearertoken",
         "accesstoken",
+        "refreshtoken",
+        "clientsecret",
+        "password",
+        "passwd",
+        "session",
+        "sessionid",
+        "sessiontoken",
     }
 )
+_SECRET_KEY_QUALIFIERS = (
+    "material",
+    "header",
+    "secret",
+    "token",
+    "value",
+)
+
+
+def _is_secret_bearing_key(key: str) -> bool:
+    normalized = _SECRET_KEY.sub("", key.lower())
+    for base in _SECRET_KEY_BASES:
+        if not normalized.startswith(base):
+            continue
+        remainder = normalized[len(base) :]
+        while remainder:
+            qualifier = next(
+                (
+                    item
+                    for item in _SECRET_KEY_QUALIFIERS
+                    if remainder.startswith(item)
+                ),
+                None,
+            )
+            if qualifier is None:
+                break
+            remainder = remainder[len(qualifier) :]
+        if not remainder:
+            return True
+    return False
 
 
 def _canonical_json(value: object) -> str:
@@ -76,8 +114,7 @@ def _reject_secret_context(value: object) -> None:
                 raise ExecutionPlanValidationError(
                     "policy_context object keys must be strings"
                 )
-            normalized = _SECRET_KEY.sub("", key.lower())
-            if normalized in _FORBIDDEN_CONTEXT_KEYS:
+            if _is_secret_bearing_key(key):
                 raise ExecutionPlanValidationError(
                     "policy_context contains secret-bearing material"
                 )
@@ -96,8 +133,7 @@ def _reject_secret_url(url: str) -> None:
     if parsed.fragment:
         raise ExecutionPlanValidationError("action URL fragments are not allowed")
     for key, value in parse_qsl(parsed.query, keep_blank_values=True):
-        normalized = _SECRET_KEY.sub("", key.lower())
-        if normalized in _FORBIDDEN_CONTEXT_KEYS or re.match(
+        if _is_secret_bearing_key(key) or re.match(
             r"^\s*bearer\s+\S", value, re.I
         ):
             raise ExecutionPlanValidationError(
@@ -194,7 +230,12 @@ def create_execution_plan(
     )
     if actor is None or actor.target_id != target.id:
         raise ExecutionPlanValidationError("actor does not belong to target")
-    if actor.auth_type not in {"none", "anonymous"} and credential_binding_id is None:
+    actor_is_anonymous = actor.auth_type in {"none", "anonymous"}
+    if actor_is_anonymous and credential_binding_id is not None:
+        raise ExecutionPlanValidationError(
+            "anonymous actor cannot select a credential binding"
+        )
+    if not actor_is_anonymous and credential_binding_id is None:
         raise ExecutionPlanValidationError(
             "authenticated actor requires an exact credential binding"
         )
@@ -209,6 +250,7 @@ def create_execution_plan(
             binding is None
             or binding.test_identity_id != actor.id
             or not binding.is_active
+            or binding.auth_type != actor.auth_type
         ):
             raise ExecutionPlanValidationError(
                 "credential binding is not active for actor"
