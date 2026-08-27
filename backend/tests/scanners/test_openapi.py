@@ -11,6 +11,7 @@ from app.executors.rate_limit import InMemoryRateLimiter
 from app.policies.scope_policy import PolicyDecision, ScopePolicyEngine
 from app.scanners.openapi import (
     MAX_OPENAPI_RESPONSE_BYTES,
+    OpenAPIExecutionBlocked,
     OpenAPIPolicyDenied,
     OpenAPIScanError,
     OpenAPIScanner,
@@ -278,6 +279,7 @@ def test_scanner_wraps_schema_parse_error(
             authorization_revision=build_revision(),
             scopes=[build_scope()],
             refresh_authorization=refresh_authorization,
+            policy_decision_observer=lambda decision: None,
         )
 
     assert isinstance(
@@ -298,14 +300,37 @@ def test_missing_refresh_fails_closed_without_fetch(
         return {"paths": {}}
 
     monkeypatch.setattr(scanner, "_fetch_schema", fetch_schema)
-    with pytest.raises(OpenAPIPolicyDenied) as exc_info:
+    with pytest.raises(OpenAPIExecutionBlocked) as exc_info:
         scanner.scan(
             target=build_target(),
             authorization_revision=build_revision(),
             scopes=[build_scope()],
         )
 
-    assert exc_info.value.decision.code == "authorization_refresh_missing"
+    assert exc_info.value.code == "authorization_refresh_missing"
+    assert network_called is False
+
+
+def test_missing_audit_observer_fails_closed_without_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scanner = build_scanner()
+    network_called = False
+
+    def fetch_schema(url: str):
+        nonlocal network_called
+        network_called = True
+        return {"paths": {}}
+
+    monkeypatch.setattr(scanner, "_fetch_schema", fetch_schema)
+    with pytest.raises(OpenAPIScanError, match="observer is unavailable"):
+        scanner.scan(
+            target=build_target(),
+            authorization_revision=build_revision(),
+            scopes=[build_scope()],
+            refresh_authorization=refresh_authorization,
+        )
+
     assert network_called is False
 
 
@@ -395,6 +420,10 @@ def denied_decision(code: str) -> PolicyDecision:
     )
 
 
+def observe_policy(decision: PolicyDecision) -> None:
+    pass
+
+
 def test_scan_orders_policy_rate_limit_policy_network(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -419,6 +448,7 @@ def test_scan_orders_policy_rate_limit_policy_network(
             events.append("refresh")
             or (build_target(), build_revision(), [build_scope()])
         ),
+        policy_decision_observer=lambda decision: events.append("audit"),
     )
 
     assert events == [
@@ -426,6 +456,7 @@ def test_scan_orders_policy_rate_limit_policy_network(
         "rate-limit",
         "refresh",
         "policy",
+        "audit",
         "network",
     ]
     assert policy_engine.evaluation_count == 2
@@ -451,10 +482,11 @@ def test_first_policy_denial_skips_limiter_and_network(
             target=build_target(),
             authorization_revision=build_revision(),
             scopes=[],
+            policy_decision_observer=lambda decision: events.append("audit"),
         )
 
     assert exc_info.value.decision.code == "no_matching_scope"
-    assert events == ["policy"]
+    assert events == ["policy", "audit"]
 
 
 def test_final_policy_denial_after_wait_skips_network(
@@ -480,10 +512,11 @@ def test_final_policy_denial_after_wait_skips_network(
             authorization_revision=build_revision(),
             scopes=[build_scope()],
             refresh_authorization=refresh_authorization,
+            policy_decision_observer=lambda decision: events.append("audit"),
         )
 
     assert exc_info.value.decision.code == "authorization_expired"
-    assert events == ["policy", "rate-limit", "policy"]
+    assert events == ["policy", "rate-limit", "policy", "audit"]
 
 
 @pytest.mark.parametrize(
@@ -506,7 +539,7 @@ def test_invalid_runtime_rate_fails_closed_before_network(
     revision = build_revision()
     revision.max_requests_per_second = invalid_rate
 
-    with pytest.raises(OpenAPIPolicyDenied) as exc_info:
+    with pytest.raises(OpenAPIExecutionBlocked) as exc_info:
         scanner.scan(
             target=build_target(),
             authorization_revision=revision,
@@ -515,7 +548,7 @@ def test_invalid_runtime_rate_fails_closed_before_network(
         )
 
     assert (
-        exc_info.value.decision.code
+        exc_info.value.code
         == "invalid_authorization_rate_limit"
     )
     assert network_called is False

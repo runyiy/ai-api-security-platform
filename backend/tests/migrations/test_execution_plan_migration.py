@@ -7,6 +7,7 @@ from app.db.session import engine
 
 
 HEAD = "d5f7a9c1e3b5"
+LATEST = "e6a8c0d2f4b7"
 PARENT = "c3e5a7b9d1f2"
 
 
@@ -18,11 +19,12 @@ def current_revision() -> str | None:
 def test_m5_01_migration_round_trip() -> None:
     config = Config("alembic.ini")
     try:
-        assert current_revision() == HEAD
+        assert current_revision() == LATEST
         inspector = inspect(engine)
         pre_m5_tables = set(inspector.get_table_names()) - {
             "execution_plans",
             "plan_actions",
+            "safety_decision_records",
         }
         assert {"execution_plans", "plan_actions"}.issubset(
             inspector.get_table_names()
@@ -55,6 +57,6 @@ def test_m5_01_migration_round_trip() -> None:
         }
 
         command.upgrade(config, "head")
-        assert current_revision() == HEAD
+        assert current_revision() == LATEST
     finally:
         command.upgrade(config, "head")

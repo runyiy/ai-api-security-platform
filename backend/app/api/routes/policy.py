@@ -19,6 +19,7 @@ from app.schemas.policy import (
     PolicyCheckRequest,
     PolicyCheckResponse,
 )
+from app.services.safety_audit import SafetyAuditService
 
 
 router = APIRouter(
@@ -78,6 +79,12 @@ def check_policy(
         request_url=payload.url,
         method=payload.method,
     )
+    SafetyAuditService(db).append_policy_decision(
+        operation="policy_check",
+        target_id=target.id,
+        decision=decision,
+    )
+    db.commit()
 
     return PolicyCheckResponse(
         allowed=decision.allowed,

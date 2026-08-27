@@ -104,12 +104,14 @@ def test_cross_path_reservations_share_target_schedule(
         url="https://example.test/projects/1",
         headers={},
         refresh_authorization=lambda: (target, revision, [scope]),
+        policy_decision_observer=lambda decision: None,
     )
     scanner.scan(
         target=target,
         authorization_revision=revision,
         scopes=[scope],
         refresh_authorization=lambda: (target, revision, [scope]),
+        policy_decision_observer=lambda decision: None,
     )
 
     assert fake_time.delays == [0.5]
@@ -124,6 +126,7 @@ def test_cross_path_reservations_share_target_schedule(
             other_revision,
             [other_scope],
         ),
+        policy_decision_observer=lambda decision: None,
     )
 
     assert fake_time.delays == [0.5]

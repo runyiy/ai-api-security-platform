@@ -33,6 +33,17 @@ class OpenAPIScanError(RuntimeError):
     pass
 
 
+class OpenAPIAuditError(OpenAPIScanError):
+    pass
+
+
+class OpenAPIExecutionBlocked(OpenAPIScanError):
+    def __init__(self, *, code: str, reason: str) -> None:
+        self.code = code
+        self.reason = reason
+        super().__init__(f"{code}: {reason}")
+
+
 class OpenAPIPolicyDenied(
     OpenAPIScanError
 ):
@@ -244,6 +255,7 @@ class OpenAPIScanner:
         refresh_authorization: Callable[
             [], tuple[Target, AuthorizationRevision | None, list[Scope]]
         ] | None = None,
+        policy_decision_observer: Callable[[PolicyDecision], None] | None = None,
     ) -> tuple[
         str,
         list[ParsedEndpoint],
@@ -264,26 +276,17 @@ class OpenAPIScanner:
         )
 
         if not decision.allowed:
+            self._observe_policy_decision(decision, policy_decision_observer)
             raise OpenAPIPolicyDenied(
                 decision
             )
         if refresh_authorization is None:
-            raise OpenAPIPolicyDenied(
-                PolicyDecision(
-                    allowed=False,
-                    code="authorization_refresh_missing",
-                    reason=(
-                        "Persisted authorization refresh is required before "
-                        "OpenAPI fetch."
-                    ),
-                    authorization_profile_id=(
-                        decision.authorization_profile_id
-                    ),
-                    authorization_revision_id=(
-                        decision.authorization_revision_id
-                    ),
-                    evaluated_at=decision.evaluated_at,
-                )
+            raise OpenAPIExecutionBlocked(
+                code="authorization_refresh_missing",
+                reason=(
+                    "Persisted authorization refresh is required before "
+                    "OpenAPI fetch."
+                ),
             )
         selected_revision_id = decision.authorization_revision_id
 
@@ -295,22 +298,12 @@ class OpenAPIScanner:
                 ),
             )
         except RateLimitConfigurationError as exc:
-            raise OpenAPIPolicyDenied(
-                PolicyDecision(
-                    allowed=False,
-                    code="invalid_authorization_rate_limit",
-                    reason=(
-                        "AuthorizationRevision request rate limit "
-                        "must be finite and greater than zero."
-                    ),
-                    authorization_profile_id=(
-                        decision.authorization_profile_id
-                    ),
-                    authorization_revision_id=(
-                        decision.authorization_revision_id
-                    ),
-                    evaluated_at=decision.evaluated_at,
-                )
+            raise OpenAPIExecutionBlocked(
+                code="invalid_authorization_rate_limit",
+                reason=(
+                    "AuthorizationRevision request rate limit "
+                    "must be finite and greater than zero."
+                ),
             ) from exc
 
         target, authorization_revision, scopes = refresh_authorization()
@@ -320,25 +313,9 @@ class OpenAPIScanner:
             or authorization_revision is None
             or authorization_revision.id != selected_revision_id
         ):
-            raise OpenAPIPolicyDenied(
-                PolicyDecision(
-                    allowed=False,
-                    code="authorization_revision_changed",
-                    reason=(
-                        "Target authorization revision changed before fetch."
-                    ),
-                    authorization_profile_id=(
-                        authorization_revision.authorization_profile_id
-                        if authorization_revision is not None
-                        else None
-                    ),
-                    authorization_revision_id=(
-                        authorization_revision.id
-                        if authorization_revision is not None
-                        else None
-                    ),
-                    evaluated_at=decision.evaluated_at,
-                )
+            raise OpenAPIExecutionBlocked(
+                code="authorization_revision_changed",
+                reason="Target authorization revision changed before fetch.",
             )
 
         decision = (
@@ -350,6 +327,8 @@ class OpenAPIScanner:
                 method="GET",
             )
         )
+
+        self._observe_policy_decision(decision, policy_decision_observer)
 
         if not decision.allowed:
             raise OpenAPIPolicyDenied(
@@ -375,6 +354,22 @@ class OpenAPIScanner:
             openapi_url,
             endpoints,
         )
+
+    @staticmethod
+    def _observe_policy_decision(
+        decision: PolicyDecision,
+        observer: Callable[[PolicyDecision], None] | None,
+    ) -> None:
+        if observer is None:
+            raise OpenAPIAuditError(
+                "Required safety audit observer is unavailable."
+            )
+        try:
+            observer(decision)
+        except Exception as exc:
+            raise OpenAPIAuditError(
+                "Required safety audit record could not be persisted."
+            ) from exc
 
     def _fetch_schema(
         self,

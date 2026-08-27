@@ -19,6 +19,7 @@ from app.db.models.endpoint import Endpoint
 from app.db.models.finding import Finding
 from app.db.models.resource import Resource
 from app.db.models.scope import Scope
+from app.db.models.safety_decision_record import SafetyDecisionRecord
 from app.db.models.target import Target
 from app.db.models.test_case import TestCase as StoredCase
 from app.db.models.test_identity import TestIdentity as StoredIdentity
@@ -214,6 +215,11 @@ def _seed_workflow(
 
 def _delete_workflow(target_id: int, profile_id: int) -> None:
     with SessionLocal() as db:
+        db.execute(
+            delete(SafetyDecisionRecord).where(
+                SafetyDecisionRecord.target_id == target_id
+            )
+        )
         test_case_ids = select(StoredCase.id).join(Endpoint).where(
             Endpoint.target_id == target_id
         )

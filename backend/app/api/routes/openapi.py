@@ -17,11 +17,13 @@ from app.db.session import get_db
 from app.services.execution_authorization import (
     build_execution_authorization_refresh,
 )
+from app.services.safety_audit import build_policy_decision_observer
 from app.executors.runtime import platform_rate_limiter
 from app.policies.scope_policy import (
     ScopePolicyEngine,
 )
 from app.scanners.openapi import (
+    OpenAPIExecutionBlocked,
     OpenAPIPolicyDenied,
     OpenAPIScanError,
     OpenAPIScanner,
@@ -120,6 +122,11 @@ def import_openapi(
         db.get_bind(),
         target.id,
     )
+    policy_decision_observer = build_policy_decision_observer(
+        db.get_bind(),
+        operation="openapi_import",
+        target_id=target.id,
+    )
 
     try:
         (
@@ -130,6 +137,7 @@ def import_openapi(
             authorization_revision=authorization_revision,
             scopes=scopes,
             refresh_authorization=refresh_authorization,
+            policy_decision_observer=policy_decision_observer,
         )
 
     except OpenAPIPolicyDenied as exc:
@@ -143,6 +151,12 @@ def import_openapi(
                     exc.decision.reason
                 ),
             },
+        ) from exc
+
+    except OpenAPIExecutionBlocked as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": exc.code, "reason": exc.reason},
         ) from exc
 
     except OpenAPIScanError as exc:
