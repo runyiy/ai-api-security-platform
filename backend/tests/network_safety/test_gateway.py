@@ -20,15 +20,18 @@ class Resolver:
 
 
 class Stream(httpcore.NetworkStream):
-    def __init__(self, peer: str | None, response: bytes | None = None):
+    def __init__(self, peer: str | None, response: bytes | None = None, read_error=None):
         self.peer = peer
         self.response = bytearray(response or b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK")
         self.writes: list[bytes] = []
         self.closed = False
         self.server_hostname = None
         self.ssl_context = None
+        self.read_error = read_error
 
     def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
+        if self.read_error is not None:
+            raise self.read_error
         chunk = bytes(self.response[:max_bytes])
         del self.response[:max_bytes]
         return chunk
@@ -51,12 +54,15 @@ class Stream(httpcore.NetworkStream):
 
 
 class Connector:
-    def __init__(self, stream: Stream):
+    def __init__(self, stream: Stream, error=None):
         self.stream = stream
         self.calls = []
+        self.error = error
 
     def connect(self, **kwargs):
         self.calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
         return self.stream
 
 
@@ -131,6 +137,114 @@ def test_https_preserves_logical_sni_and_verifying_context() -> None:
     assert stream.server_hostname == "lab.test"
     assert stream.ssl_context.verify_mode == ssl.CERT_REQUIRED
     assert stream.ssl_context.check_hostname is True
+
+
+def test_default_and_custom_verifying_contexts_are_accepted() -> None:
+    for context in (ssl.create_default_context(), ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)):
+        connector = Connector(Stream("127.0.0.1"))
+        gateway = NetworkGateway(
+            resolver=Resolver(("127.0.0.1",)),
+            connector=connector,
+            ssl_context=context,
+        )
+        result = gateway.request(
+            network_mode="private_local",
+            method="GET",
+            url="https://lab.test/x",
+            headers={},
+        )
+        assert result.status_code == 200
+        assert len(connector.calls) == 1
+
+
+@pytest.mark.parametrize("insecurity", ["cert_none", "hostname_disabled"])
+def test_insecure_ssl_context_is_rejected_before_connect(insecurity) -> None:
+    context = ssl.create_default_context()
+    if insecurity == "cert_none":
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+    else:
+        context.check_hostname = False
+    connector = Connector(Stream("127.0.0.1"))
+    gateway = NetworkGateway(
+        resolver=Resolver(("127.0.0.1",)),
+        connector=connector,
+        ssl_context=context,
+    )
+    with pytest.raises(NetworkGatewayError) as exc_info:
+        gateway.request(
+            network_mode="private_local", method="GET",
+            url="https://lab.test/x", headers={},
+        )
+    assert exc_info.value.code == "tls_verification_required"
+    assert exc_info.value.reason == "TLS certificate and hostname verification are required."
+    assert connector.calls == []
+
+
+def test_ssl_context_mutation_after_construction_fails_closed() -> None:
+    context = ssl.create_default_context()
+    connector = Connector(Stream("127.0.0.1"))
+    gateway = NetworkGateway(
+        resolver=Resolver(("127.0.0.1",)), connector=connector, ssl_context=context
+    )
+    context.check_hostname = False
+    with pytest.raises(NetworkGatewayError) as exc_info:
+        gateway.request(network_mode="private_local", method="GET",
+                        url="https://lab.test/x", headers={})
+    assert exc_info.value.code == "tls_verification_required"
+    assert connector.calls == []
+
+
+def test_unencodable_authorization_header_is_sanitized_before_connect() -> None:
+    secret = "Bearer token-secret-\U0001f512"
+    connector = Connector(Stream("127.0.0.1"))
+    gateway = NetworkGateway(resolver=Resolver(("127.0.0.1",)), connector=connector)
+    with pytest.raises(NetworkGatewayError) as exc_info:
+        gateway.request(network_mode="private_local", method="GET",
+                        url="http://lab.test/x", headers={"Authorization": secret})
+    assert exc_info.value.code == "network_request_failed"
+    assert exc_info.value.reason == "Request headers are invalid."
+    assert "Bearer" not in str(exc_info.value)
+    assert "token-secret" not in str(exc_info.value)
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
+    assert connector.calls == []
+
+
+def test_external_public_mode_rejects_private_actual_peer() -> None:
+    stream = Stream("10.0.0.1")
+    connector = Connector(stream)
+    gateway = NetworkGateway(resolver=Resolver(("8.8.8.8",)), connector=connector)
+    with pytest.raises(NetworkGatewayError) as exc_info:
+        gateway.request(network_mode="external_public_authorized", method="GET",
+                        url="http://public.test/x", headers={})
+    assert exc_info.value.code == "destination_peer_prohibited"
+    assert stream.closed is True
+
+
+@pytest.mark.parametrize("stage", ["connect", "read"])
+def test_timeout_errors_are_stable_and_sanitized(stage) -> None:
+    sensitive = "socket timeout https://lab.test/x?token=secret Authorization: Bearer raw"
+    stream = Stream(
+        "127.0.0.1",
+        read_error=httpcore.ReadTimeout(sensitive) if stage == "read" else None,
+    )
+    connector = Connector(
+        stream,
+        error=TimeoutError(sensitive) if stage == "connect" else None,
+    )
+    gateway = NetworkGateway(resolver=Resolver(("127.0.0.1",)), connector=connector)
+    with pytest.raises(NetworkGatewayError) as exc_info:
+        gateway.request(network_mode="private_local", method="GET",
+                        url="http://lab.test/x?token=secret",
+                        headers={"Authorization": "Bearer raw"})
+    assert exc_info.value.code in {"destination_connect_failed", "network_request_failed"}
+    assert exc_info.value.reason in {
+        "Connection to the approved destination failed.",
+        "Network request timed out.",
+    }
+    assert "secret" not in str(exc_info.value)
+    assert "Bearer" not in str(exc_info.value)
 
 
 def test_redirect_is_returned_without_second_connection() -> None:

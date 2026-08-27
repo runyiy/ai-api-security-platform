@@ -26,6 +26,9 @@ from app.network_safety.destination import (
 
 DEFAULT_TIMEOUT_SECONDS = 5.0
 DEFAULT_MAX_RESPONSE_BYTES = 1_000_000
+_HEADER_NAME_CHARACTERS = frozenset(
+    "!#$%&'*+-.^_`|~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+)
 
 
 class NetworkGatewayError(RuntimeError):
@@ -196,6 +199,9 @@ class NetworkGateway:
             )
             raise NetworkGatewayError(code=code, reason=_gateway_reason(code))
 
+        if decision.destination.scheme == "https":
+            _validate_ssl_context(self.ssl_context)
+
         selected_ip = ipaddress.ip_address(decision.resolved_addresses[0])
         backend = _BoundNetworkBackend(
             connector=self.connector,
@@ -265,13 +271,21 @@ def _build_headers(
 ) -> list[tuple[bytes, bytes]]:
     result: list[tuple[bytes, bytes]] = []
     for name, value in headers.items():
-        if name.strip().lower() == "host":
-            continue
-        if "\r" in name or "\n" in name or "\r" in value or "\n" in value:
-            raise NetworkGatewayError(
-                code="network_request_failed",
-                reason="Request headers are invalid.",
+        if not isinstance(name, str) or not isinstance(value, str):
+            _raise_invalid_headers()
+        if (
+            not name
+            or any(character not in _HEADER_NAME_CHARACTERS for character in name)
+            or any(
+                ord(character) > 255
+                or (ord(character) < 32 and character != "\t")
+                or ord(character) == 127
+                for character in value
             )
+        ):
+            _raise_invalid_headers()
+        if name.lower() == "host":
+            continue
         result.append((name.encode("ascii"), value.encode("latin-1")))
     default_port = 80 if destination.scheme == "http" else 443
     hostname = (
@@ -286,6 +300,24 @@ def _build_headers(
     )
     result.append((b"Host", host_value.encode("ascii")))
     return result
+
+
+def _raise_invalid_headers() -> None:
+    raise NetworkGatewayError(
+        code="network_request_failed",
+        reason="Request headers are invalid.",
+    )
+
+
+def _validate_ssl_context(ssl_context: ssl.SSLContext) -> None:
+    if (
+        ssl_context.verify_mode != ssl.CERT_REQUIRED
+        or ssl_context.check_hostname is not True
+    ):
+        raise NetworkGatewayError(
+            code="tls_verification_required",
+            reason="TLS certificate and hostname verification are required.",
+        )
 
 
 def _read_bounded(chunks: Iterable[bytes], maximum: int) -> bytes:
