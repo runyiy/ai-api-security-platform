@@ -7,6 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.db.models.authorization_profile import AuthorizationProfile
+from app.db.models.authorization_revision import AuthorizationRevision
 
 
 class Target(Base):
@@ -30,6 +31,20 @@ class Target(Base):
     )
 
     authorization_profile: Mapped[AuthorizationProfile | None] = relationship(
+        back_populates="targets",
+    )
+
+    authorization_revision_id: Mapped[int | None] = mapped_column(
+        ForeignKey(
+            "authorization_revisions.id",
+            name="fk_targets_authorization_revision_id_authorization_revisions",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
+        index=True,
+    )
+
+    authorization_revision: Mapped[AuthorizationRevision | None] = relationship(
         back_populates="targets",
     )
 

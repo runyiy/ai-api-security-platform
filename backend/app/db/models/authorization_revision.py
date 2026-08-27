@@ -9,11 +9,13 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     String,
     Text,
     UniqueConstraint,
     false,
     func,
+    text,
     true,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -23,6 +25,7 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.db.models.authorization_profile import AuthorizationProfile
+    from app.db.models.target import Target
 
 
 class AuthorizationRevision(Base):
@@ -60,6 +63,12 @@ class AuthorizationRevision(Base):
             ),
             name="ck_authorization_revisions_lifecycle_state",
         ),
+        Index(
+            "uq_authorization_revisions_one_active_per_profile",
+            "authorization_profile_id",
+            unique=True,
+            postgresql_where=text("lifecycle_state = 'active'"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -76,6 +85,11 @@ class AuthorizationRevision(Base):
 
     authorization_profile: Mapped[AuthorizationProfile] = relationship(
         back_populates="revisions",
+    )
+
+    targets: Mapped[list[Target]] = relationship(
+        back_populates="authorization_revision",
+        passive_deletes="all",
     )
 
     revision_number: Mapped[int] = mapped_column(nullable=False)
