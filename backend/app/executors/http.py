@@ -79,7 +79,6 @@ class PolicyEnforcedHTTPExecutor:
             [], tuple[Target, AuthorizationRevision | None, list[Scope]]
         ] | None = None,
         policy_decision_observer: Callable[[PolicyDecision], None] | None = None,
-        human_approval_satisfied: bool = False,
     ) -> HTTPExecutionResult:
         normalized_method = (
             method.strip().upper()
@@ -103,7 +102,6 @@ class PolicyEnforcedHTTPExecutor:
             scopes=scopes,
             request_url=url,
             method=normalized_method,
-            human_approval_satisfied=human_approval_satisfied,
         )
 
         if not decision.allowed:
@@ -155,7 +153,6 @@ class PolicyEnforcedHTTPExecutor:
             scopes=scopes,
             request_url=url,
             method=normalized_method,
-            human_approval_satisfied=human_approval_satisfied,
         )
 
         self._observe_policy_decision(decision, policy_decision_observer)

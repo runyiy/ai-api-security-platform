@@ -259,7 +259,6 @@ class PlanExecutionService:
                 headers=request_headers,
                 refresh_authorization=refresh_authorization,
                 policy_decision_observer=observer,
-                human_approval_satisfied=approval_satisfied,
             )
         except ExecutionBlockedError as exc:
             test_case.status = "blocked"

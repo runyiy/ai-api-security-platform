@@ -77,7 +77,6 @@ def test_exact_single_action_plan_executes_without_required_approval(
     assert call["authorization_revision"].id == plan.authorization_revision_id
     assert call["url"] == plan.actions[0].url
     assert call["method"] == plan.actions[0].method
-    assert call["human_approval_satisfied"] is False
     outcome = (
         db.query(SafetyDecisionRecord)
         .filter(SafetyDecisionRecord.stage == "execution")
@@ -111,7 +110,6 @@ def test_required_exact_approval_executes_and_missing_or_revoked_blocks(
 
     record_plan_decision(db, execution_plan_id=plan.id, decision="approved")
     assert service.execute(execution_plan_id=plan.id).response_status == 200
-    assert executor.execute.call_args.kwargs["human_approval_satisfied"] is True
 
     executor.reset_mock()
     record_plan_decision(db, execution_plan_id=plan.id, decision="revoked")

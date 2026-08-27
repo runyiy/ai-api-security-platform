@@ -157,27 +157,6 @@ def test_durable_audit_precedes_gateway() -> None:
     assert events == ["refresh", "audit", "gateway"]
 
 
-def test_internal_exact_plan_approval_satisfies_only_human_approval_gate() -> None:
-    executor = build_executor(lambda request: httpx.Response(200, content=b"ok"))
-    target = build_target()
-    revision = build_revision()
-    revision.require_human_execution_approval = True
-
-    result = executor.execute(
-        target=target,
-        authorization_revision=revision,
-        scopes=[build_scope()],
-        method="GET",
-        url="http://localhost:8001/api/projects/2001",
-        headers={},
-        refresh_authorization=lambda: (target, revision, [build_scope()]),
-        policy_decision_observer=observe_policy,
-        human_approval_satisfied=True,
-    )
-
-    assert result.status_code == 200
-
-
 def test_gateway_receives_refreshed_exact_target_id() -> None:
     executor = build_executor(lambda request: httpx.Response(200))
     refreshed_target = build_target()

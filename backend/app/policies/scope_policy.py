@@ -220,7 +220,6 @@ class ScopePolicyEngine:
         scopes: list[Scope],
         request_url: str,
         method: str,
-        human_approval_satisfied: bool = False,
         evaluation_time: datetime | None = None,
     ) -> PolicyDecision:
         evaluated_at = evaluation_time or datetime.now(timezone.utc)
@@ -332,19 +331,6 @@ class ScopePolicyEngine:
                 code="automation_not_allowed",
                 reason=(
                     "AuthorizationRevision does not allow automation."
-                ),
-            )
-
-        if (
-            authorization_revision.require_human_execution_approval
-            and not human_approval_satisfied
-        ):
-            return decision(
-                allowed=False,
-                code="human_approval_required",
-                reason=(
-                    "AuthorizationRevision requires human execution "
-                    "approval, which is not available."
                 ),
             )
 
