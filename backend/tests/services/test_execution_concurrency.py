@@ -10,6 +10,7 @@ from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.endpoint import Endpoint
 from app.db.models.resource import Resource
 from app.db.models.scope import Scope
+from app.db.models.safety_decision_record import SafetyDecisionRecord
 from app.db.models.target import Target
 from app.db.models.test_case import TestCase as StoredCase
 from app.db.models.test_identity import TestIdentity as StoredIdentity
@@ -180,6 +181,11 @@ def executable_test_case_id() -> Iterator[int]:
     finally:
         with SessionLocal() as db:
             db.execute(
+                delete(SafetyDecisionRecord).where(
+                    SafetyDecisionRecord.test_case_id == test_case_id
+                )
+            )
+            db.execute(
                 delete(StoredRun).where(
                     StoredRun.test_case_id
                     == test_case_id
@@ -324,6 +330,16 @@ def test_http_error_run_records_exact_revision_provenance(
             .join(StoredCase, StoredCase.endpoint_id == Endpoint.id)
             .where(StoredCase.id == executable_test_case_id)
         )
+        audit = db.scalar(
+            select(SafetyDecisionRecord).where(
+                SafetyDecisionRecord.test_run_id == run.id
+            )
+        )
 
     assert run.error_message == "synthetic HTTP failure"
     assert run.authorization_revision_id == target_revision_id
+    assert audit is not None
+    assert audit.outcome == "failed"
+    assert audit.code == "http_execution_failed"
+    assert audit.reason == "HTTP execution failed."
+    assert "synthetic" not in audit.reason

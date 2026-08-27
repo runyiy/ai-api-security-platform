@@ -10,7 +10,11 @@ from app.db.models import AuthorizationProfile, AuthorizationRevision, Scope, Ta
 from app.db.session import SessionLocal, engine
 from app.executors.http import ExecutionBlockedError, PolicyEnforcedHTTPExecutor
 from app.policies.scope_policy import ScopePolicyEngine
-from app.scanners.openapi import OpenAPIPolicyDenied, OpenAPIScanner
+from app.scanners.openapi import (
+    OpenAPIExecutionBlocked,
+    OpenAPIPolicyDenied,
+    OpenAPIScanner,
+)
 from app.services.authorization_revision import transition_revision
 from app.services.execution_authorization import (
     build_execution_authorization_refresh,
@@ -114,6 +118,7 @@ def test_rate_wait_revalidation_blocks_persisted_revision_change(
             url="https://example.test/resource",
             headers={},
             refresh_authorization=refresh,
+            policy_decision_observer=lambda decision: None,
         )
         expected_error = ExecutionBlockedError
     else:
@@ -124,8 +129,11 @@ def test_rate_wait_revalidation_blocks_persisted_revision_change(
             authorization_revision=revision,
             scopes=scopes,
             refresh_authorization=refresh,
+            policy_decision_observer=lambda decision: None,
         )
-        expected_error = OpenAPIPolicyDenied
+        expected_error = (
+            OpenAPIExecutionBlocked if change == "rebind" else OpenAPIPolicyDenied
+        )
 
     try:
         with ThreadPoolExecutor(max_workers=1) as pool:

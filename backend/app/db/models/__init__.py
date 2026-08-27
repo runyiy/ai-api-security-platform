@@ -8,6 +8,7 @@ from app.db.models.finding import Finding
 from app.db.models.finding_ai_analysis import FindingAIAnalysis
 from app.db.models.resource import Resource
 from app.db.models.plan_action import PlanAction
+from app.db.models.safety_decision_record import SafetyDecisionRecord
 from app.db.models.scope import Scope
 from app.db.models.security_report import SecurityReport
 from app.db.models.target import Target
@@ -23,6 +24,7 @@ __all__ = [
     "CredentialSecretVersion",
     "ExecutionPlan",
     "PlanAction",
+    "SafetyDecisionRecord",
     "Target",
     "Scope",
     "Endpoint",

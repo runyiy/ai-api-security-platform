@@ -167,6 +167,7 @@ def test_concurrent_import_is_endpoint_conflict_safe(
             authorization_revision,
             scopes,
             refresh_authorization,
+            policy_decision_observer,
         ):
             with sessions_lock:
                 session = sessions[threading.get_ident()]
@@ -251,6 +252,7 @@ def test_sequential_import_preserves_create_unchanged_update_counts(
             authorization_revision,
             scopes,
             refresh_authorization,
+            policy_decision_observer,
         ):
             assert authorization_revision.id == target.authorization_revision_id
             return (

@@ -58,6 +58,11 @@ def test_import_returns_502_for_malformed_schema(
             lambda: (build_target(), build_revision(), [build_scope()])
         ),
     )
+    monkeypatch.setattr(
+        openapi_routes,
+        "build_policy_decision_observer",
+        lambda *args, **kwargs: (lambda decision: None),
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         openapi_routes.import_openapi(
@@ -126,6 +131,7 @@ def test_import_ends_read_transaction_before_scan(
             authorization_revision,
             scopes,
             refresh_authorization,
+            policy_decision_observer,
         ):
             events.append("scanner-call")
             assert db.in_transaction() is False

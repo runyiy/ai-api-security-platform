@@ -31,6 +31,10 @@ from app.generators.bola import (
 from app.services.execution_authorization import (
     build_execution_authorization_refresh,
 )
+from app.services.safety_audit import (
+    SafetyAuditService,
+    build_policy_decision_observer,
+)
 
 
 class TestExecutionError(RuntimeError):
@@ -326,6 +330,12 @@ class TestExecutionService:
             self.db.get_bind(),
             target.id,
         )
+        policy_decision_observer = build_policy_decision_observer(
+            self.db.get_bind(),
+            operation="test_execution",
+            target_id=target.id,
+            test_case_id=test_case.id,
+        )
 
         try:
             result = self.executor.execute(
@@ -336,10 +346,23 @@ class TestExecutionService:
                 url=request_url,
                 headers=request_headers,
                 refresh_authorization=refresh_authorization,
+                policy_decision_observer=policy_decision_observer,
             )
 
-        except ExecutionBlockedError:
+        except ExecutionBlockedError as exc:
             test_case.status = "blocked"
+            SafetyAuditService(self.db).append_execution_outcome(
+                outcome="blocked",
+                target_id=target.id,
+                authorization_revision_id=(
+                    authorization_revision.id
+                    if authorization_revision is not None
+                    else None
+                ),
+                test_case_id=test_case.id,
+                code=exc.code,
+                reason=exc.reason,
+            )
             self.db.commit()
             raise
 
@@ -355,6 +378,16 @@ class TestExecutionService:
             )
 
             self.db.add(test_run)
+            self.db.flush()
+            SafetyAuditService(self.db).append_execution_outcome(
+                outcome="failed",
+                target_id=target.id,
+                authorization_revision_id=authorization_revision.id,
+                test_case_id=test_case.id,
+                test_run=test_run,
+                code="http_execution_failed",
+                reason="HTTP execution failed.",
+            )
 
             test_case.status = "failed"
 
@@ -376,6 +409,16 @@ class TestExecutionService:
         )
 
         self.db.add(test_run)
+        self.db.flush()
+        SafetyAuditService(self.db).append_execution_outcome(
+            outcome="succeeded",
+            target_id=target.id,
+            authorization_revision_id=authorization_revision.id,
+            test_case_id=test_case.id,
+            test_run=test_run,
+            code="http_execution_succeeded",
+            reason="HTTP execution completed.",
+        )
 
         test_case.status = "completed"
 

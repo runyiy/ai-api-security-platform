@@ -15,6 +15,7 @@ from app.db.models import (
     ExecutionPlan,
     PlanAction,
     Resource,
+    SafetyDecisionRecord,
     Scope,
     Target,
     TestCase as StoredTestCase,
@@ -26,6 +27,7 @@ from app.services.test_case_planning import (
     create_test_case_execution_plan,
 )
 from app.services.test_execution import build_test_case_url
+from app.services.safety_audit import SafetyAuditService
 
 
 @pytest.fixture
@@ -197,6 +199,43 @@ def test_valid_test_case_derives_one_get_action_and_scope_snapshot(db: Session) 
     }
     assert test_case.status == "pending"
     assert revision.require_human_execution_approval is True
+    records = (
+        db.query(SafetyDecisionRecord)
+        .filter(SafetyDecisionRecord.target_id == target.id)
+        .all()
+    )
+    assert len(records) == 1
+    record = records[0]
+    assert (record.stage, record.operation, record.outcome) == (
+        "plan",
+        "testcase_plan",
+        "created",
+    )
+    assert record.target_id == target.id
+    assert record.authorization_revision_id == revision.id
+    assert record.execution_plan_id == execution_plan.id
+    assert record.plan_action_id == action.id
+    assert record.test_case_id == test_case.id
+
+
+def test_plan_audit_failure_rolls_back_plan_graph(
+    db: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graph = build_graph(db)
+    plan_count = db.query(ExecutionPlan).count()
+    action_count = db.query(PlanAction).count()
+
+    def fail_append(*args, **kwargs):
+        raise RuntimeError("synthetic audit failure")
+
+    monkeypatch.setattr(SafetyAuditService, "append_plan_created", fail_append)
+    with pytest.raises(RuntimeError, match="synthetic audit failure"):
+        with db.begin_nested():
+            plan(db, graph)
+
+    assert db.query(ExecutionPlan).count() == plan_count
+    assert db.query(PlanAction).count() == action_count
 
 
 def test_planner_uses_existing_url_builder_semantics(db: Session) -> None:

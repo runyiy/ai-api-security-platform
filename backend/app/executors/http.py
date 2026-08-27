@@ -79,6 +79,7 @@ class PolicyEnforcedHTTPExecutor:
         refresh_authorization: Callable[
             [], tuple[Target, AuthorizationRevision | None, list[Scope]]
         ] | None = None,
+        policy_decision_observer: Callable[[PolicyDecision], None] | None = None,
     ) -> HTTPExecutionResult:
         normalized_method = (
             method.strip().upper()
@@ -104,9 +105,9 @@ class PolicyEnforcedHTTPExecutor:
             method=normalized_method,
         )
 
-        self._raise_if_denied(
-            decision
-        )
+        if not decision.allowed:
+            self._observe_policy_decision(decision, policy_decision_observer)
+            self._raise_if_denied(decision)
         if refresh_authorization is None:
             raise ExecutionBlockedError(
                 code="authorization_refresh_missing",
@@ -155,15 +156,34 @@ class PolicyEnforcedHTTPExecutor:
             method=normalized_method,
         )
 
-        self._raise_if_denied(
-            decision
-        )
+        self._observe_policy_decision(decision, policy_decision_observer)
+        self._raise_if_denied(decision)
 
         return self._send(
             method=normalized_method,
             url=url,
             headers=headers,
         )
+
+    @staticmethod
+    def _observe_policy_decision(
+        decision: PolicyDecision,
+        observer: Callable[[PolicyDecision], None] | None,
+    ) -> None:
+        if observer is None:
+            raise ExecutionBlockedError(
+                code="safety_audit_observer_missing",
+                reason="Required safety audit observer is unavailable.",
+            )
+        try:
+            observer(decision)
+        except ExecutionBlockedError:
+            raise
+        except Exception as exc:
+            raise ExecutionBlockedError(
+                code="safety_audit_persistence_failed",
+                reason="Required safety audit record could not be persisted.",
+            ) from exc
 
     @staticmethod
     def _raise_if_denied(

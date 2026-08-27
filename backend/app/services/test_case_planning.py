@@ -22,6 +22,7 @@ from app.policies.scope_policy import (
     path_matches_scope,
 )
 from app.services.execution_plan import PlanActionInput, create_execution_plan
+from app.services.safety_audit import SafetyAuditService
 from app.services.test_execution import TestExecutionError, build_test_case_url
 
 
@@ -139,7 +140,7 @@ def create_test_case_execution_plan(
         target_id=target.id,
         request_url=request_url,
     )
-    return create_execution_plan(
+    plan = create_execution_plan(
         db,
         target_id=target.id,
         authorization_revision_id=revision.id,
@@ -155,3 +156,8 @@ def create_test_case_execution_plan(
         ],
         policy_context=policy_context,
     )
+    SafetyAuditService(db).append_plan_created(
+        plan=plan,
+        test_case_id=test_case.id,
+    )
+    return plan

@@ -2,17 +2,52 @@ from datetime import datetime, timedelta
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
-from sqlalchemy import delete
+import pytest
+from sqlalchemy import delete, select
 
 from app.db.models.authorization_profile import AuthorizationProfile
 from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.scope import Scope
+from app.db.models.safety_decision_record import SafetyDecisionRecord
 from app.db.models.target import Target
 from app.db.session import SessionLocal
 from app.main import app
+from app.services.safety_audit import SafetyAuditService
 
 
 client = TestClient(app)
+
+
+def test_policy_audit_failure_does_not_return_normal_response(
+    monkeypatch,
+) -> None:
+    with SessionLocal() as db:
+        target = Target(
+            name=f"policy-audit-failure-{uuid4()}",
+            base_url="http://localhost:8001",
+            environment="test",
+            is_enabled=True,
+        )
+        db.add(target)
+        db.commit()
+        target_id = target.id
+
+    def fail_append(*args, **kwargs):
+        raise RuntimeError("synthetic audit failure")
+
+    monkeypatch.setattr(SafetyAuditService, "append_policy_decision", fail_append)
+    try:
+        with pytest.raises(RuntimeError, match="synthetic audit failure"):
+            client.post(
+                "/api/policy/check",
+                json={
+                    "target_id": target_id,
+                    "url": "http://localhost:8001/projects/1",
+                    "method": "GET",
+                },
+            )
+    finally:
+        delete_policy_rows(target_id=target_id)
 
 
 def delete_policy_rows(
@@ -21,6 +56,11 @@ def delete_policy_rows(
     profile_id: int | None = None,
 ) -> None:
     with SessionLocal() as db:
+        db.execute(
+            delete(SafetyDecisionRecord).where(
+                SafetyDecisionRecord.target_id == target_id
+            )
+        )
         db.execute(delete(Target).where(Target.id == target_id))
         if profile_id is not None:
             db.execute(
@@ -72,6 +112,18 @@ def test_policy_check_denies_unbound_target() -> None:
         )
         assert evaluated_at.tzinfo is not None
         assert evaluated_at.utcoffset() == timedelta(0)
+        with SessionLocal() as db:
+            record = db.scalar(
+                select(SafetyDecisionRecord).where(
+                    SafetyDecisionRecord.target_id == target_id
+                )
+            )
+            assert record is not None
+            assert record.outcome == "blocked"
+            assert record.authorization_revision_id is None
+            assert record.code == response.json()["code"]
+            assert record.reason == response.json()["reason"]
+            assert record.policy_evaluated_at == evaluated_at
     finally:
         delete_policy_rows(target_id=target_id)
 
@@ -168,5 +220,22 @@ def test_policy_check_uses_exact_revision_not_mutable_profile() -> None:
             "authorization_revision_id",
             "evaluated_at",
         }
+        with SessionLocal() as db:
+            records = list(
+                db.scalars(
+                    select(SafetyDecisionRecord)
+                    .where(SafetyDecisionRecord.target_id == target_id)
+                    .order_by(SafetyDecisionRecord.id)
+                ).all()
+            )
+            assert len(records) == 2
+            assert all(record.outcome == "allowed" for record in records)
+            assert records[-1].authorization_revision_id == revision_id
+            assert records[-1].matched_scope_id == allowed_response.json()[
+                "matched_scope_id"
+            ]
+            assert records[-1].code == allowed_response.json()["code"]
+            assert records[-1].reason == allowed_response.json()["reason"]
+            assert records[-1].policy_evaluated_at == allowed_evaluated_at
     finally:
         delete_policy_rows(target_id=target_id, profile_id=profile_id)
