@@ -20,6 +20,7 @@ from app.services.execution_plan_approval import (
     is_plan_approved,
     recompute_persisted_plan_digest,
     record_plan_decision,
+    validate_persisted_plan_integrity,
 )
 from tests.services.test_execution_plan import build_graph, create_plan
 
@@ -94,7 +95,23 @@ def test_plan_delete_is_restricted_when_approval_history_exists(db: Session) -> 
     nested.rollback()
 
 
-def test_intact_plan_recomputes_exact_digest_with_canonical_action_order(
+def test_intact_persisted_plan_recomputes_exact_digest_and_validates(
+    db: Session,
+) -> None:
+    plan = create_plan(
+        db,
+        build_graph(db),
+        actions=[
+            PlanActionInput("GET", "https://example.test/api/items/1"),
+            PlanActionInput("GET", "https://example.test/api/items/2"),
+        ],
+    )
+
+    assert recompute_persisted_plan_digest(db, plan.id) == plan.plan_digest
+    assert validate_persisted_plan_integrity(db, plan.id) is plan
+
+
+def test_changed_action_order_invalidates_integrity(
     db: Session,
 ) -> None:
     plan = create_plan(
