@@ -7,6 +7,7 @@ from app.db.session import engine
 
 
 HEAD = "c3e5a7b9d1f2"
+LATEST = "d5f7a9c1e3b5"
 PARENT = "b2d4f6a8c0e1"
 
 
@@ -18,6 +19,8 @@ def current_revision() -> str | None:
 def test_m4_03_migration_round_trip() -> None:
     config = Config("alembic.ini")
     try:
+        assert current_revision() == LATEST
+        command.downgrade(config, HEAD)
         assert current_revision() == HEAD
         inspector = inspect(engine)
         columns_at_head = {
@@ -43,7 +46,7 @@ def test_m4_03_migration_round_trip() -> None:
         } == columns_at_head - {"authorization_revision_id"}
         assert "authorization_revisions" in inspector.get_table_names()
 
-        command.upgrade(config, "head")
+        command.upgrade(config, HEAD)
         assert current_revision() == HEAD
     finally:
         command.upgrade(config, "head")
