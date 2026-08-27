@@ -1,6 +1,4 @@
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
-
 import httpx
 import pytest
 
@@ -17,6 +15,7 @@ from app.scanners.openapi import (
     OpenAPIScanner,
     parse_openapi_schema,
 )
+from tests.network_gateway_fakes import StaticJSONNetworkGateway
 
 
 def test_parses_endpoint() -> None:
@@ -212,6 +211,7 @@ def build_scanner() -> OpenAPIScanner:
             }
         ),
         InMemoryRateLimiter(requests_per_second=1000.0),
+        StaticJSONNetworkGateway(),
     )
 
 
@@ -266,7 +266,7 @@ def test_scanner_wraps_schema_parse_error(
     monkeypatch.setattr(
         scanner,
         "_fetch_schema",
-        lambda url: {
+        lambda **kwargs: {
             "paths": [],
         },
     )
@@ -295,7 +295,7 @@ def test_missing_refresh_fails_closed_without_fetch(
     scanner = build_scanner()
     network_called = False
 
-    def fetch_schema(url: str):
+    def fetch_schema(**kwargs):
         nonlocal network_called
         network_called = True
         return {"paths": {}}
@@ -318,7 +318,7 @@ def test_missing_audit_observer_fails_closed_without_fetch(
     scanner = build_scanner()
     network_called = False
 
-    def fetch_schema(url: str):
+    def fetch_schema(**kwargs):
         nonlocal network_called
         network_called = True
         return {"paths": {}}
@@ -343,7 +343,7 @@ def test_external_network_mode_is_audited_then_blocked_without_fetch(
     monkeypatch.setattr(
         scanner,
         "_fetch_schema",
-        lambda url: events.append("network") or {"paths": {}},
+        lambda **kwargs: events.append("network") or {"paths": {}},
     )
     target = build_target()
     target.network_mode = "external_public_authorized"
@@ -363,38 +363,6 @@ def test_external_network_mode_is_audited_then_blocked_without_fetch(
 
     assert exc_info.value.code == "external_network_mode_not_ready"
     assert events == ["audit"]
-
-
-def test_fetch_schema_disables_environment_proxy() -> None:
-    scanner = build_scanner()
-    response = MagicMock()
-    response.__enter__.return_value = response
-    response.iter_bytes.return_value = [
-        b'{"paths": {}}',
-    ]
-    client = MagicMock()
-    client.__enter__.return_value = client
-    client.stream.return_value = response
-
-    with patch(
-        "app.scanners.openapi.httpx.Client",
-        return_value=client,
-    ) as client_class:
-        schema = scanner._fetch_schema(
-            "https://example.test/openapi.json"
-        )
-
-    assert schema == {
-        "paths": {},
-    }
-    assert (
-        client_class.call_args.kwargs[
-            "trust_env"
-        ]
-        is False
-    )
-    assert client_class.call_args.kwargs["follow_redirects"] is False
-    assert isinstance(client_class.call_args.kwargs["timeout"], httpx.Timeout)
 
 
 class RecordingRateLimiter:
@@ -464,11 +432,11 @@ def test_scan_orders_policy_rate_limit_policy_network(
         [allowed_decision(), allowed_decision()],
     )
     rate_limiter = RecordingRateLimiter(events)
-    scanner = OpenAPIScanner(policy_engine, rate_limiter)
+    scanner = OpenAPIScanner(policy_engine, rate_limiter, StaticJSONNetworkGateway())
     monkeypatch.setattr(
         scanner,
         "_fetch_schema",
-        lambda url: events.append("network") or {"paths": {}},
+        lambda **kwargs: events.append("network") or {"paths": {}},
     )
 
     scanner.scan(
@@ -501,11 +469,12 @@ def test_first_policy_denial_skips_limiter_and_network(
     scanner = OpenAPIScanner(
         SequencedPolicyEngine(events, [denied_decision("no_matching_scope")]),
         RecordingRateLimiter(events),
+        StaticJSONNetworkGateway(),
     )
     monkeypatch.setattr(
         scanner,
         "_fetch_schema",
-        lambda url: events.append("network") or {"paths": {}},
+        lambda **kwargs: events.append("network") or {"paths": {}},
     )
 
     with pytest.raises(OpenAPIPolicyDenied) as exc_info:
@@ -530,11 +499,12 @@ def test_final_policy_denial_after_wait_skips_network(
             [allowed_decision(), denied_decision("authorization_expired")],
         ),
         RecordingRateLimiter(events),
+        StaticJSONNetworkGateway(),
     )
     monkeypatch.setattr(
         scanner,
         "_fetch_schema",
-        lambda url: events.append("network") or {"paths": {}},
+        lambda **kwargs: events.append("network") or {"paths": {}},
     )
 
     with pytest.raises(OpenAPIPolicyDenied) as exc_info:
@@ -561,7 +531,7 @@ def test_invalid_runtime_rate_fails_closed_before_network(
     scanner = build_scanner()
     network_called = False
 
-    def fetch_schema(url: str) -> dict[str, object]:
+    def fetch_schema(**kwargs) -> dict[str, object]:
         nonlocal network_called
         network_called = True
         return {"paths": {}}
@@ -586,30 +556,30 @@ def test_invalid_runtime_rate_fails_closed_before_network(
 
 
 def test_fetch_schema_rejects_timeout() -> None:
-    scanner = build_scanner()
-
-    with patch(
-        "app.scanners.openapi.httpx.Client",
-        side_effect=httpx.ReadTimeout("timed out"),
-    ):
-        with pytest.raises(OpenAPIScanError, match="Unable to fetch"):
-            scanner._fetch_schema("https://example.test/openapi.json")
+    gateway = StaticJSONNetworkGateway()
+    gateway.handler = lambda request: (_ for _ in ()).throw(RuntimeError("secret"))
+    scanner = OpenAPIScanner(
+        ScopePolicyEngine({"example.test"}),
+        InMemoryRateLimiter(requests_per_second=1000.0),
+        gateway,
+    )
+    with pytest.raises(OpenAPIScanError, match="network_request_failed"):
+        scanner._fetch_schema(
+            target=build_target(), url="https://example.test/openapi.json"
+        )
 
 
 def test_fetch_schema_enforces_response_size_cap() -> None:
-    scanner = build_scanner()
-    response = MagicMock()
-    response.__enter__.return_value = response
-    response.iter_bytes.return_value = [
-        b"x" * (MAX_OPENAPI_RESPONSE_BYTES + 1),
-    ]
-    client = MagicMock()
-    client.__enter__.return_value = client
-    client.stream.return_value = response
-
-    with patch(
-        "app.scanners.openapi.httpx.Client",
-        return_value=client,
-    ):
-        with pytest.raises(OpenAPIScanError, match="size limit"):
-            scanner._fetch_schema("https://example.test/openapi.json")
+    gateway = StaticJSONNetworkGateway()
+    gateway.handler = lambda request: httpx.Response(
+        200, content=b"x" * (MAX_OPENAPI_RESPONSE_BYTES + 1)
+    )
+    scanner = OpenAPIScanner(
+        ScopePolicyEngine({"example.test"}),
+        InMemoryRateLimiter(requests_per_second=1000.0),
+        gateway,
+    )
+    with pytest.raises(OpenAPIScanError, match="response_too_large"):
+        scanner._fetch_schema(
+            target=build_target(), url="https://example.test/openapi.json"
+        )

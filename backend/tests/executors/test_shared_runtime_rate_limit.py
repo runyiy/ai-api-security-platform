@@ -10,6 +10,7 @@ from app.executors.rate_limit import InMemoryRateLimiter
 from app.executors.runtime import platform_rate_limiter
 from app.policies.scope_policy import ScopePolicyEngine
 from app.scanners.openapi import OpenAPIScanner
+from tests.network_gateway_fakes import HandlerNetworkGateway, StaticJSONNetworkGateway
 
 
 class FakeTime:
@@ -70,6 +71,7 @@ def test_production_paths_share_limiter_identity() -> None:
         test_run_routes.executor.rate_limiter
         is openapi_routes.scanner.rate_limiter
     )
+    assert test_run_routes.executor.network_gateway is openapi_routes.scanner.network_gateway
 
 
 def test_cross_path_reservations_share_target_schedule(
@@ -85,15 +87,17 @@ def test_cross_path_reservations_share_target_schedule(
     executor = PolicyEnforcedHTTPExecutor(
         policy_engine=policy_engine,
         rate_limiter=shared_limiter,
-        transport=httpx.MockTransport(
+        network_gateway=HandlerNetworkGateway(
             lambda request: httpx.Response(200, json={"ok": True})
         ),
     )
-    scanner = OpenAPIScanner(policy_engine, shared_limiter)
+    scanner = OpenAPIScanner(
+        policy_engine, shared_limiter, StaticJSONNetworkGateway()
+    )
     monkeypatch.setattr(
         scanner,
         "_fetch_schema",
-        lambda url: {"paths": {}},
+        lambda **kwargs: {"paths": {}},
     )
     target, revision, scope = build_policy_objects(1, 101)
 

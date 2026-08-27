@@ -17,6 +17,7 @@ from tests.scanners.test_openapi import (
     build_scope,
     build_target,
 )
+from tests.network_gateway_fakes import StaticJSONNetworkGateway
 
 
 def test_import_returns_502_for_malformed_schema(
@@ -29,11 +30,12 @@ def test_import_returns_502_for_malformed_schema(
             }
         ),
         InMemoryRateLimiter(requests_per_second=1000.0),
+        StaticJSONNetworkGateway(),
     )
     monkeypatch.setattr(
         scanner,
         "_fetch_schema",
-        lambda url: {
+        lambda **kwargs: {
             "paths": [],
         },
     )

@@ -19,6 +19,7 @@ from app.policies.scope_policy import (
     PolicyDecision,
     ScopePolicyEngine,
 )
+from tests.network_gateway_fakes import HandlerNetworkGateway
 
 
 def build_target() -> Target:
@@ -80,10 +81,6 @@ def observe_policy(decision: PolicyDecision) -> None:
 def build_executor(
     handler,
 ) -> PolicyEnforcedHTTPExecutor:
-    transport = httpx.MockTransport(
-        handler
-    )
-
     return PolicyEnforcedHTTPExecutor(
         policy_engine=ScopePolicyEngine(
             {
@@ -95,7 +92,7 @@ def build_executor(
         rate_limiter=InMemoryRateLimiter(
             requests_per_second=1000.0
         ),
-        transport=transport,
+        network_gateway=HandlerNetworkGateway(handler),
     )
 
 
@@ -134,6 +131,30 @@ def test_executes_allowed_get() -> None:
     assert result.status_code == 200
 
     assert b"2001" in result.body
+
+
+def test_durable_audit_precedes_gateway() -> None:
+    events: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        events.append("gateway")
+        return httpx.Response(200)
+
+    build_executor(handler).execute(
+        target=build_target(),
+        authorization_revision=build_revision(),
+        scopes=[build_scope()],
+        method="GET",
+        url="http://localhost:8001/api/projects/2001",
+        headers={},
+        refresh_authorization=lambda: (
+            events.append("refresh")
+            or (build_target(), build_revision(), [build_scope()])
+        ),
+        policy_decision_observer=lambda decision: events.append("audit"),
+    )
+
+    assert events == ["refresh", "audit", "gateway"]
 
 
 def test_missing_refresh_fails_closed_without_network() -> None:
@@ -423,7 +444,7 @@ def test_revalidates_policy_after_rate_limit_wait() -> None:
     executor = PolicyEnforcedHTTPExecutor(
         policy_engine=policy_engine,
         rate_limiter=rate_limiter,
-        transport=httpx.MockTransport(handler),
+        network_gateway=HandlerNetworkGateway(handler),
     )
 
     with pytest.raises(ExecutionBlockedError) as exc_info:
@@ -452,7 +473,7 @@ def test_timeout_behavior_remains_bounded() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("timed out", request=request)
 
-    with pytest.raises(HTTPExecutionError, match="HTTP request failed"):
+    with pytest.raises(HTTPExecutionError, match="network_request_failed"):
         build_executor(handler).execute(
             target=build_target(),
             authorization_revision=build_revision(),
@@ -472,7 +493,7 @@ def test_response_size_cap_remains_enforced() -> None:
             content=b"x" * (MAX_RESPONSE_BYTES + 1),
         )
 
-    with pytest.raises(HTTPExecutionError, match="maximum allowed size"):
+    with pytest.raises(HTTPExecutionError, match="response_too_large"):
         build_executor(handler).execute(
             target=build_target(),
             authorization_revision=build_revision(),

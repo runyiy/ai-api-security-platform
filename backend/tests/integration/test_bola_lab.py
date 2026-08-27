@@ -26,6 +26,7 @@ from app.db.models.test_identity import TestIdentity as StoredIdentity
 from app.db.models.test_run import TestRun as StoredRun
 from app.db.session import SessionLocal
 from app.executors.http import PolicyEnforcedHTTPExecutor
+from app.network_safety.gateway import NetworkGateway
 from app.executors.rate_limit import InMemoryRateLimiter
 from app.generators.bola import BOLA_CROSS_OWNER, OWNER_BASELINE
 from app.policies.scope_policy import ScopePolicyEngine
@@ -263,6 +264,7 @@ def test_local_bola_workflow_end_to_end(bola_lab: RunningBOLALab) -> None:
     executor = PolicyEnforcedHTTPExecutor(
         policy_engine=policy_engine,
         rate_limiter=InMemoryRateLimiter(requests_per_second=1000.0),
+        network_gateway=NetworkGateway(),
     )
 
     try:

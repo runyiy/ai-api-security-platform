@@ -1,8 +1,6 @@
 import json
 from collections.abc import Callable
 
-import httpx
-
 from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.scope import Scope
 from app.db.models.target import Target
@@ -11,6 +9,7 @@ from app.executors.rate_limit import (
     RateLimitConfigurationError,
 )
 from app.network_safety.destination import PRIVATE_LOCAL
+from app.network_safety.gateway import NetworkGateway, NetworkGatewayError
 from app.policies.scope_policy import (
     PolicyDecision,
     ScopePolicyEngine,
@@ -243,9 +242,11 @@ class OpenAPIScanner:
         self,
         policy_engine: ScopePolicyEngine,
         rate_limiter: InMemoryRateLimiter,
+        network_gateway: NetworkGateway,
     ) -> None:
         self.policy_engine = policy_engine
         self.rate_limiter = rate_limiter
+        self.network_gateway = network_gateway
 
     def scan(
         self,
@@ -341,13 +342,11 @@ class OpenAPIScanner:
                 code="external_network_mode_not_ready",
                 reason=(
                     "External/public-authorized OpenAPI retrieval is not "
-                    "available until the centralized network gateway exists."
+                    "available until the remaining release gates exist."
                 ),
             )
 
-        schema = self._fetch_schema(
-            openapi_url
-        )
+        schema = self._fetch_schema(target=target, url=openapi_url)
 
         try:
             endpoints = (
@@ -383,60 +382,28 @@ class OpenAPIScanner:
 
     def _fetch_schema(
         self,
+        *,
+        target: Target,
         url: str,
     ) -> dict[str, Any]:
-        timeout = httpx.Timeout(
-            5.0
-        )
-
         try:
-            with httpx.Client(
-                timeout=timeout,
-                follow_redirects=False,
-                trust_env=False,
-            ) as client:
-                with client.stream(
-                    "GET",
-                    url,
-                    headers={
-                        "Accept": (
-                            "application/json"
-                        )
-                    },
-                ) as response:
-                    response.raise_for_status()
-
-                    chunks: list[bytes] = []
-                    total_size = 0
-
-                    for chunk in (
-                        response.iter_bytes()
-                    ):
-                        total_size += len(chunk)
-
-                        if (
-                            total_size
-                            > MAX_OPENAPI_RESPONSE_BYTES
-                        ):
-                            raise OpenAPIScanError(
-                                "OpenAPI response "
-                                "exceeded size limit"
-                            )
-
-                        chunks.append(
-                            chunk
-                        )
-
-        except httpx.HTTPError as exc:
+            response = self.network_gateway.request(
+                network_mode=target.network_mode,
+                method="GET",
+                url=url,
+                headers={"Accept": "application/json"},
+                max_response_bytes=MAX_OPENAPI_RESPONSE_BYTES,
+                timeout_seconds=5.0,
+            )
+        except NetworkGatewayError as exc:
             raise OpenAPIScanError(
-                f"Unable to fetch OpenAPI schema: "
-                f"{exc}"
+                f"{exc.code}: {exc.reason}"
             ) from exc
-
-        raw = b"".join(chunks)
+        if response.status_code >= 400:
+            raise OpenAPIScanError("OpenAPI retrieval returned an error status")
 
         try:
-            data = json.loads(raw)
+            data = json.loads(response.body)
         except json.JSONDecodeError as exc:
             raise OpenAPIScanError(
                 "OpenAPI response is not valid JSON"

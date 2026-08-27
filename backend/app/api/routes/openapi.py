@@ -19,6 +19,7 @@ from app.services.execution_authorization import (
 )
 from app.services.safety_audit import build_policy_decision_observer
 from app.executors.runtime import platform_rate_limiter
+from app.network_safety.runtime import network_gateway
 from app.policies.scope_policy import (
     ScopePolicyEngine,
 )
@@ -53,6 +54,7 @@ policy_engine = ScopePolicyEngine(
 scanner = OpenAPIScanner(
     policy_engine=policy_engine,
     rate_limiter=platform_rate_limiter,
+    network_gateway=network_gateway,
 )
 
 

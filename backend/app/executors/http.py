@@ -1,8 +1,5 @@
-from dataclasses import dataclass
-import time
 from collections.abc import Callable
-
-import httpx
+from dataclasses import dataclass
 
 from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.scope import Scope
@@ -12,6 +9,7 @@ from app.executors.rate_limit import (
     RateLimitConfigurationError,
 )
 from app.network_safety.destination import PRIVATE_LOCAL
+from app.network_safety.gateway import NetworkGateway, NetworkGatewayError
 from app.policies.scope_policy import (
     PolicyDecision,
     ScopePolicyEngine,
@@ -62,11 +60,11 @@ class PolicyEnforcedHTTPExecutor:
         *,
         policy_engine: ScopePolicyEngine,
         rate_limiter: InMemoryRateLimiter,
-        transport: httpx.BaseTransport | None = None,
+        network_gateway: NetworkGateway,
     ) -> None:
         self.policy_engine = policy_engine
         self.rate_limiter = rate_limiter
-        self.transport = transport
+        self.network_gateway = network_gateway
 
     def execute(
         self,
@@ -165,14 +163,25 @@ class PolicyEnforcedHTTPExecutor:
                 code="external_network_mode_not_ready",
                 reason=(
                     "External/public-authorized network execution is not "
-                    "available until the centralized network gateway exists."
+                    "available until the remaining release gates exist."
                 ),
             )
 
-        return self._send(
-            method=normalized_method,
-            url=url,
-            headers=headers,
+        try:
+            result = self.network_gateway.request(
+                network_mode=target.network_mode,
+                method=normalized_method,
+                url=url,
+                headers=headers,
+                max_response_bytes=MAX_RESPONSE_BYTES,
+                timeout_seconds=5.0,
+            )
+        except NetworkGatewayError as exc:
+            raise HTTPExecutionError(f"{exc.code}: {exc.reason}") from exc
+        return HTTPExecutionResult(
+            status_code=result.status_code,
+            body=result.body,
+            duration_ms=result.duration_ms,
         )
 
     @staticmethod
@@ -205,70 +214,4 @@ class PolicyEnforcedHTTPExecutor:
         raise ExecutionBlockedError(
             code=decision.code,
             reason=decision.reason,
-        )
-
-    def _send(
-        self,
-        *,
-        method: str,
-        url: str,
-        headers: dict[str, str],
-    ) -> HTTPExecutionResult:
-        timeout = httpx.Timeout(
-            5.0
-        )
-
-        started_at = time.monotonic()
-
-        try:
-            with httpx.Client(
-                timeout=timeout,
-                follow_redirects=False,
-                trust_env=False,
-                transport=self.transport,
-            ) as client:
-                with client.stream(
-                    method,
-                    url,
-                    headers=headers,
-                ) as response:
-                    chunks: list[bytes] = []
-                    total_size = 0
-
-                    for chunk in response.iter_bytes():
-                        total_size += len(chunk)
-
-                        if (
-                            total_size
-                            > MAX_RESPONSE_BYTES
-                        ):
-                            raise HTTPExecutionError(
-                                "Response exceeded "
-                                "maximum allowed size."
-                            )
-
-                        chunks.append(chunk)
-
-                    body = b"".join(chunks)
-
-        except HTTPExecutionError:
-            raise
-
-        except httpx.HTTPError as exc:
-            raise HTTPExecutionError(
-                f"HTTP request failed: {exc}"
-            ) from exc
-
-        duration_ms = int(
-            (
-                time.monotonic()
-                - started_at
-            )
-            * 1000
-        )
-
-        return HTTPExecutionResult(
-            status_code=response.status_code,
-            body=body,
-            duration_ms=duration_ms,
         )
