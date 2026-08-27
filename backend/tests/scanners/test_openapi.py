@@ -253,6 +253,10 @@ def build_scope() -> Scope:
     )
 
 
+def refresh_authorization():
+    return build_target(), build_revision(), [build_scope()]
+
+
 def test_scanner_wraps_schema_parse_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -273,12 +277,36 @@ def test_scanner_wraps_schema_parse_error(
             target=build_target(),
             authorization_revision=build_revision(),
             scopes=[build_scope()],
+            refresh_authorization=refresh_authorization,
         )
 
     assert isinstance(
         exc_info.value.__cause__,
         ValueError,
     )
+
+
+def test_missing_refresh_fails_closed_without_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scanner = build_scanner()
+    network_called = False
+
+    def fetch_schema(url: str):
+        nonlocal network_called
+        network_called = True
+        return {"paths": {}}
+
+    monkeypatch.setattr(scanner, "_fetch_schema", fetch_schema)
+    with pytest.raises(OpenAPIPolicyDenied) as exc_info:
+        scanner.scan(
+            target=build_target(),
+            authorization_revision=build_revision(),
+            scopes=[build_scope()],
+        )
+
+    assert exc_info.value.decision.code == "authorization_refresh_missing"
+    assert network_called is False
 
 
 def test_fetch_schema_disables_environment_proxy() -> None:
@@ -387,9 +415,19 @@ def test_scan_orders_policy_rate_limit_policy_network(
         target=build_target(),
         authorization_revision=build_revision(),
         scopes=[build_scope()],
+        refresh_authorization=lambda: (
+            events.append("refresh")
+            or (build_target(), build_revision(), [build_scope()])
+        ),
     )
 
-    assert events == ["policy", "rate-limit", "policy", "network"]
+    assert events == [
+        "policy",
+        "rate-limit",
+        "refresh",
+        "policy",
+        "network",
+    ]
     assert policy_engine.evaluation_count == 2
     assert rate_limiter.calls == [("target:1", 1000.0)]
 
@@ -441,6 +479,7 @@ def test_final_policy_denial_after_wait_skips_network(
             target=build_target(),
             authorization_revision=build_revision(),
             scopes=[build_scope()],
+            refresh_authorization=refresh_authorization,
         )
 
     assert exc_info.value.decision.code == "authorization_expired"
@@ -472,6 +511,7 @@ def test_invalid_runtime_rate_fails_closed_before_network(
             target=build_target(),
             authorization_revision=revision,
             scopes=[build_scope()],
+            refresh_authorization=refresh_authorization,
         )
 
     assert (

@@ -267,6 +267,24 @@ class OpenAPIScanner:
             raise OpenAPIPolicyDenied(
                 decision
             )
+        if refresh_authorization is None:
+            raise OpenAPIPolicyDenied(
+                PolicyDecision(
+                    allowed=False,
+                    code="authorization_refresh_missing",
+                    reason=(
+                        "Persisted authorization refresh is required before "
+                        "OpenAPI fetch."
+                    ),
+                    authorization_profile_id=(
+                        decision.authorization_profile_id
+                    ),
+                    authorization_revision_id=(
+                        decision.authorization_revision_id
+                    ),
+                    evaluated_at=decision.evaluated_at,
+                )
+            )
         selected_revision_id = decision.authorization_revision_id
 
         try:
@@ -295,8 +313,7 @@ class OpenAPIScanner:
                 )
             ) from exc
 
-        if refresh_authorization is not None:
-            target, authorization_revision, scopes = refresh_authorization()
+        target, authorization_revision, scopes = refresh_authorization()
 
         if (
             target.authorization_revision_id != selected_revision_id

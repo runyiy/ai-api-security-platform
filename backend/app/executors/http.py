@@ -107,6 +107,14 @@ class PolicyEnforcedHTTPExecutor:
         self._raise_if_denied(
             decision
         )
+        if refresh_authorization is None:
+            raise ExecutionBlockedError(
+                code="authorization_refresh_missing",
+                reason=(
+                    "Persisted authorization refresh is required before "
+                    "network execution."
+                ),
+            )
         selected_revision_id = decision.authorization_revision_id
 
         try:
@@ -125,8 +133,7 @@ class PolicyEnforcedHTTPExecutor:
                 ),
             ) from exc
 
-        if refresh_authorization is not None:
-            target, authorization_revision, scopes = refresh_authorization()
+        target, authorization_revision, scopes = refresh_authorization()
 
         if (
             target.authorization_revision_id != selected_revision_id

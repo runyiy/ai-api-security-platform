@@ -68,6 +68,10 @@ def build_scope() -> Scope:
     )
 
 
+def refresh_authorization():
+    return build_target(), build_revision(), [build_scope()]
+
+
 def build_executor(
     handler,
 ) -> PolicyEnforcedHTTPExecutor:
@@ -118,11 +122,34 @@ def test_executes_allowed_get() -> None:
             "/api/projects/2001"
         ),
         headers={},
+        refresh_authorization=refresh_authorization,
     )
 
     assert result.status_code == 200
 
     assert b"2001" in result.body
+
+
+def test_missing_refresh_fails_closed_without_network() -> None:
+    network_called = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal network_called
+        network_called = True
+        return httpx.Response(200)
+
+    with pytest.raises(ExecutionBlockedError) as exc_info:
+        build_executor(handler).execute(
+            target=build_target(),
+            authorization_revision=build_revision(),
+            scopes=[build_scope()],
+            method="GET",
+            url="http://localhost:8001/api/projects/2001",
+            headers={},
+        )
+
+    assert exc_info.value.code == "authorization_refresh_missing"
+    assert network_called is False
 
 
 def test_denies_request_outside_scope() -> None:
@@ -157,6 +184,7 @@ def test_denies_request_outside_scope() -> None:
                 "/admin/users"
             ),
             headers={},
+            refresh_authorization=refresh_authorization,
         )
 
     assert called is False
@@ -195,6 +223,7 @@ def test_blocks_mutating_methods_before_network(method: str) -> None:
                 "/api/projects/2001"
             ),
             headers={},
+            refresh_authorization=refresh_authorization,
         )
 
     assert (
@@ -238,6 +267,7 @@ def test_does_not_follow_redirect() -> None:
             "/api/projects/2001"
         ),
         headers={},
+        refresh_authorization=refresh_authorization,
     )
 
     assert result.status_code == 302
@@ -315,12 +345,15 @@ def test_revalidates_policy_after_rate_limit_wait() -> None:
             method="GET",
             url="http://localhost:8001/api/projects/2001",
             headers={},
+            refresh_authorization=lambda: (
+                events.append("refresh")
+                or (build_target(), build_revision(), [build_scope()])
+            ),
         )
-
+    assert events == ["policy", "rate-limit", "refresh", "policy"]
     assert policy_engine.evaluation_count == 2
     assert rate_limiter.keys == ["target:1"]
     assert rate_limiter.requested_rates == [1000.0]
-    assert events == ["policy", "rate-limit", "policy"]
     assert exc_info.value.code == "authorization_expired"
     assert transport_called is False
 
@@ -336,7 +369,8 @@ def test_timeout_behavior_remains_bounded() -> None:
             scopes=[build_scope()],
             method="GET",
             url="http://localhost:8001/api/projects/2001",
-            headers={},
+                headers={},
+                refresh_authorization=refresh_authorization,
         )
 
 
@@ -354,7 +388,8 @@ def test_response_size_cap_remains_enforced() -> None:
             scopes=[build_scope()],
             method="GET",
             url="http://localhost:8001/api/projects/2001",
-            headers={},
+                headers={},
+                refresh_authorization=refresh_authorization,
         )
 
 
@@ -384,6 +419,7 @@ def test_invalid_profile_rate_fails_closed_before_network(
             method="GET",
             url="http://localhost:8001/api/projects/2001",
             headers={},
+            refresh_authorization=refresh_authorization,
         )
 
     assert exc_info.value.code == "invalid_authorization_rate_limit"
