@@ -187,7 +187,7 @@ def shared_limiter_with_wait_mutation(target_id: int, mutation) -> PostgresRateL
     )
     limiter.reserve_delay(
         key=f"target:{target_id}",
-        requested_requests_per_second=1.0,
+        requested_requests_per_second=0.1,
     )
     return limiter
 
