@@ -2,7 +2,7 @@ import httpx
 
 from app.api.routes import openapi as openapi_routes
 from app.api.routes import test_runs as test_run_routes
-from app.db.models.authorization_profile import AuthorizationProfile
+from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.scope import Scope
 from app.db.models.target import Target
 from app.executors.http import PolicyEnforcedHTTPExecutor
@@ -27,19 +27,23 @@ class FakeTime:
 
 def build_policy_objects(
     target_id: int,
-    profile_id: int,
-) -> tuple[Target, AuthorizationProfile, Scope]:
+    revision_id: int,
+) -> tuple[Target, AuthorizationRevision, Scope]:
     target = Target(
         id=target_id,
-        authorization_profile_id=profile_id,
+        authorization_profile_id=revision_id,
+        authorization_revision_id=revision_id,
         name=f"Target {target_id}",
         base_url="https://example.test",
         environment="test",
         is_enabled=True,
     )
-    profile = AuthorizationProfile(
-        id=profile_id,
-        name=f"Authorization {profile_id}",
+    revision = AuthorizationRevision(
+        id=revision_id,
+        authorization_profile_id=revision_id,
+        revision_number=1,
+        lifecycle_state="active",
+        name=f"Authorization {revision_id}",
         program_name="Self-controlled test",
         authorization_type="self_owned",
         automation_allowed=True,
@@ -55,7 +59,7 @@ def build_policy_objects(
         allowed_methods=["GET"],
         is_active=True,
     )
-    return target, profile, scope
+    return target, revision, scope
 
 
 def test_production_paths_share_limiter_identity() -> None:
@@ -90,29 +94,36 @@ def test_cross_path_reservations_share_target_schedule(
         "_fetch_schema",
         lambda url: {"paths": {}},
     )
-    target, profile, scope = build_policy_objects(1, 101)
+    target, revision, scope = build_policy_objects(1, 101)
 
     executor.execute(
         target=target,
-        authorization_profile=profile,
+        authorization_revision=revision,
         scopes=[scope],
         method="GET",
         url="https://example.test/projects/1",
         headers={},
+        refresh_authorization=lambda: (target, revision, [scope]),
     )
     scanner.scan(
         target=target,
-        authorization_profile=profile,
+        authorization_revision=revision,
         scopes=[scope],
+        refresh_authorization=lambda: (target, revision, [scope]),
     )
 
     assert fake_time.delays == [0.5]
 
-    other_target, other_profile, other_scope = build_policy_objects(2, 202)
+    other_target, other_revision, other_scope = build_policy_objects(2, 202)
     scanner.scan(
         target=other_target,
-        authorization_profile=other_profile,
+        authorization_revision=other_revision,
         scopes=[other_scope],
+        refresh_authorization=lambda: (
+            other_target,
+            other_revision,
+            [other_scope],
+        ),
     )
 
     assert fake_time.delays == [0.5]

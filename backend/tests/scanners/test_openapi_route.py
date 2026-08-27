@@ -13,7 +13,7 @@ from app.scanners.openapi import (
 )
 from app.schemas.openapi import OpenAPIImportRequest
 from tests.scanners.test_openapi import (
-    build_profile,
+    build_revision,
     build_scope,
     build_target,
 )
@@ -48,8 +48,16 @@ def test_import_returns_502_for_malformed_schema(
         build_scope(),
     ]
     db = Mock(spec=Session)
-    db.get.side_effect = [build_target(), build_profile()]
+    db.get.side_effect = [build_target(), build_revision()]
+    db.get_bind.return_value = Mock()
     db.scalars.return_value = scalar_result
+    monkeypatch.setattr(
+        openapi_routes,
+        "build_execution_authorization_refresh",
+        lambda bind, target_id: (
+            lambda: (build_target(), build_revision(), [build_scope()])
+        ),
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         openapi_routes.import_openapi(
@@ -84,7 +92,7 @@ def test_import_ends_read_transaction_before_scan(
         events.append("db-read")
         if object_id == 1:
             return build_target()
-        return build_profile()
+        return build_revision()
 
     def read_scopes(statement):
         transaction_active["value"] = True
@@ -108,11 +116,20 @@ def test_import_ends_read_transaction_before_scan(
         lambda: transaction_active["value"]
     )
 
+    db.get_bind.return_value = Mock()
+
     class OrderingScanner:
-        def scan(self, *, target, authorization_profile, scopes):
+        def scan(
+            self,
+            *,
+            target,
+            authorization_revision,
+            scopes,
+            refresh_authorization,
+        ):
             events.append("scanner-call")
             assert db.in_transaction() is False
-            assert authorization_profile.id == 100
+            assert authorization_revision.id == 200
             return (
                 "https://example.test/openapi.json",
                 [

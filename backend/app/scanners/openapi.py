@@ -1,8 +1,9 @@
 import json
+from collections.abc import Callable
 
 import httpx
 
-from app.db.models.authorization_profile import AuthorizationProfile
+from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.scope import Scope
 from app.db.models.target import Target
 from app.executors.rate_limit import (
@@ -238,8 +239,11 @@ class OpenAPIScanner:
         self,
         *,
         target: Target,
-        authorization_profile: AuthorizationProfile | None,
+        authorization_revision: AuthorizationRevision | None,
         scopes: list[Scope],
+        refresh_authorization: Callable[
+            [], tuple[Target, AuthorizationRevision | None, list[Scope]]
+        ] | None = None,
     ) -> tuple[
         str,
         list[ParsedEndpoint],
@@ -252,7 +256,7 @@ class OpenAPIScanner:
         decision = (
             self.policy_engine.evaluate(
                 target=target,
-                authorization_profile=authorization_profile,
+                authorization_revision=authorization_revision,
                 scopes=scopes,
                 request_url=openapi_url,
                 method="GET",
@@ -263,12 +267,31 @@ class OpenAPIScanner:
             raise OpenAPIPolicyDenied(
                 decision
             )
+        if refresh_authorization is None:
+            raise OpenAPIPolicyDenied(
+                PolicyDecision(
+                    allowed=False,
+                    code="authorization_refresh_missing",
+                    reason=(
+                        "Persisted authorization refresh is required before "
+                        "OpenAPI fetch."
+                    ),
+                    authorization_profile_id=(
+                        decision.authorization_profile_id
+                    ),
+                    authorization_revision_id=(
+                        decision.authorization_revision_id
+                    ),
+                    evaluated_at=decision.evaluated_at,
+                )
+            )
+        selected_revision_id = decision.authorization_revision_id
 
         try:
             self.rate_limiter.wait(
                 key=f"target:{target.id}",
                 requested_requests_per_second=(
-                    authorization_profile.max_requests_per_second
+                    authorization_revision.max_requests_per_second
                 ),
             )
         except RateLimitConfigurationError as exc:
@@ -277,20 +300,51 @@ class OpenAPIScanner:
                     allowed=False,
                     code="invalid_authorization_rate_limit",
                     reason=(
-                        "AuthorizationProfile request rate limit "
+                        "AuthorizationRevision request rate limit "
                         "must be finite and greater than zero."
                     ),
                     authorization_profile_id=(
                         decision.authorization_profile_id
                     ),
+                    authorization_revision_id=(
+                        decision.authorization_revision_id
+                    ),
                     evaluated_at=decision.evaluated_at,
                 )
             ) from exc
 
+        target, authorization_revision, scopes = refresh_authorization()
+
+        if (
+            target.authorization_revision_id != selected_revision_id
+            or authorization_revision is None
+            or authorization_revision.id != selected_revision_id
+        ):
+            raise OpenAPIPolicyDenied(
+                PolicyDecision(
+                    allowed=False,
+                    code="authorization_revision_changed",
+                    reason=(
+                        "Target authorization revision changed before fetch."
+                    ),
+                    authorization_profile_id=(
+                        authorization_revision.authorization_profile_id
+                        if authorization_revision is not None
+                        else None
+                    ),
+                    authorization_revision_id=(
+                        authorization_revision.id
+                        if authorization_revision is not None
+                        else None
+                    ),
+                    evaluated_at=decision.evaluated_at,
+                )
+            )
+
         decision = (
             self.policy_engine.evaluate(
                 target=target,
-                authorization_profile=authorization_profile,
+                authorization_revision=authorization_revision,
                 scopes=scopes,
                 request_url=openapi_url,
                 method="GET",

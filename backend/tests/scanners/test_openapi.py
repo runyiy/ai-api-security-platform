@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from app.db.models.authorization_profile import AuthorizationProfile
+from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.scope import Scope
 from app.db.models.target import Target
 from app.executors.rate_limit import InMemoryRateLimiter
@@ -218,6 +218,7 @@ def build_target() -> Target:
     return Target(
         id=1,
         authorization_profile_id=100,
+        authorization_revision_id=200,
         name="Example",
         base_url="https://example.test",
         environment="test",
@@ -225,9 +226,12 @@ def build_target() -> Target:
     )
 
 
-def build_profile() -> AuthorizationProfile:
-    return AuthorizationProfile(
-        id=100,
+def build_revision() -> AuthorizationRevision:
+    return AuthorizationRevision(
+        id=200,
+        authorization_profile_id=100,
+        revision_number=1,
+        lifecycle_state="active",
         name="Local authorization",
         program_name="Self-controlled lab",
         authorization_type="self_owned",
@@ -249,6 +253,10 @@ def build_scope() -> Scope:
     )
 
 
+def refresh_authorization():
+    return build_target(), build_revision(), [build_scope()]
+
+
 def test_scanner_wraps_schema_parse_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -267,14 +275,38 @@ def test_scanner_wraps_schema_parse_error(
     ) as exc_info:
         scanner.scan(
             target=build_target(),
-            authorization_profile=build_profile(),
+            authorization_revision=build_revision(),
             scopes=[build_scope()],
+            refresh_authorization=refresh_authorization,
         )
 
     assert isinstance(
         exc_info.value.__cause__,
         ValueError,
     )
+
+
+def test_missing_refresh_fails_closed_without_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scanner = build_scanner()
+    network_called = False
+
+    def fetch_schema(url: str):
+        nonlocal network_called
+        network_called = True
+        return {"paths": {}}
+
+    monkeypatch.setattr(scanner, "_fetch_schema", fetch_schema)
+    with pytest.raises(OpenAPIPolicyDenied) as exc_info:
+        scanner.scan(
+            target=build_target(),
+            authorization_revision=build_revision(),
+            scopes=[build_scope()],
+        )
+
+    assert exc_info.value.decision.code == "authorization_refresh_missing"
+    assert network_called is False
 
 
 def test_fetch_schema_disables_environment_proxy() -> None:
@@ -346,6 +378,7 @@ def allowed_decision() -> PolicyDecision:
         code="allowed_by_scope",
         reason="Request matches an active scope.",
         authorization_profile_id=100,
+        authorization_revision_id=200,
         evaluated_at=datetime.now(timezone.utc),
         matched_scope_id=1,
     )
@@ -357,6 +390,7 @@ def denied_decision(code: str) -> PolicyDecision:
         code=code,
         reason="Request denied for test.",
         authorization_profile_id=100,
+        authorization_revision_id=200,
         evaluated_at=datetime.now(timezone.utc),
     )
 
@@ -379,11 +413,21 @@ def test_scan_orders_policy_rate_limit_policy_network(
 
     scanner.scan(
         target=build_target(),
-        authorization_profile=build_profile(),
+        authorization_revision=build_revision(),
         scopes=[build_scope()],
+        refresh_authorization=lambda: (
+            events.append("refresh")
+            or (build_target(), build_revision(), [build_scope()])
+        ),
     )
 
-    assert events == ["policy", "rate-limit", "policy", "network"]
+    assert events == [
+        "policy",
+        "rate-limit",
+        "refresh",
+        "policy",
+        "network",
+    ]
     assert policy_engine.evaluation_count == 2
     assert rate_limiter.calls == [("target:1", 1000.0)]
 
@@ -405,7 +449,7 @@ def test_first_policy_denial_skips_limiter_and_network(
     with pytest.raises(OpenAPIPolicyDenied) as exc_info:
         scanner.scan(
             target=build_target(),
-            authorization_profile=build_profile(),
+            authorization_revision=build_revision(),
             scopes=[],
         )
 
@@ -433,8 +477,9 @@ def test_final_policy_denial_after_wait_skips_network(
     with pytest.raises(OpenAPIPolicyDenied) as exc_info:
         scanner.scan(
             target=build_target(),
-            authorization_profile=build_profile(),
+            authorization_revision=build_revision(),
             scopes=[build_scope()],
+            refresh_authorization=refresh_authorization,
         )
 
     assert exc_info.value.decision.code == "authorization_expired"
@@ -458,14 +503,15 @@ def test_invalid_runtime_rate_fails_closed_before_network(
         return {"paths": {}}
 
     monkeypatch.setattr(scanner, "_fetch_schema", fetch_schema)
-    profile = build_profile()
-    profile.max_requests_per_second = invalid_rate
+    revision = build_revision()
+    revision.max_requests_per_second = invalid_rate
 
     with pytest.raises(OpenAPIPolicyDenied) as exc_info:
         scanner.scan(
             target=build_target(),
-            authorization_profile=profile,
+            authorization_revision=revision,
             scopes=[build_scope()],
+            refresh_authorization=refresh_authorization,
         )
 
     assert (

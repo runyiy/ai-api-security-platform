@@ -12,6 +12,7 @@ from app.api.routes.test_cases import generate_bola_cases
 from app.core.config import settings
 from app.credentials.bearer import BearerCredentialService
 from app.db.models.authorization_profile import AuthorizationProfile
+from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.credential_binding import CredentialBinding
 from app.db.models.credential_secret_version import CredentialSecretVersion
 from app.db.models.endpoint import Endpoint
@@ -82,6 +83,20 @@ def _seed_workflow(
         )
         db.add(authorization_profile)
         db.flush()
+        authorization_revision = AuthorizationRevision(
+            authorization_profile_id=authorization_profile.id,
+            revision_number=1,
+            lifecycle_state="active",
+            name=authorization_profile.name,
+            program_name=authorization_profile.program_name,
+            authorization_type=authorization_profile.authorization_type,
+            automation_allowed=True,
+            max_requests_per_second=1000.0,
+            allow_get=True,
+            require_human_execution_approval=False,
+        )
+        db.add(authorization_revision)
+        db.flush()
 
         target = Target(
             name=unique_name,
@@ -89,6 +104,7 @@ def _seed_workflow(
             environment="test",
             is_enabled=True,
             authorization_profile_id=authorization_profile.id,
+            authorization_revision_id=authorization_revision.id,
         )
         db.add(target)
         db.flush()
@@ -217,6 +233,11 @@ def _delete_workflow(target_id: int, profile_id: int) -> None:
             delete(CredentialBinding).where(CredentialBinding.id.in_(binding_ids))
         )
         db.execute(delete(Target).where(Target.id == target_id))
+        db.execute(
+            delete(AuthorizationRevision).where(
+                AuthorizationRevision.authorization_profile_id == profile_id
+            )
+        )
         db.execute(
             delete(AuthorizationProfile).where(
                 AuthorizationProfile.id == profile_id

@@ -1,9 +1,10 @@
 from dataclasses import dataclass
 import time
+from collections.abc import Callable
 
 import httpx
 
-from app.db.models.authorization_profile import AuthorizationProfile
+from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.scope import Scope
 from app.db.models.target import Target
 from app.executors.rate_limit import (
@@ -70,11 +71,14 @@ class PolicyEnforcedHTTPExecutor:
         self,
         *,
         target: Target,
-        authorization_profile: AuthorizationProfile | None,
+        authorization_revision: AuthorizationRevision | None,
         scopes: list[Scope],
         method: str,
         url: str,
         headers: dict[str, str],
+        refresh_authorization: Callable[
+            [], tuple[Target, AuthorizationRevision | None, list[Scope]]
+        ] | None = None,
     ) -> HTTPExecutionResult:
         normalized_method = (
             method.strip().upper()
@@ -94,7 +98,7 @@ class PolicyEnforcedHTTPExecutor:
 
         decision = self.policy_engine.evaluate(
             target=target,
-            authorization_profile=authorization_profile,
+            authorization_revision=authorization_revision,
             scopes=scopes,
             request_url=url,
             method=normalized_method,
@@ -103,26 +107,49 @@ class PolicyEnforcedHTTPExecutor:
         self._raise_if_denied(
             decision
         )
+        if refresh_authorization is None:
+            raise ExecutionBlockedError(
+                code="authorization_refresh_missing",
+                reason=(
+                    "Persisted authorization refresh is required before "
+                    "network execution."
+                ),
+            )
+        selected_revision_id = decision.authorization_revision_id
 
         try:
             self.rate_limiter.wait(
                 key=f"target:{target.id}",
                 requested_requests_per_second=(
-                    authorization_profile.max_requests_per_second
+                    authorization_revision.max_requests_per_second
                 ),
             )
         except RateLimitConfigurationError as exc:
             raise ExecutionBlockedError(
                 code="invalid_authorization_rate_limit",
                 reason=(
-                    "AuthorizationProfile request rate limit "
+                    "AuthorizationRevision request rate limit "
                     "must be finite and greater than zero."
                 ),
             ) from exc
 
+        target, authorization_revision, scopes = refresh_authorization()
+
+        if (
+            target.authorization_revision_id != selected_revision_id
+            or authorization_revision is None
+            or authorization_revision.id != selected_revision_id
+        ):
+            raise ExecutionBlockedError(
+                code="authorization_revision_changed",
+                reason=(
+                    "Target authorization revision changed before execution."
+                ),
+            )
+
         decision = self.policy_engine.evaluate(
             target=target,
-            authorization_profile=authorization_profile,
+            authorization_revision=authorization_revision,
             scopes=scopes,
             request_url=url,
             method=normalized_method,

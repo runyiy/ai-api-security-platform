@@ -15,4 +15,5 @@ class PolicyCheckResponse(BaseModel):
     reason: str
     matched_scope_id: int | None
     authorization_profile_id: int | None
+    authorization_revision_id: int | None
     evaluated_at: datetime

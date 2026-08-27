@@ -60,3 +60,13 @@ class TestRun(Base):
         nullable=False,
         server_default=func.now(),
     )
+
+    authorization_revision_id: Mapped[int | None] = mapped_column(
+        ForeignKey(
+            "authorization_revisions.id",
+            name="fk_test_runs_authorization_revision_id",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
+        index=True,
+    )
