@@ -7,7 +7,7 @@ from app.db.session import engine
 
 
 HEAD = "e6a8c0d2f4b7"
-LATEST = "b3d5f7a9c1e4"
+LATEST = "c5e7a9b1d3f6"
 PARENT = "d5f7a9c1e3b5"
 
 
@@ -25,6 +25,7 @@ def test_m5_03_migration_round_trip_preserves_preexisting_schema() -> None:
         later_tables = {
             "execution_plan_approval_records",
             "rate_reservation_states",
+            "execution_plan_claims",
         }
         preexisting = tables_before - {"safety_decision_records", *later_tables}
         assert "safety_decision_records" in tables_before

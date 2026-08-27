@@ -10,6 +10,7 @@ from app.db.models import (
     Endpoint,
     ExecutionPlan,
     ExecutionPlanApprovalRecord,
+    ExecutionPlanClaim,
     PlanAction,
     RateReservationState,
     Resource,
@@ -25,6 +26,10 @@ from app.executors.http import ExecutionBlockedError, PolicyEnforcedHTTPExecutor
 from app.executors.rate_limit import PostgresRateLimiter, RateLimiter
 from app.policies.scope_policy import ScopePolicyEngine
 from app.services.execution_plan_approval import record_plan_decision
+from app.services.execution_plan_claim import (
+    ExecutionClaimCoordinationError,
+    ExecutionPlanClaimService,
+)
 from app.services.plan_execution import PlanExecutionService
 from app.services.safety_audit import SafetyAuditService
 from app.services.test_case_planning import create_test_case_execution_plan
@@ -94,6 +99,11 @@ def approved_plan() -> tuple[int, int, int, int]:
                     ExecutionPlanApprovalRecord.execution_plan_id == plan_id
                 )
             )
+            db.execute(
+                delete(ExecutionPlanClaim).where(
+                    ExecutionPlanClaim.execution_plan_id == plan_id
+                )
+            )
             db.execute(delete(TestRun).where(TestRun.test_case_id.in_(test_case_ids)))
             db.execute(delete(PlanAction).where(PlanAction.execution_plan_id == plan_id))
             db.execute(delete(ExecutionPlan).where(ExecutionPlan.id == plan_id))
@@ -121,10 +131,14 @@ def execute(
     *,
     limiter: RateLimiter,
     gateway: RecordingGateway,
+    claim_service: ExecutionPlanClaimService | None = None,
+    claim_lease_seconds: float = 30.0,
 ) -> None:
     with SessionLocal() as db:
         PlanExecutionService(
             db=db,
+            claim_service=claim_service,
+            claim_lease_seconds=claim_lease_seconds,
             executor=PolicyEnforcedHTTPExecutor(
                 policy_engine=ScopePolicyEngine({"example.test"}),
                 rate_limiter=limiter,
@@ -295,4 +309,60 @@ def test_external_public_mode_remains_blocked_before_gateway(
         execute(plan_id, limiter=MutatingRateLimiter(), gateway=gateway)
 
     assert raised.value.code == "external_network_mode_not_ready"
+    assert gateway.target_ids == []
+
+
+def test_expired_claim_taken_over_during_rate_wait_fences_stale_worker(
+    approved_plan: tuple[int, int, int, int],
+) -> None:
+    plan_id, _, _, _ = approved_plan
+    claims = ExecutionPlanClaimService(bind=engine, attempt_timeout_seconds=0.1)
+
+    def take_over() -> None:
+        import time
+
+        time.sleep(0.08)
+        claims.acquire(plan_id, "takeover-owner", lease_seconds=2)
+
+    gateway = RecordingGateway()
+    with pytest.raises(ExecutionBlockedError) as raised:
+        execute(
+            plan_id,
+            limiter=MutatingRateLimiter(take_over),
+            gateway=gateway,
+            claim_service=claims,
+            claim_lease_seconds=0.05,
+        )
+
+    assert raised.value.code == "execution_plan_claim_lost"
+    assert gateway.target_ids == []
+    with SessionLocal() as db:
+        claim = db.get(ExecutionPlanClaim, plan_id)
+        assert claim is not None
+        assert claim.owner_id == "takeover-owner"
+        assert claim.fencing_generation == 2
+
+
+def test_claim_renew_coordination_failure_blocks_gateway(
+    approved_plan: tuple[int, int, int, int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_id, _, _, _ = approved_plan
+    claims = ExecutionPlanClaimService(bind=engine, attempt_timeout_seconds=0.1)
+
+    def fail_renew(*args, **kwargs):
+        raise ExecutionClaimCoordinationError("private database details")
+
+    monkeypatch.setattr(claims, "renew", fail_renew)
+    gateway = RecordingGateway()
+    with pytest.raises(ExecutionBlockedError) as raised:
+        execute(
+            plan_id,
+            limiter=MutatingRateLimiter(),
+            gateway=gateway,
+            claim_service=claims,
+        )
+
+    assert raised.value.code == "execution_plan_claim_coordination_failed"
+    assert "private database details" not in raised.value.reason
     assert gateway.target_ids == []

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import uuid4
+
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
@@ -31,6 +33,12 @@ from app.services.execution_plan_approval import (
     is_plan_approved,
     validate_persisted_plan_integrity,
 )
+from app.services.execution_plan_claim import (
+    ExecutionClaimCoordinationError,
+    ExecutionClaimLostError,
+    ExecutionClaimUnavailableError,
+    ExecutionPlanClaimService,
+)
 from app.services.safety_audit import (
     SafetyAuditService,
     build_policy_decision_observer,
@@ -48,10 +56,21 @@ class PlanExecutionNotFoundError(PlanExecutionError):
 
 class PlanExecutionService:
     def __init__(
-        self, *, db: Session, executor: PolicyEnforcedHTTPExecutor
+        self,
+        *,
+        db: Session,
+        executor: PolicyEnforcedHTTPExecutor,
+        claim_service: ExecutionPlanClaimService | None = None,
+        claim_lease_seconds: float = 30.0,
+        claim_owner_id: str | None = None,
     ) -> None:
         self.db = db
         self.executor = executor
+        self.claim_service = claim_service or ExecutionPlanClaimService(
+            bind=db.get_bind()
+        )
+        self.claim_lease_seconds = claim_lease_seconds
+        self.claim_owner_id = claim_owner_id or str(uuid4())
 
     def execute(self, *, execution_plan_id: int) -> TestRun:
         if self.db.get(ExecutionPlan, execution_plan_id) is None:
@@ -177,9 +196,40 @@ class PlanExecutionService:
                 reason=str(exc),
             )
 
+        # End the preflight transaction before the independently committed claim
+        # transaction. No claim lock may span rate waiting or network I/O.
+        self.db.commit()
+        try:
+            claim_handle = self.claim_service.acquire(
+                plan.id,
+                self.claim_owner_id,
+                lease_seconds=self.claim_lease_seconds,
+            )
+        except ExecutionClaimUnavailableError:
+            self._raise_preflight_blocked(
+                target_id=target.id,
+                revision_id=revision.id,
+                test_case_id=test_case.id,
+                plan_id=plan.id,
+                action_id=action.id,
+                code="execution_plan_claim_unavailable",
+                reason="ExecutionPlan is already claimed for execution.",
+            )
+        except ExecutionClaimCoordinationError:
+            self._raise_preflight_blocked(
+                target_id=target.id,
+                revision_id=revision.id,
+                test_case_id=test_case.id,
+                plan_id=plan.id,
+                action_id=action.id,
+                code="execution_plan_claim_coordination_failed",
+                reason="ExecutionPlan claim coordination failed.",
+            )
+
         observed_status = test_case.status
         if observed_status == "running":
             self.db.commit()
+            self.claim_service.release(claim_handle)
             raise PlanExecutionError("TestCase is already running.")
         acquired = self.db.scalar(
             update(TestCase)
@@ -190,6 +240,7 @@ class PlanExecutionService:
         )
         if acquired is None:
             self.db.commit()
+            self.claim_service.release(claim_handle)
             raise PlanExecutionError("TestCase execution state changed.")
         set_committed_value(test_case, "status", "running")
 
@@ -215,6 +266,22 @@ class PlanExecutionService:
         self.db.commit()
 
         def refresh_authorization():
+            nonlocal claim_handle
+            try:
+                claim_handle = self.claim_service.renew(
+                    claim_handle,
+                    lease_seconds=self.claim_lease_seconds,
+                )
+            except ExecutionClaimLostError as exc:
+                raise ExecutionBlockedError(
+                    code="execution_plan_claim_lost",
+                    reason="ExecutionPlan execution claim was lost before network.",
+                ) from exc
+            except ExecutionClaimCoordinationError as exc:
+                raise ExecutionBlockedError(
+                    code="execution_plan_claim_coordination_failed",
+                    reason="ExecutionPlan claim coordination failed.",
+                ) from exc
             with Session(
                 bind=self.db.get_bind(), expire_on_commit=False
             ) as fresh_db:
@@ -285,18 +352,25 @@ class PlanExecutionService:
                 outcome="failed",
                 error_message=str(exc),
             )
-        return self._finish(
-            test_case=test_case,
-            request_data=request_data,
-            target_id=target_id,
-            revision_id=revision_id,
-            plan_id=plan_id,
-            action_id=action_id,
-            outcome="succeeded",
-            response_status=result.status_code,
-            response_body=decode_response_body(result.body),
-            duration_ms=result.duration_ms,
-        )
+        else:
+            return self._finish(
+                test_case=test_case,
+                request_data=request_data,
+                target_id=target_id,
+                revision_id=revision_id,
+                plan_id=plan_id,
+                action_id=action_id,
+                outcome="succeeded",
+                response_status=result.status_code,
+                response_body=decode_response_body(result.body),
+                duration_ms=result.duration_ms,
+            )
+        finally:
+            try:
+                self.claim_service.release(claim_handle)
+            except ExecutionClaimLostError:
+                # A stale owner must not alter the successor's durable claim.
+                pass
 
     def _raise_preflight_blocked(
         self,
