@@ -12,11 +12,19 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.models.authorization_profile import AuthorizationProfile
+from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.session import get_db
 from app.schemas.authorization_profile import (
     AuthorizationProfileCreate,
     AuthorizationProfileRead,
     AuthorizationProfileUpdate,
+)
+from app.schemas.authorization_revision import AuthorizationRevisionRead
+from app.services.authorization_revision import (
+    InvalidRevisionTransitionError,
+    RevisionNotFoundError,
+    create_revision,
+    transition_revision,
 )
 
 
@@ -108,10 +116,13 @@ def update_authorization_profile(
     payload: AuthorizationProfileUpdate,
     db: Session = Depends(get_db),
 ) -> AuthorizationProfile:
-    profile = get_profile_or_404(
-        db=db,
-        profile_id=profile_id,
+    profile = db.scalar(
+        select(AuthorizationProfile)
+        .where(AuthorizationProfile.id == profile_id)
+        .with_for_update()
     )
+    if profile is None:
+        raise HTTPException(status_code=404, detail="AuthorizationProfile not found.")
     supplied_values = payload.model_dump(
         exclude_unset=True
     )
@@ -168,11 +179,100 @@ def delete_authorization_profile(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                "AuthorizationProfile is referenced "
-                "by one or more Targets."
+                "AuthorizationProfile is referenced by retained "
+                "revision history or one or more Targets."
             ),
         ) from exc
 
     return Response(
         status_code=status.HTTP_204_NO_CONTENT
     )
+
+
+@router.post(
+    "/{profile_id}/revisions",
+    response_model=AuthorizationRevisionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_authorization_revision(
+    profile_id: int,
+    db: Session = Depends(get_db),
+) -> AuthorizationRevision:
+    try:
+        return create_revision(db, profile_id)
+    except RevisionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="AuthorizationProfile not found.") from exc
+    except IntegrityError as exc:
+        raise HTTPException(status_code=409, detail="Revision creation conflict.") from exc
+
+
+@router.get(
+    "/{profile_id}/revisions",
+    response_model=list[AuthorizationRevisionRead],
+)
+def list_authorization_revisions(
+    profile_id: int,
+    db: Session = Depends(get_db),
+) -> list[AuthorizationRevision]:
+    get_profile_or_404(db=db, profile_id=profile_id)
+    return list(db.scalars(
+        select(AuthorizationRevision)
+        .where(AuthorizationRevision.authorization_profile_id == profile_id)
+        .order_by(AuthorizationRevision.revision_number)
+    ).all())
+
+
+@router.get(
+    "/{profile_id}/revisions/{revision_id}",
+    response_model=AuthorizationRevisionRead,
+)
+def get_authorization_revision(
+    profile_id: int,
+    revision_id: int,
+    db: Session = Depends(get_db),
+) -> AuthorizationRevision:
+    revision = db.scalar(select(AuthorizationRevision).where(
+        AuthorizationRevision.id == revision_id,
+        AuthorizationRevision.authorization_profile_id == profile_id,
+    ))
+    if revision is None:
+        raise HTTPException(status_code=404, detail="AuthorizationRevision not found.")
+    return revision
+
+
+def apply_revision_transition(
+    profile_id: int,
+    revision_id: int,
+    destination: str,
+    db: Session,
+) -> AuthorizationRevision:
+    try:
+        return transition_revision(db, profile_id, revision_id, destination)
+    except RevisionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="AuthorizationRevision not found.") from exc
+    except InvalidRevisionTransitionError as exc:
+        raise HTTPException(status_code=409, detail="Invalid revision lifecycle transition.") from exc
+
+
+@router.post(
+    "/{profile_id}/revisions/{revision_id}/activate",
+    response_model=AuthorizationRevisionRead,
+)
+def activate_authorization_revision(
+    profile_id: int,
+    revision_id: int,
+    db: Session = Depends(get_db),
+) -> AuthorizationRevision:
+    return apply_revision_transition(profile_id, revision_id, "active", db)
+
+
+@router.post(
+    "/{profile_id}/revisions/{revision_id}/revoke",
+    response_model=AuthorizationRevisionRead,
+)
+def revoke_authorization_revision(
+    profile_id: int,
+    revision_id: int,
+    db: Session = Depends(get_db),
+) -> AuthorizationRevision:
+    return apply_revision_transition(profile_id, revision_id, "revoked", db)

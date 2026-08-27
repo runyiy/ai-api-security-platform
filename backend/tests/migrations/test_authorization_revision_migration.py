@@ -6,7 +6,7 @@ from sqlalchemy import inspect
 from app.db.session import engine
 
 
-HEAD_REVISION = "f8c6d5e4b3a2"
+HEAD_REVISION = "b2d4f6a8c0e1"
 PARENT_REVISION = "e7a5b4c3d2f1"
 
 
@@ -70,6 +70,16 @@ def test_authorization_revision_migration_round_trip() -> None:
                 "column_names": ["authorization_profile_id"],
                 "include_columns": [],
                 "dialect_options": {"postgresql_include": []},
+            },
+            {
+                "name": "uq_authorization_revisions_one_active_per_profile",
+                "unique": True,
+                "column_names": ["authorization_profile_id"],
+                "include_columns": [],
+                "dialect_options": {
+                    "postgresql_include": [],
+                    "postgresql_where": "((lifecycle_state)::text = 'active'::text)",
+                },
             },
             {
                 "name": "uq_authorization_revisions_profile_revision_number",
