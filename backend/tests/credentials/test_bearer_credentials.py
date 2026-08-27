@@ -163,6 +163,54 @@ def test_resolve_requires_exactly_one_active_matching_binding(
             BearerCredentialService(db=db, provider=provider()).resolve(identity)
 
 
+def test_resolve_binding_uses_only_the_exact_selected_binding(
+    bearer_identity: tuple[int, int],
+) -> None:
+    _, identity_id = bearer_identity
+    with SessionLocal() as db:
+        identity = db.get(TestIdentity, identity_id)
+        assert identity is not None
+        service = BearerCredentialService(db=db, provider=provider())
+        selected = service.provision(
+            identity=identity, token=SecretStr("selected-token")
+        )
+        service.provision(identity=identity, token=SecretStr("other-token"))
+        db.flush()
+
+        token = service.resolve_binding(
+            identity=identity, credential_binding_id=selected.id
+        )
+
+        assert token.get_secret_value() == "selected-token"
+
+
+@pytest.mark.parametrize("change", ["inactive", "wrong_type", "wrong_source"])
+def test_resolve_binding_rejects_invalid_exact_binding_without_substitution(
+    bearer_identity: tuple[int, int], change: str
+) -> None:
+    _, identity_id = bearer_identity
+    with SessionLocal() as db:
+        identity = db.get(TestIdentity, identity_id)
+        assert identity is not None
+        service = BearerCredentialService(db=db, provider=provider())
+        selected = service.provision(
+            identity=identity, token=SecretStr("selected-token")
+        )
+        service.provision(identity=identity, token=SecretStr("other-token"))
+        if change == "inactive":
+            selected.is_active = False
+        elif change == "wrong_type":
+            selected.auth_type = "basic"
+        else:
+            selected.source_type = "external_reference"
+        db.flush()
+
+        with pytest.raises(BearerCredentialError, match="unavailable"):
+            service.resolve_binding(
+                identity=identity, credential_binding_id=selected.id
+            )
+
+
 def test_inactive_or_nonmatching_binding_is_not_selected(
     bearer_identity: tuple[int, int],
 ) -> None:

@@ -88,6 +88,15 @@ def test_allows_valid_profile_and_matching_scope() -> None:
     assert decision.matched_scope_id == 10
 
 
+def test_human_approval_setting_does_not_change_generic_scope_policy() -> None:
+    decision = evaluate(
+        revision=build_revision(require_human_execution_approval=True)
+    )
+
+    assert decision.allowed is True
+    assert decision.code == "allowed_by_scope"
+
+
 def test_denies_disabled_target() -> None:
     target = build_target()
     target.is_enabled = False
@@ -227,14 +236,6 @@ def test_denies_when_automation_is_not_allowed() -> None:
 
     assert decision.code == "automation_not_allowed"
     assert decision.authorization_profile_id == 100
-
-
-def test_denies_when_human_approval_is_required() -> None:
-    decision = evaluate(
-        revision=build_revision(require_human_execution_approval=True)
-    )
-
-    assert decision.code == "human_approval_required"
 
 
 def test_denies_when_revision_disallows_method() -> None:

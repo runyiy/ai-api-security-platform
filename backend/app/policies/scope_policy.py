@@ -334,16 +334,6 @@ class ScopePolicyEngine:
                 ),
             )
 
-        if authorization_revision.require_human_execution_approval:
-            return decision(
-                allowed=False,
-                code="human_approval_required",
-                reason=(
-                    "AuthorizationRevision requires human execution "
-                    "approval, which is not available."
-                ),
-            )
-
         try:
             request_origin = parse_origin(
                 request_url

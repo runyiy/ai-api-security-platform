@@ -289,6 +289,30 @@ def test_scanner_wraps_schema_parse_error(
     )
 
 
+def test_human_execution_approval_does_not_block_openapi_import(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scanner = build_scanner()
+    revision = build_revision()
+    revision.require_human_execution_approval = True
+    monkeypatch.setattr(scanner, "_fetch_schema", lambda **kwargs: {"paths": {}})
+
+    source_url, endpoints = scanner.scan(
+        target=build_target(),
+        authorization_revision=revision,
+        scopes=[build_scope()],
+        refresh_authorization=lambda: (
+            build_target(),
+            revision,
+            [build_scope()],
+        ),
+        policy_decision_observer=lambda decision: None,
+    )
+
+    assert source_url == "https://example.test/openapi.json"
+    assert endpoints == []
+
+
 def test_missing_refresh_fails_closed_without_fetch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

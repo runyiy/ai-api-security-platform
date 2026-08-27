@@ -156,6 +156,41 @@ class BearerCredentialService:
                 "Bearer credential is unavailable."
             ) from None
 
+    def resolve_binding(
+        self, *, identity: TestIdentity, credential_binding_id: int
+    ) -> SecretStr:
+        if (
+            identity.id is None
+            or not identity.is_active
+            or identity.auth_type != "bearer"
+        ):
+            raise BearerCredentialError("Bearer credential is unavailable.")
+        binding = self.db.get(CredentialBinding, credential_binding_id)
+        if (
+            binding is None
+            or binding.test_identity_id != identity.id
+            or binding.auth_type != identity.auth_type
+            or binding.source_type != "stored_secret"
+            or not binding.is_active
+        ):
+            raise BearerCredentialError("Bearer credential is unavailable.")
+        version = self.db.scalar(
+            select(CredentialSecretVersion)
+            .where(
+                CredentialSecretVersion.credential_binding_id == binding.id
+            )
+            .order_by(CredentialSecretVersion.id.desc())
+            .limit(1)
+        )
+        if version is None:
+            raise BearerCredentialError("Bearer credential is unavailable.")
+        try:
+            return self._get_provider().load_secret(version)
+        except StoredSecretError:
+            raise BearerCredentialError(
+                "Bearer credential is unavailable."
+            ) from None
+
     def _matching_bindings(
         self,
         *,

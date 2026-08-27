@@ -234,6 +234,18 @@ class TestExecutionService:
                 target.authorization_revision_id,
             )
 
+        if (
+            authorization_revision is not None
+            and authorization_revision.require_human_execution_approval
+        ):
+            raise ExecutionBlockedError(
+                code="plan_bound_execution_required",
+                reason=(
+                    "Human approval requires execution through an exact "
+                    "approved ExecutionPlan."
+                ),
+            )
+
         if actor.target_id != target.id:
             raise TestExecutionError(
                 "Actor belongs to a different target."
