@@ -11,6 +11,7 @@ from app.db.models import (
     ExecutionPlan,
     ExecutionPlanApprovalRecord,
     PlanAction,
+    RateReservationState,
     Resource,
     SafetyDecisionRecord,
     Scope,
@@ -19,8 +20,9 @@ from app.db.models import (
     TestIdentity,
     TestRun,
 )
-from app.db.session import SessionLocal
+from app.db.session import SessionLocal, engine
 from app.executors.http import ExecutionBlockedError, PolicyEnforcedHTTPExecutor
+from app.executors.rate_limit import PostgresRateLimiter, RateLimiter
 from app.policies.scope_policy import ScopePolicyEngine
 from app.services.execution_plan_approval import record_plan_decision
 from app.services.plan_execution import PlanExecutionService
@@ -83,6 +85,11 @@ def approved_plan() -> tuple[int, int, int, int]:
                 )
             )
             db.execute(
+                delete(RateReservationState).where(
+                    RateReservationState.key == f"target:{target_id}"
+                )
+            )
+            db.execute(
                 delete(ExecutionPlanApprovalRecord).where(
                     ExecutionPlanApprovalRecord.execution_plan_id == plan_id
                 )
@@ -112,7 +119,7 @@ def approved_plan() -> tuple[int, int, int, int]:
 def execute(
     plan_id: int,
     *,
-    limiter: MutatingRateLimiter,
+    limiter: RateLimiter,
     gateway: RecordingGateway,
 ) -> None:
     with SessionLocal() as db:
@@ -126,10 +133,23 @@ def execute(
         ).execute(execution_plan_id=plan_id)
 
 
+def shared_limiter_with_wait_mutation(target_id: int, mutation) -> PostgresRateLimiter:
+    limiter = PostgresRateLimiter(
+        requests_per_second=100.0,
+        bind=engine,
+        sleep=lambda delay: mutation(),
+    )
+    limiter.reserve_delay(
+        key=f"target:{target_id}",
+        requested_requests_per_second=1.0,
+    )
+    return limiter
+
+
 def test_approval_revoked_during_rate_wait_blocks_gateway(
     approved_plan: tuple[int, int, int, int],
 ) -> None:
-    plan_id, _, _, _ = approved_plan
+    plan_id, target_id, _, _ = approved_plan
 
     def revoke() -> None:
         with SessionLocal() as db:
@@ -140,7 +160,11 @@ def test_approval_revoked_during_rate_wait_blocks_gateway(
 
     gateway = RecordingGateway()
     with pytest.raises(ExecutionBlockedError) as raised:
-        execute(plan_id, limiter=MutatingRateLimiter(revoke), gateway=gateway)
+        execute(
+            plan_id,
+            limiter=shared_limiter_with_wait_mutation(target_id, revoke),
+            gateway=gateway,
+        )
 
     assert raised.value.code == "execution_plan_approval_changed"
     assert gateway.target_ids == []
@@ -179,7 +203,11 @@ def test_authorization_change_during_rate_wait_blocks_gateway(
 
     gateway = RecordingGateway()
     with pytest.raises(ExecutionBlockedError):
-        execute(plan_id, limiter=MutatingRateLimiter(mutate), gateway=gateway)
+        execute(
+            plan_id,
+            limiter=shared_limiter_with_wait_mutation(target_id, mutate),
+            gateway=gateway,
+        )
 
     assert gateway.target_ids == []
 
@@ -200,7 +228,7 @@ def test_scope_narrowing_during_rate_wait_blocks_gateway(
     with pytest.raises(ExecutionBlockedError) as raised:
         execute(
             plan_id,
-            limiter=MutatingRateLimiter(narrow_scope),
+            limiter=shared_limiter_with_wait_mutation(target_id, narrow_scope),
             gateway=gateway,
         )
 

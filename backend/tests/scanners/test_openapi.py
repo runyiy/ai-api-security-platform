@@ -5,7 +5,7 @@ import pytest
 from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.scope import Scope
 from app.db.models.target import Target
-from app.executors.rate_limit import InMemoryRateLimiter
+from app.executors.rate_limit import InMemoryRateLimiter, RateLimitCoordinationError
 from app.policies.scope_policy import PolicyDecision, ScopePolicyEngine
 from app.scanners.openapi import (
     MAX_OPENAPI_RESPONSE_BYTES,
@@ -333,6 +333,36 @@ def test_missing_refresh_fails_closed_without_fetch(
         )
 
     assert exc_info.value.code == "authorization_refresh_missing"
+    assert network_called is False
+
+
+def test_shared_rate_coordination_failure_blocks_without_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FailingLimiter:
+        def wait(self, **kwargs):
+            raise RateLimitCoordinationError("database details")
+
+    scanner = build_scanner()
+    scanner.rate_limiter = FailingLimiter()
+    network_called = False
+
+    def fetch_schema(**kwargs):
+        nonlocal network_called
+        network_called = True
+        return {"paths": {}}
+
+    monkeypatch.setattr(scanner, "_fetch_schema", fetch_schema)
+    with pytest.raises(OpenAPIExecutionBlocked) as raised:
+        scanner.scan(
+            target=build_target(),
+            authorization_revision=build_revision(),
+            scopes=[build_scope()],
+            refresh_authorization=refresh_authorization,
+            policy_decision_observer=lambda decision: None,
+        )
+
+    assert raised.value.code == "shared_rate_coordination_failed"
     assert network_called is False
 
 
