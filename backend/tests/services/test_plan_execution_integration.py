@@ -1,8 +1,9 @@
 from types import SimpleNamespace
+import time
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 
 from app.db.models import (
     AuthorizationProfile,
@@ -10,6 +11,7 @@ from app.db.models import (
     Endpoint,
     ExecutionPlan,
     ExecutionPlanApprovalRecord,
+    ExecutionPlanClaim,
     PlanAction,
     RateReservationState,
     Resource,
@@ -23,8 +25,13 @@ from app.db.models import (
 from app.db.session import SessionLocal, engine
 from app.executors.http import ExecutionBlockedError, PolicyEnforcedHTTPExecutor
 from app.executors.rate_limit import PostgresRateLimiter, RateLimiter
+from app.network_safety.gateway import NetworkGatewayError
 from app.policies.scope_policy import ScopePolicyEngine
 from app.services.execution_plan_approval import record_plan_decision
+from app.services.execution_plan_claim import (
+    ExecutionClaimCoordinationError,
+    ExecutionPlanClaimService,
+)
 from app.services.plan_execution import PlanExecutionService
 from app.services.safety_audit import SafetyAuditService
 from app.services.test_case_planning import create_test_case_execution_plan
@@ -49,6 +56,36 @@ class RecordingGateway:
     def request(self, **kwargs):
         self.target_ids.append(kwargs["target_id"])
         return SimpleNamespace(status_code=200, body=b"{}", duration_ms=1)
+
+
+class FailingGateway(RecordingGateway):
+    def request(self, **kwargs):
+        self.target_ids.append(kwargs["target_id"])
+        raise NetworkGatewayError(code="synthetic_network_failure", reason="failed")
+
+
+class ReleaseCoordinationFailureClaims:
+    def __init__(self) -> None:
+        self.delegate = ExecutionPlanClaimService(
+            bind=engine, attempt_timeout_seconds=0.1
+        )
+        self.acquired = []
+        self.renewed = []
+        self.release_attempts = []
+
+    def acquire(self, *args, **kwargs):
+        handle = self.delegate.acquire(*args, **kwargs)
+        self.acquired.append(handle)
+        return handle
+
+    def renew(self, *args, **kwargs):
+        handle = self.delegate.renew(*args, **kwargs)
+        self.renewed.append(handle)
+        return handle
+
+    def release(self, handle) -> None:
+        self.release_attempts.append(handle)
+        raise ExecutionClaimCoordinationError("private owner and database details")
 
 
 @pytest.fixture
@@ -94,6 +131,11 @@ def approved_plan() -> tuple[int, int, int, int]:
                     ExecutionPlanApprovalRecord.execution_plan_id == plan_id
                 )
             )
+            db.execute(
+                delete(ExecutionPlanClaim).where(
+                    ExecutionPlanClaim.execution_plan_id == plan_id
+                )
+            )
             db.execute(delete(TestRun).where(TestRun.test_case_id.in_(test_case_ids)))
             db.execute(delete(PlanAction).where(PlanAction.execution_plan_id == plan_id))
             db.execute(delete(ExecutionPlan).where(ExecutionPlan.id == plan_id))
@@ -121,10 +163,14 @@ def execute(
     *,
     limiter: RateLimiter,
     gateway: RecordingGateway,
-) -> None:
+    claim_service: ExecutionPlanClaimService | None = None,
+    claim_lease_seconds: float = 30.0,
+) -> TestRun:
     with SessionLocal() as db:
-        PlanExecutionService(
+        return PlanExecutionService(
             db=db,
+            claim_service=claim_service,
+            claim_lease_seconds=claim_lease_seconds,
             executor=PolicyEnforcedHTTPExecutor(
                 policy_engine=ScopePolicyEngine({"example.test"}),
                 rate_limiter=limiter,
@@ -141,7 +187,7 @@ def shared_limiter_with_wait_mutation(target_id: int, mutation) -> PostgresRateL
     )
     limiter.reserve_delay(
         key=f"target:{target_id}",
-        requested_requests_per_second=1.0,
+        requested_requests_per_second=0.1,
     )
     return limiter
 
@@ -296,3 +342,216 @@ def test_external_public_mode_remains_blocked_before_gateway(
 
     assert raised.value.code == "external_network_mode_not_ready"
     assert gateway.target_ids == []
+
+
+def test_expired_claim_taken_over_during_rate_wait_fences_stale_worker(
+    approved_plan: tuple[int, int, int, int],
+) -> None:
+    plan_id, _, _, _ = approved_plan
+    claims = ExecutionPlanClaimService(bind=engine, attempt_timeout_seconds=0.1)
+
+    def take_over() -> None:
+        import time
+
+        time.sleep(0.08)
+        claims.acquire(plan_id, "takeover-owner", lease_seconds=2)
+
+    gateway = RecordingGateway()
+    with pytest.raises(ExecutionBlockedError) as raised:
+        execute(
+            plan_id,
+            limiter=MutatingRateLimiter(take_over),
+            gateway=gateway,
+            claim_service=claims,
+            claim_lease_seconds=0.05,
+        )
+
+    assert raised.value.code == "execution_plan_claim_lost"
+    assert gateway.target_ids == []
+    with SessionLocal() as db:
+        claim = db.get(ExecutionPlanClaim, plan_id)
+        assert claim is not None
+        assert claim.owner_id == "takeover-owner"
+        assert claim.fencing_generation == 2
+
+
+def test_claim_renew_coordination_failure_blocks_gateway(
+    approved_plan: tuple[int, int, int, int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_id, _, _, _ = approved_plan
+    claims = ExecutionPlanClaimService(bind=engine, attempt_timeout_seconds=0.1)
+
+    def fail_renew(*args, **kwargs):
+        raise ExecutionClaimCoordinationError("private database details")
+
+    monkeypatch.setattr(claims, "renew", fail_renew)
+    gateway = RecordingGateway()
+    with pytest.raises(ExecutionBlockedError) as raised:
+        execute(
+            plan_id,
+            limiter=MutatingRateLimiter(),
+            gateway=gateway,
+            claim_service=claims,
+        )
+
+    assert raised.value.code == "execution_plan_claim_coordination_failed"
+    assert "private database details" not in raised.value.reason
+    assert gateway.target_ids == []
+
+
+def test_expired_old_owner_is_not_blocked_by_stale_running_test_case(
+    approved_plan: tuple[int, int, int, int],
+) -> None:
+    plan_id, _, _, _ = approved_plan
+    claims = ExecutionPlanClaimService(bind=engine, attempt_timeout_seconds=0.1)
+    first = claims.acquire(plan_id, "dead-worker", lease_seconds=0.05)
+    with SessionLocal() as db:
+        action = db.scalar(
+            select(PlanAction).where(PlanAction.execution_plan_id == plan_id)
+        )
+        assert action is not None
+        test_case = db.get(TestCase, action.test_case_id)
+        assert test_case is not None
+        test_case.status = "running"
+        db.commit()
+    time.sleep(0.08)
+
+    result = execute(
+        plan_id,
+        limiter=MutatingRateLimiter(),
+        gateway=RecordingGateway(),
+        claim_service=claims,
+    )
+
+    assert result.response_status == 200
+    with SessionLocal() as db:
+        claim = db.get(ExecutionPlanClaim, plan_id)
+        assert claim is not None
+        assert claim.fencing_generation == first.fencing_generation + 1
+        assert claim.owner_id is None
+
+
+def test_claim_is_committed_and_unlocked_before_rate_wait(
+    approved_plan: tuple[int, int, int, int],
+) -> None:
+    plan_id, _, _, _ = approved_plan
+    observed: list[tuple[str | None, int]] = []
+
+    def inspect_claim_during_wait() -> None:
+        with SessionLocal() as db:
+            row = db.execute(
+                text(
+                    "SELECT owner_id, fencing_generation "
+                    "FROM execution_plan_claims "
+                    "WHERE execution_plan_id=:plan_id FOR UPDATE NOWAIT"
+                ),
+                {"plan_id": plan_id},
+            ).one()
+            observed.append((row.owner_id, row.fencing_generation))
+            db.commit()
+
+    result = execute(
+        plan_id,
+        limiter=MutatingRateLimiter(inspect_claim_during_wait),
+        gateway=RecordingGateway(),
+    )
+
+    assert result.response_status == 200
+    assert len(observed) == 1
+    assert observed[0][0]
+    assert observed[0][1] == 1
+
+
+@pytest.mark.parametrize(
+    ("path", "expected_status", "expected_block_code"),
+    [
+        ("success", 200, None),
+        ("http_failed", None, None),
+        ("blocked", None, "external_network_mode_not_ready"),
+    ],
+)
+def test_release_coordination_failure_preserves_original_outcome_and_is_audited(
+    approved_plan: tuple[int, int, int, int],
+    path: str,
+    expected_status: int | None,
+    expected_block_code: str | None,
+) -> None:
+    plan_id, target_id, _, _ = approved_plan
+    claims = ReleaseCoordinationFailureClaims()
+    gateway: RecordingGateway = (
+        FailingGateway() if path == "http_failed" else RecordingGateway()
+    )
+    if path == "blocked":
+        with SessionLocal() as db:
+            target = db.get(Target, target_id)
+            assert target is not None
+            target.network_mode = "external_public_authorized"
+            db.commit()
+
+    if expected_block_code is not None:
+        with pytest.raises(ExecutionBlockedError) as raised:
+            execute(
+                plan_id,
+                limiter=MutatingRateLimiter(),
+                gateway=gateway,
+                claim_service=claims,
+            )
+        assert raised.value.code == expected_block_code
+    else:
+        result = execute(
+            plan_id,
+            limiter=MutatingRateLimiter(),
+            gateway=gateway,
+            claim_service=claims,
+        )
+        assert result.response_status == expected_status
+        if path == "http_failed":
+            assert result.error_message == "synthetic_network_failure: failed"
+
+    assert len(claims.release_attempts) == 1
+    assert len(claims.renewed) == 1
+    assert claims.release_attempts[0] == claims.renewed[0]
+    assert (
+        claims.release_attempts[0].execution_plan_id,
+        claims.release_attempts[0].owner_id,
+        claims.release_attempts[0].fencing_generation,
+    ) == (
+        claims.acquired[0].execution_plan_id,
+        claims.acquired[0].owner_id,
+        claims.acquired[0].fencing_generation,
+    )
+    with SessionLocal() as db:
+        action = db.scalar(
+            select(PlanAction).where(PlanAction.execution_plan_id == plan_id)
+        )
+        assert action is not None
+        cleanup = db.scalar(
+            select(SafetyDecisionRecord)
+            .where(
+                SafetyDecisionRecord.execution_plan_id == plan_id,
+                SafetyDecisionRecord.code
+                == "execution_plan_claim_cleanup_failed",
+            )
+            .order_by(SafetyDecisionRecord.id.desc())
+        )
+        assert cleanup is not None
+        assert cleanup.reason == "ExecutionPlan claim cleanup could not be completed."
+        assert "private" not in cleanup.reason
+        claim = db.get(ExecutionPlanClaim, plan_id)
+        assert claim is not None
+        assert claim.owner_id == claims.acquired[0].owner_id
+        assert claim.fencing_generation == claims.acquired[0].fencing_generation
+        if path != "blocked":
+            persisted_run = db.scalar(
+                select(TestRun)
+                .where(TestRun.test_case_id == action.test_case_id)
+                .order_by(TestRun.id.desc())
+            )
+            assert persisted_run is not None
+            assert persisted_run.response_status == expected_status
+            assert persisted_run.error_message == (
+                "synthetic_network_failure: failed"
+                if path == "http_failed"
+                else None
+            )
