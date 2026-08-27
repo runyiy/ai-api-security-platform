@@ -29,6 +29,7 @@ def build_target() -> Target:
         name="Local Lab",
         base_url="http://localhost:8001",
         environment="development",
+        network_mode="private_local",
         is_enabled=True,
     )
 
@@ -206,6 +207,35 @@ def test_failing_audit_observer_fails_closed_without_network() -> None:
 
     assert exc_info.value.code == "safety_audit_persistence_failed"
     assert network_called is False
+
+
+def test_external_network_mode_is_audited_then_blocked_without_network() -> None:
+    events: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        events.append("network")
+        return httpx.Response(200)
+
+    target = build_target()
+    target.network_mode = "external_public_authorized"
+    with pytest.raises(ExecutionBlockedError) as exc_info:
+        build_executor(handler).execute(
+            target=target,
+            authorization_revision=build_revision(),
+            scopes=[build_scope()],
+            method="GET",
+            url="http://localhost:8001/api/projects/2001",
+            headers={},
+            refresh_authorization=lambda: (
+                target,
+                build_revision(),
+                [build_scope()],
+            ),
+            policy_decision_observer=lambda decision: events.append("audit"),
+        )
+
+    assert exc_info.value.code == "external_network_mode_not_ready"
+    assert events == ["audit"]
 
 
 def test_denies_request_outside_scope() -> None:

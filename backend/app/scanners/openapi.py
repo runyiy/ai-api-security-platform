@@ -10,6 +10,7 @@ from app.executors.rate_limit import (
     InMemoryRateLimiter,
     RateLimitConfigurationError,
 )
+from app.network_safety.destination import PRIVATE_LOCAL
 from app.policies.scope_policy import (
     PolicyDecision,
     ScopePolicyEngine,
@@ -333,6 +334,15 @@ class OpenAPIScanner:
         if not decision.allowed:
             raise OpenAPIPolicyDenied(
                 decision
+            )
+
+        if target.network_mode != PRIVATE_LOCAL:
+            raise OpenAPIExecutionBlocked(
+                code="external_network_mode_not_ready",
+                reason=(
+                    "External/public-authorized OpenAPI retrieval is not "
+                    "available until the centralized network gateway exists."
+                ),
             )
 
         schema = self._fetch_schema(

@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, func
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    String,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -12,6 +19,13 @@ from app.db.models.authorization_revision import AuthorizationRevision
 
 class Target(Base):
     __tablename__ = "targets"
+
+    __table_args__ = (
+        CheckConstraint(
+            "network_mode IN ('private_local', 'external_public_authorized')",
+            name="ck_targets_network_mode",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(
         primary_key=True,
@@ -62,6 +76,13 @@ class Target(Base):
         String(50),
         nullable=False,
         default="development",
+    )
+
+    network_mode: Mapped[str] = mapped_column(
+        String(40),
+        nullable=False,
+        default="private_local",
+        server_default="private_local",
     )
 
     is_enabled: Mapped[bool] = mapped_column(

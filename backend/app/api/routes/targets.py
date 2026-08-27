@@ -10,6 +10,7 @@ from app.schemas.target import (
     TargetAuthorizationProfileUpdate,
     TargetAuthorizationRevisionUpdate,
     TargetCreate,
+    TargetNetworkModeUpdate,
     TargetRead,
 )
 
@@ -33,12 +34,36 @@ def create_target(
         name=payload.name,
         base_url=str(payload.base_url),
         environment=payload.environment,
+        network_mode=payload.network_mode,
     )
 
     db.add(target)
     db.commit()
     db.refresh(target)
 
+    return target
+
+
+@router.patch(
+    "/{target_id}/network-mode",
+    response_model=TargetRead,
+)
+def update_target_network_mode(
+    target_id: int,
+    payload: TargetNetworkModeUpdate,
+    db: Session = Depends(get_db),
+) -> Target:
+    target = db.scalar(
+        select(Target).where(Target.id == target_id).with_for_update()
+    )
+    if target is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Target not found.",
+        )
+    target.network_mode = payload.network_mode
+    db.commit()
+    db.refresh(target)
     return target
 
 
