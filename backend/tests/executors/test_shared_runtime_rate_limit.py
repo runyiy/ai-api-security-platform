@@ -36,6 +36,7 @@ def build_policy_objects(
         name=f"Target {target_id}",
         base_url="https://example.test",
         environment="test",
+        network_mode="private_local",
         is_enabled=True,
     )
     revision = AuthorizationRevision(

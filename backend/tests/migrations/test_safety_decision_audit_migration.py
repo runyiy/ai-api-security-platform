@@ -7,6 +7,7 @@ from app.db.session import engine
 
 
 HEAD = "e6a8c0d2f4b7"
+LATEST = "f7b9d1e3a5c8"
 PARENT = "d5f7a9c1e3b5"
 
 
@@ -18,7 +19,7 @@ def current_revision() -> str | None:
 def test_m5_03_migration_round_trip_preserves_preexisting_schema() -> None:
     config = Config("alembic.ini")
     try:
-        assert current_revision() == HEAD
+        assert current_revision() == LATEST
         inspector = inspect(engine)
         tables_before = set(inspector.get_table_names())
         preexisting = tables_before - {"safety_decision_records"}

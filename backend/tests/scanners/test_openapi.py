@@ -223,6 +223,7 @@ def build_target() -> Target:
         name="Example",
         base_url="https://example.test",
         environment="test",
+        network_mode="private_local",
         is_enabled=True,
     )
 
@@ -332,6 +333,36 @@ def test_missing_audit_observer_fails_closed_without_fetch(
         )
 
     assert network_called is False
+
+
+def test_external_network_mode_is_audited_then_blocked_without_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    scanner = build_scanner()
+    monkeypatch.setattr(
+        scanner,
+        "_fetch_schema",
+        lambda url: events.append("network") or {"paths": {}},
+    )
+    target = build_target()
+    target.network_mode = "external_public_authorized"
+
+    with pytest.raises(OpenAPIExecutionBlocked) as exc_info:
+        scanner.scan(
+            target=target,
+            authorization_revision=build_revision(),
+            scopes=[build_scope()],
+            refresh_authorization=lambda: (
+                target,
+                build_revision(),
+                [build_scope()],
+            ),
+            policy_decision_observer=lambda decision: events.append("audit"),
+        )
+
+    assert exc_info.value.code == "external_network_mode_not_ready"
+    assert events == ["audit"]
 
 
 def test_fetch_schema_disables_environment_proxy() -> None:

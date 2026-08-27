@@ -11,6 +11,7 @@ from app.executors.rate_limit import (
     InMemoryRateLimiter,
     RateLimitConfigurationError,
 )
+from app.network_safety.destination import PRIVATE_LOCAL
 from app.policies.scope_policy import (
     PolicyDecision,
     ScopePolicyEngine,
@@ -158,6 +159,15 @@ class PolicyEnforcedHTTPExecutor:
 
         self._observe_policy_decision(decision, policy_decision_observer)
         self._raise_if_denied(decision)
+
+        if target.network_mode != PRIVATE_LOCAL:
+            raise ExecutionBlockedError(
+                code="external_network_mode_not_ready",
+                reason=(
+                    "External/public-authorized network execution is not "
+                    "available until the centralized network gateway exists."
+                ),
+            )
 
         return self._send(
             method=normalized_method,

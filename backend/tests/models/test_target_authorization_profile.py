@@ -27,6 +27,13 @@ def build_profile() -> AuthorizationProfile:
     )
 
 
+def test_target_network_mode_database_check_rejects_unknown_value() -> None:
+    with SessionLocal() as db:
+        db.add(build_target(network_mode="public"))
+        with pytest.raises(IntegrityError):
+            db.commit()
+
+
 def test_target_can_remain_unbound_without_implicit_authorization() -> None:
     target_id: int | None = None
 

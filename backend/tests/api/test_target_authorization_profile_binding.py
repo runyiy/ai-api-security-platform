@@ -61,11 +61,45 @@ def test_target_creation_remains_unbound() -> None:
 
     try:
         assert target["authorization_profile_id"] is None
+        assert target["network_mode"] == "private_local"
 
         with SessionLocal() as db:
             stored_target = db.get(Target, target["id"])
             assert stored_target is not None
             assert stored_target.authorization_profile_id is None
+            assert stored_target.network_mode == "private_local"
+    finally:
+        delete_rows(target_ids=[target["id"]], profile_ids=[])
+
+
+def test_target_network_mode_create_update_and_validation_round_trip() -> None:
+    response = client.post(
+        "/api/targets",
+        json={
+            "name": f"external-target-{uuid4()}",
+            "base_url": "https://example.test",
+            "environment": "test",
+            "network_mode": "external_public_authorized",
+        },
+    )
+    assert response.status_code == 201
+    target = response.json()
+    try:
+        assert target["network_mode"] == "external_public_authorized"
+        updated = client.patch(
+            f"/api/targets/{target['id']}/network-mode",
+            json={"network_mode": "private_local"},
+        )
+        assert updated.status_code == 200
+        assert updated.json()["network_mode"] == "private_local"
+
+        invalid = client.patch(
+            f"/api/targets/{target['id']}/network-mode",
+            json={"network_mode": "public"},
+        )
+        assert invalid.status_code == 422
+        with SessionLocal() as db:
+            assert db.get(Target, target["id"]).network_mode == "private_local"
     finally:
         delete_rows(target_ids=[target["id"]], profile_ids=[])
 
