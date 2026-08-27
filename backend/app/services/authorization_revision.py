@@ -93,9 +93,13 @@ def transition_revision(
     if destination == "active":
         if selected.lifecycle_state != "draft":
             raise InvalidRevisionTransitionError
+        active_revisions = []
         for revision in revisions:
             if revision.lifecycle_state == "active":
                 revision.lifecycle_state = "superseded"
+                active_revisions.append(revision)
+        if active_revisions:
+            db.flush(active_revisions)
         selected.lifecycle_state = "active"
     elif destination == "revoked":
         if selected.lifecycle_state not in {"draft", "active"}:

@@ -8,6 +8,7 @@ from app.db.models import AuthorizationProfile, AuthorizationRevision
 from app.db.session import SessionLocal
 from app.services.authorization_revision import (
     InvalidRevisionTransitionError,
+    SNAPSHOT_FIELDS,
     create_revision,
     transition_revision,
 )
@@ -126,5 +127,88 @@ def test_database_prevents_two_active_revisions_for_one_profile() -> None:
             with pytest.raises(IntegrityError):
                 db.commit()
             db.rollback()
+    finally:
+        cleanup(ids)
+
+
+def test_revoke_transitions_are_terminal_and_preserve_snapshots() -> None:
+    ids = []
+    try:
+        with SessionLocal() as db:
+            profile = make_profile(db)
+            ids = [profile.id]
+            profile_id = profile.id
+
+        with SessionLocal() as db:
+            draft = create_revision(db, profile_id)
+            draft_id = draft.id
+            draft_snapshot = {
+                field: getattr(draft, field)
+                for field in SNAPSHOT_FIELDS
+            }
+        with SessionLocal() as db:
+            revoked_draft = transition_revision(
+                db,
+                profile_id,
+                draft_id,
+                "revoked",
+            )
+            assert revoked_draft.lifecycle_state == "revoked"
+            assert {
+                field: getattr(revoked_draft, field)
+                for field in draft_snapshot
+            } == draft_snapshot
+        for destination in ("active", "revoked"):
+            with SessionLocal() as db:
+                with pytest.raises(InvalidRevisionTransitionError):
+                    transition_revision(
+                        db,
+                        profile_id,
+                        draft_id,
+                        destination,
+                    )
+
+        with SessionLocal() as db:
+            active = create_revision(db, profile_id)
+            active_id = active.id
+            active_snapshot = {
+                field: getattr(active, field)
+                for field in SNAPSHOT_FIELDS
+            }
+        with SessionLocal() as db:
+            transition_revision(db, profile_id, active_id, "active")
+        with SessionLocal() as db:
+            revoked_active = transition_revision(
+                db,
+                profile_id,
+                active_id,
+                "revoked",
+            )
+            assert revoked_active.lifecycle_state == "revoked"
+            assert {
+                field: getattr(revoked_active, field)
+                for field in active_snapshot
+            } == active_snapshot
+
+        with SessionLocal() as db:
+            old_active_id = create_revision(db, profile_id).id
+        with SessionLocal() as db:
+            transition_revision(db, profile_id, old_active_id, "active")
+        with SessionLocal() as db:
+            replacement_id = create_revision(db, profile_id).id
+        with SessionLocal() as db:
+            transition_revision(db, profile_id, replacement_id, "active")
+        with SessionLocal() as db:
+            assert (
+                db.get(AuthorizationRevision, old_active_id).lifecycle_state
+                == "superseded"
+            )
+            with pytest.raises(InvalidRevisionTransitionError):
+                transition_revision(
+                    db,
+                    profile_id,
+                    old_active_id,
+                    "revoked",
+                )
     finally:
         cleanup(ids)

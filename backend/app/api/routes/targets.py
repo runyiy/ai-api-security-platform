@@ -109,7 +109,11 @@ def update_target_authorization_revision(
 
     revision_id = payload.authorization_revision_id
     if revision_id is not None:
-        revision = db.get(AuthorizationRevision, revision_id)
+        revision = db.scalar(
+            select(AuthorizationRevision)
+            .where(AuthorizationRevision.id == revision_id)
+            .with_for_update()
+        )
         if revision is None:
             raise HTTPException(
                 status_code=404,
