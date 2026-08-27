@@ -7,7 +7,7 @@ from app.db.session import engine
 
 
 HEAD = "e6a8c0d2f4b7"
-LATEST = "f7b9d1e3a5c8"
+LATEST = "a1c3e5f7b9d2"
 PARENT = "d5f7a9c1e3b5"
 
 
@@ -22,7 +22,8 @@ def test_m5_03_migration_round_trip_preserves_preexisting_schema() -> None:
         assert current_revision() == LATEST
         inspector = inspect(engine)
         tables_before = set(inspector.get_table_names())
-        preexisting = tables_before - {"safety_decision_records"}
+        later_tables = {"execution_plan_approval_records"}
+        preexisting = tables_before - {"safety_decision_records", *later_tables}
         assert "safety_decision_records" in tables_before
         assert {
             foreign_key["referred_table"]
@@ -46,6 +47,6 @@ def test_m5_03_migration_round_trip_preserves_preexisting_schema() -> None:
 
         command.upgrade(config, HEAD)
         assert current_revision() == HEAD
-        assert set(inspect(engine).get_table_names()) == tables_before
+        assert set(inspect(engine).get_table_names()) == tables_before - later_tables
     finally:
         command.upgrade(config, "head")

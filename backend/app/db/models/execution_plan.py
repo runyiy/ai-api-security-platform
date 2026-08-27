@@ -11,6 +11,9 @@ from app.db.base import Base
 
 
 if TYPE_CHECKING:
+    from app.db.models.execution_plan_approval_record import (
+        ExecutionPlanApprovalRecord,
+    )
     from app.db.models.plan_action import PlanAction
 
 
@@ -64,5 +67,10 @@ class ExecutionPlan(Base):
     actions: Mapped[list[PlanAction]] = relationship(
         back_populates="execution_plan",
         order_by="PlanAction.ordinal",
+        passive_deletes="all",
+    )
+    approval_records: Mapped[list[ExecutionPlanApprovalRecord]] = relationship(
+        back_populates="execution_plan",
+        order_by="ExecutionPlanApprovalRecord.id",
         passive_deletes="all",
     )
