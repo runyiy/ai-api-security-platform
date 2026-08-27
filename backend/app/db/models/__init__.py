@@ -3,9 +3,11 @@ from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.credential_binding import CredentialBinding
 from app.db.models.credential_secret_version import CredentialSecretVersion
 from app.db.models.endpoint import Endpoint
+from app.db.models.execution_plan import ExecutionPlan
 from app.db.models.finding import Finding
 from app.db.models.finding_ai_analysis import FindingAIAnalysis
 from app.db.models.resource import Resource
+from app.db.models.plan_action import PlanAction
 from app.db.models.scope import Scope
 from app.db.models.security_report import SecurityReport
 from app.db.models.target import Target
@@ -19,6 +21,8 @@ __all__ = [
     "AuthorizationRevision",
     "CredentialBinding",
     "CredentialSecretVersion",
+    "ExecutionPlan",
+    "PlanAction",
     "Target",
     "Scope",
     "Endpoint",
