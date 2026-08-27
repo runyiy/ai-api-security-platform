@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 import os
 import subprocess
 import sys
+import time
 from uuid import uuid4
 
 import pytest
@@ -26,12 +27,18 @@ def rate_key() -> str:
         )
 
 
-def limiter(*, sleep=lambda delay: None, retries: int = 3) -> PostgresRateLimiter:
+def limiter(
+    *,
+    sleep=lambda delay: None,
+    retries: int = 3,
+    attempt_timeout_seconds: float = 1.0,
+) -> PostgresRateLimiter:
     return PostgresRateLimiter(
         requests_per_second=2.0,
         bind=engine,
         sleep=sleep,
         max_retries=retries,
+        attempt_timeout_seconds=attempt_timeout_seconds,
     )
 
 
@@ -122,14 +129,14 @@ def test_different_keys_reserve_without_shared_schedule() -> None:
 
 def test_subprocess_observes_committed_postgres_reservation(rate_key: str) -> None:
     first = limiter().reserve_delay(
-        key=rate_key, requested_requests_per_second=0.5
+        key=rate_key, requested_requests_per_second=0.1
     )
     code = (
         "from app.db.session import engine; "
         "from app.executors.rate_limit import PostgresRateLimiter; "
         "import sys; "
         "value=PostgresRateLimiter(requests_per_second=2.0,bind=engine)"
-        ".reserve_delay(key=sys.argv[1],requested_requests_per_second=0.5); "
+        ".reserve_delay(key=sys.argv[1],requested_requests_per_second=0.1); "
         "print(value)"
     )
     result = subprocess.run(
@@ -141,7 +148,7 @@ def test_subprocess_observes_committed_postgres_reservation(rate_key: str) -> No
     )
 
     assert first < 0.1
-    assert float(result.stdout.strip()) >= 1.0
+    assert float(result.stdout.strip()) >= 5.0
 
 
 def test_bounded_coordination_failure_is_sanitized(
@@ -162,6 +169,40 @@ def test_bounded_coordination_failure_is_sanitized(
     assert calls == 2
     assert str(raised.value) == "Shared rate coordination failed."
     assert "database details" not in str(raised.value)
+
+
+def test_locked_key_attempts_time_out_and_exhaust_bounded_retries(
+    rate_key: str,
+) -> None:
+    shared = limiter(retries=2, attempt_timeout_seconds=0.05)
+    shared.reserve_delay(key=rate_key, requested_requests_per_second=2.0)
+
+    with SessionLocal() as holder:
+        holder.begin()
+        locked = holder.scalar(
+            select(RateReservationState)
+            .where(RateReservationState.key == rate_key)
+            .with_for_update()
+        )
+        assert locked is not None
+        original_next_allowed_at = locked.next_allowed_at
+
+        started = time.monotonic()
+        with pytest.raises(RateLimitCoordinationError) as raised:
+            shared.reserve_delay(
+                key=rate_key,
+                requested_requests_per_second=2.0,
+            )
+        elapsed = time.monotonic() - started
+
+        assert 0.08 <= elapsed < 1.0
+        assert str(raised.value) == "Shared rate coordination failed."
+        holder.rollback()
+
+    with SessionLocal() as db:
+        persisted = db.get(RateReservationState, rate_key)
+        assert persisted is not None
+        assert persisted.next_allowed_at == original_next_allowed_at
 
 
 def test_coordination_table_contains_only_bounded_schedule_state() -> None:

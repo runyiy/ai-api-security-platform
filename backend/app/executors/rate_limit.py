@@ -113,6 +113,7 @@ class PostgresRateLimiter:
         bind: Engine,
         sleep: Callable[[float], None] = time.sleep,
         max_retries: int = 3,
+        attempt_timeout_seconds: float = 1.0,
     ) -> None:
         self._platform_requests_per_second = validate_requests_per_second(
             requests_per_second,
@@ -122,11 +123,21 @@ class PostgresRateLimiter:
             raise ValueError("max_retries must be a positive integer")
         if max_retries <= 0:
             raise ValueError("max_retries must be a positive integer")
+        if (
+            isinstance(attempt_timeout_seconds, bool)
+            or not isinstance(attempt_timeout_seconds, (int, float))
+            or not math.isfinite(attempt_timeout_seconds)
+            or attempt_timeout_seconds <= 0
+        ):
+            raise ValueError("attempt_timeout_seconds must be finite and positive")
         self._session_factory = sessionmaker(
             bind=bind, autoflush=False, expire_on_commit=False
         )
         self._sleep = sleep
         self._max_retries = max_retries
+        self._attempt_timeout_milliseconds = max(
+            1, math.ceil(float(attempt_timeout_seconds) * 1000)
+        )
 
     def wait(
         self, *, key: str, requested_requests_per_second: float
@@ -189,6 +200,15 @@ class PostgresRateLimiter:
             """
         )
         with self._session_factory.begin() as db:
+            timeout = f"{self._attempt_timeout_milliseconds}ms"
+            db.execute(
+                text("SELECT set_config('lock_timeout', :timeout, true)"),
+                {"timeout": timeout},
+            )
+            db.execute(
+                text("SELECT set_config('statement_timeout', :timeout, true)"),
+                {"timeout": timeout},
+            )
             delay = db.scalar(
                 statement,
                 {"key": key, "minimum_interval": minimum_interval},
