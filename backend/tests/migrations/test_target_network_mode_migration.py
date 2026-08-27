@@ -9,6 +9,7 @@ from app.db.session import engine
 
 
 HEAD = "f7b9d1e3a5c8"
+LATEST = "a1c3e5f7b9d2"
 PARENT = "e6a8c0d2f4b7"
 
 
@@ -22,6 +23,8 @@ def test_m6_01_migration_round_trip_backfills_and_preserves_schema() -> None:
     target_name = f"m6-network-mode-{uuid4()}"
     target_id: int | None = None
     try:
+        assert current_revision() == LATEST
+        command.downgrade(config, HEAD)
         assert current_revision() == HEAD
         columns_at_head = {
             column["name"] for column in inspect(engine).get_columns("targets")
