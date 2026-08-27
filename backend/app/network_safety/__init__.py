@@ -9,6 +9,11 @@ from app.network_safety.destination import (
     evaluate_destination_policy,
     parse_canonical_destination,
 )
+from app.network_safety.gateway import (
+    NetworkGateway,
+    NetworkGatewayError,
+    NetworkGatewayResult,
+)
 
 __all__ = [
     "AddressCategory",
@@ -20,4 +25,7 @@ __all__ = [
     "classify_address",
     "evaluate_destination_policy",
     "parse_canonical_destination",
+    "NetworkGateway",
+    "NetworkGatewayError",
+    "NetworkGatewayResult",
 ]

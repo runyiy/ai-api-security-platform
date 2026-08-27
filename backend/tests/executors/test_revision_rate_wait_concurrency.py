@@ -20,6 +20,7 @@ from app.services.execution_authorization import (
     build_execution_authorization_refresh,
     load_execution_authorization,
 )
+from tests.network_gateway_fakes import HandlerNetworkGateway, StaticJSONNetworkGateway
 
 
 class BlockingRateLimiter:
@@ -106,7 +107,7 @@ def test_rate_wait_revalidation_blocks_persisted_revision_change(
         runner = PolicyEnforcedHTTPExecutor(
             policy_engine=policy,
             rate_limiter=limiter,
-            transport=httpx.MockTransport(
+            network_gateway=HandlerNetworkGateway(
                 lambda request: network_response()
             ),
         )
@@ -122,7 +123,7 @@ def test_rate_wait_revalidation_blocks_persisted_revision_change(
         )
         expected_error = ExecutionBlockedError
     else:
-        runner = OpenAPIScanner(policy, limiter)
+        runner = OpenAPIScanner(policy, limiter, StaticJSONNetworkGateway())
         monkeypatch.setattr(runner, "_fetch_schema", network_response)
         operation = lambda: runner.scan(
             target=target,
