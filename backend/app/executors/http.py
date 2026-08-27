@@ -5,8 +5,9 @@ from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.scope import Scope
 from app.db.models.target import Target
 from app.executors.rate_limit import (
-    InMemoryRateLimiter,
+    RateLimiter,
     RateLimitConfigurationError,
+    RateLimitCoordinationError,
 )
 from app.network_safety.destination import PRIVATE_LOCAL
 from app.network_safety.gateway import NetworkGateway, NetworkGatewayError
@@ -59,7 +60,7 @@ class PolicyEnforcedHTTPExecutor:
         self,
         *,
         policy_engine: ScopePolicyEngine,
-        rate_limiter: InMemoryRateLimiter,
+        rate_limiter: RateLimiter,
         network_gateway: NetworkGateway,
     ) -> None:
         self.policy_engine = policy_engine
@@ -131,6 +132,11 @@ class PolicyEnforcedHTTPExecutor:
                     "AuthorizationRevision request rate limit "
                     "must be finite and greater than zero."
                 ),
+            ) from exc
+        except RateLimitCoordinationError as exc:
+            raise ExecutionBlockedError(
+                code="shared_rate_coordination_failed",
+                reason="Shared request rate coordination failed.",
             ) from exc
 
         target, authorization_revision, scopes = refresh_authorization()

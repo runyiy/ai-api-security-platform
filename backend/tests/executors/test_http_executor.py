@@ -14,6 +14,7 @@ from app.executors.http import (
 )
 from app.executors.rate_limit import (
     InMemoryRateLimiter,
+    RateLimitCoordinationError,
 )
 from app.policies.scope_policy import (
     PolicyDecision,
@@ -203,6 +204,30 @@ def test_missing_refresh_fails_closed_without_network() -> None:
 
     assert exc_info.value.code == "authorization_refresh_missing"
     assert network_called is False
+
+
+def test_shared_rate_coordination_failure_blocks_without_gateway() -> None:
+    class FailingLimiter:
+        def wait(self, **kwargs):
+            raise RateLimitCoordinationError("database details")
+
+    executor = build_executor(lambda request: httpx.Response(200))
+    executor.rate_limiter = FailingLimiter()
+
+    with pytest.raises(ExecutionBlockedError) as raised:
+        executor.execute(
+            target=build_target(),
+            authorization_revision=build_revision(),
+            scopes=[build_scope()],
+            method="GET",
+            url="http://localhost:8001/api/projects/2001",
+            headers={},
+            refresh_authorization=refresh_authorization,
+            policy_decision_observer=observe_policy,
+        )
+
+    assert raised.value.code == "shared_rate_coordination_failed"
+    assert executor.network_gateway.target_ids == []
 
 
 def test_missing_audit_observer_fails_closed_without_network() -> None:

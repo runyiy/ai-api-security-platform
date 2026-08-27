@@ -6,7 +6,7 @@ from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.scope import Scope
 from app.db.models.target import Target
 from app.executors.http import PolicyEnforcedHTTPExecutor
-from app.executors.rate_limit import InMemoryRateLimiter
+from app.executors.rate_limit import InMemoryRateLimiter, PostgresRateLimiter
 from app.executors.runtime import platform_rate_limiter
 from app.network_safety.runtime import network_execution_controller
 from app.policies.scope_policy import ScopePolicyEngine
@@ -66,6 +66,8 @@ def build_policy_objects(
 
 
 def test_production_paths_share_limiter_identity() -> None:
+    assert isinstance(platform_rate_limiter, PostgresRateLimiter)
+    assert not isinstance(platform_rate_limiter, InMemoryRateLimiter)
     assert test_run_routes.executor.rate_limiter is platform_rate_limiter
     assert openapi_routes.scanner.rate_limiter is platform_rate_limiter
     assert (
