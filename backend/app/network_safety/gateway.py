@@ -22,6 +22,10 @@ from app.network_safety.destination import (
     classify_address,
     evaluate_destination_policy,
 )
+from app.network_safety.controller import (
+    NetworkExecutionController,
+    NetworkExecutionDenied,
+)
 
 
 DEFAULT_TIMEOUT_SECONDS = 5.0
@@ -99,11 +103,15 @@ class _BoundNetworkBackend(httpcore.NetworkBackend):
         logical_hostname: str,
         selected_ip: IPAddress,
         mode: str,
+        controller: NetworkExecutionController,
+        target_id: int,
     ) -> None:
         self.connector = connector
         self.logical_hostname = logical_hostname
         self.selected_ip = selected_ip
         self.mode = mode
+        self.controller = controller
+        self.target_id = target_id
         self.peer_ip: IPAddress | None = None
 
     def connect_tcp(
@@ -119,6 +127,7 @@ class _BoundNetworkBackend(httpcore.NetworkBackend):
                 code="destination_connect_failed",
                 reason="Gateway connection binding was rejected.",
             )
+        _check_network_enabled(self.controller, self.target_id)
         try:
             stream = self.connector.connect(
                 ip_address=self.selected_ip,
@@ -161,14 +170,17 @@ class NetworkGateway:
         resolver: DNSResolver | None = None,
         connector: TCPConnector | None = None,
         ssl_context: ssl.SSLContext | None = None,
+        controller: NetworkExecutionController | None = None,
     ) -> None:
         self.resolver = resolver or SystemDNSResolver()
         self.connector = connector or DirectTCPConnector()
         self.ssl_context = ssl_context or ssl.create_default_context()
+        self.controller = controller or NetworkExecutionController()
 
     def request(
         self,
         *,
+        target_id: int,
         network_mode: str,
         method: str,
         url: str,
@@ -181,10 +193,33 @@ class NetworkGateway:
                 code="network_request_failed",
                 reason="Gateway request bounds are invalid.",
             )
+        try:
+            with self.controller.admission(target_id):
+                return self._request_admitted(
+                    target_id=target_id,
+                    network_mode=network_mode,
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    max_response_bytes=max_response_bytes,
+                    timeout_seconds=timeout_seconds,
+                )
+        except NetworkExecutionDenied as exc:
+            raise NetworkGatewayError(code=exc.code, reason=exc.reason) from exc
+
+    def _request_admitted(
+        self,
+        *,
+        target_id: int,
+        network_mode: str,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        max_response_bytes: int,
+        timeout_seconds: float,
+    ) -> NetworkGatewayResult:
         decision = evaluate_destination_policy(
-            mode=network_mode,
-            url=url,
-            resolver=self.resolver,
+            mode=network_mode, url=url, resolver=self.resolver
         )
         if not decision.allowed or decision.destination is None:
             code = (
@@ -208,6 +243,8 @@ class NetworkGateway:
             logical_hostname=decision.destination.hostname,
             selected_ip=selected_ip,
             mode=network_mode,
+            controller=self.controller,
+            target_id=target_id,
         )
         request_headers = _build_headers(
             headers=headers,
@@ -264,6 +301,15 @@ class NetworkGateway:
             selected_ip=selected_ip.compressed,
             peer_ip=backend.peer_ip.compressed,
         )
+
+
+def _check_network_enabled(
+    controller: NetworkExecutionController, target_id: int
+) -> None:
+    try:
+        controller.check_enabled(target_id)
+    except NetworkExecutionDenied as exc:
+        raise NetworkGatewayError(code=exc.code, reason=exc.reason) from exc
 
 
 def _build_headers(

@@ -73,7 +73,7 @@ def request(*, addresses=("127.0.0.1",), peer="127.0.0.1", url="http://lab.test/
     connector = Connector(stream)
     gateway = NetworkGateway(resolver=resolver, connector=connector)
     result = gateway.request(
-        network_mode=mode, method="GET", url=url, headers={"Host": "attacker"}
+        target_id=1, network_mode=mode, method="GET", url=url, headers={"Host": "attacker"}
     )
     return result, resolver, connector, stream
 
@@ -99,7 +99,7 @@ def test_resolution_failure_or_any_prohibited_address_fails_before_connect(addre
     connector = Connector(Stream("127.0.0.1"))
     gateway = NetworkGateway(resolver=resolver, connector=connector)
     with pytest.raises(NetworkGatewayError):
-        gateway.request(network_mode="private_local", method="GET",
+        gateway.request(target_id=1, network_mode="private_local", method="GET",
                         url="http://lab.test/x", headers={})
     assert connector.calls == []
 
@@ -117,7 +117,7 @@ def test_peer_mismatch_or_prohibition_closes_connection(selected, peer, code) ->
     stream = Stream(peer)
     gateway = NetworkGateway(resolver=Resolver((selected,)), connector=Connector(stream))
     with pytest.raises(NetworkGatewayError) as exc_info:
-        gateway.request(network_mode="private_local", method="GET",
+        gateway.request(target_id=1, network_mode="private_local", method="GET",
                         url="http://lab.test/x", headers={})
     assert exc_info.value.code == code
     assert stream.closed is True
@@ -148,6 +148,7 @@ def test_default_and_custom_verifying_contexts_are_accepted() -> None:
             ssl_context=context,
         )
         result = gateway.request(
+            target_id=1,
             network_mode="private_local",
             method="GET",
             url="https://lab.test/x",
@@ -173,7 +174,7 @@ def test_insecure_ssl_context_is_rejected_before_connect(insecurity) -> None:
     )
     with pytest.raises(NetworkGatewayError) as exc_info:
         gateway.request(
-            network_mode="private_local", method="GET",
+            target_id=1, network_mode="private_local", method="GET",
             url="https://lab.test/x", headers={},
         )
     assert exc_info.value.code == "tls_verification_required"
@@ -189,7 +190,7 @@ def test_ssl_context_mutation_after_construction_fails_closed() -> None:
     )
     context.check_hostname = False
     with pytest.raises(NetworkGatewayError) as exc_info:
-        gateway.request(network_mode="private_local", method="GET",
+        gateway.request(target_id=1, network_mode="private_local", method="GET",
                         url="https://lab.test/x", headers={})
     assert exc_info.value.code == "tls_verification_required"
     assert connector.calls == []
@@ -200,7 +201,7 @@ def test_unencodable_authorization_header_is_sanitized_before_connect() -> None:
     connector = Connector(Stream("127.0.0.1"))
     gateway = NetworkGateway(resolver=Resolver(("127.0.0.1",)), connector=connector)
     with pytest.raises(NetworkGatewayError) as exc_info:
-        gateway.request(network_mode="private_local", method="GET",
+        gateway.request(target_id=1, network_mode="private_local", method="GET",
                         url="http://lab.test/x", headers={"Authorization": secret})
     assert exc_info.value.code == "network_request_failed"
     assert exc_info.value.reason == "Request headers are invalid."
@@ -216,7 +217,7 @@ def test_external_public_mode_rejects_private_actual_peer() -> None:
     connector = Connector(stream)
     gateway = NetworkGateway(resolver=Resolver(("8.8.8.8",)), connector=connector)
     with pytest.raises(NetworkGatewayError) as exc_info:
-        gateway.request(network_mode="external_public_authorized", method="GET",
+        gateway.request(target_id=1, network_mode="external_public_authorized", method="GET",
                         url="http://public.test/x", headers={})
     assert exc_info.value.code == "destination_peer_prohibited"
     assert stream.closed is True
@@ -235,7 +236,7 @@ def test_timeout_errors_are_stable_and_sanitized(stage) -> None:
     )
     gateway = NetworkGateway(resolver=Resolver(("127.0.0.1",)), connector=connector)
     with pytest.raises(NetworkGatewayError) as exc_info:
-        gateway.request(network_mode="private_local", method="GET",
+        gateway.request(target_id=1, network_mode="private_local", method="GET",
                         url="http://lab.test/x?token=secret",
                         headers={"Authorization": "Bearer raw"})
     assert exc_info.value.code in {"destination_connect_failed", "network_request_failed"}
@@ -268,7 +269,7 @@ def test_streaming_response_cap_closes_connection() -> None:
     stream = Stream("127.0.0.1", response)
     gateway = NetworkGateway(resolver=Resolver(("127.0.0.1",)), connector=Connector(stream))
     with pytest.raises(NetworkGatewayError) as exc_info:
-        gateway.request(network_mode="private_local", method="GET",
+        gateway.request(target_id=1, network_mode="private_local", method="GET",
                         url="http://lab.test/x", headers={}, max_response_bytes=2)
     assert exc_info.value.code == "response_too_large"
     assert stream.closed is True

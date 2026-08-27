@@ -157,6 +157,31 @@ def test_durable_audit_precedes_gateway() -> None:
     assert events == ["refresh", "audit", "gateway"]
 
 
+def test_gateway_receives_refreshed_exact_target_id() -> None:
+    executor = build_executor(lambda request: httpx.Response(200))
+    refreshed_target = build_target()
+    refreshed_target.id = 77
+    refreshed_scope = build_scope()
+    refreshed_scope.target_id = 77
+
+    executor.execute(
+        target=build_target(),
+        authorization_revision=build_revision(),
+        scopes=[build_scope()],
+        method="GET",
+        url="http://localhost:8001/api/projects/2001",
+        headers={},
+        refresh_authorization=lambda: (
+            refreshed_target,
+            build_revision(),
+            [refreshed_scope],
+        ),
+        policy_decision_observer=observe_policy,
+    )
+
+    assert executor.network_gateway.target_ids == [77]
+
+
 def test_missing_refresh_fails_closed_without_network() -> None:
     network_called = False
 

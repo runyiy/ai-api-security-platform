@@ -462,6 +462,28 @@ def test_scan_orders_policy_rate_limit_policy_network(
     assert rate_limiter.calls == [("target:1", 1000.0)]
 
 
+def test_gateway_receives_refreshed_exact_target_id() -> None:
+    scanner = build_scanner()
+    refreshed_target = build_target()
+    refreshed_target.id = 77
+    refreshed_scope = build_scope()
+    refreshed_scope.target_id = 77
+
+    scanner.scan(
+        target=build_target(),
+        authorization_revision=build_revision(),
+        scopes=[build_scope()],
+        refresh_authorization=lambda: (
+            refreshed_target,
+            build_revision(),
+            [refreshed_scope],
+        ),
+        policy_decision_observer=observe_policy,
+    )
+
+    assert scanner.network_gateway.target_ids == [77]
+
+
 def test_first_policy_denial_skips_limiter_and_network(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
