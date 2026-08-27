@@ -8,6 +8,7 @@ from app.db.models.target import Target
 from app.executors.http import PolicyEnforcedHTTPExecutor
 from app.executors.rate_limit import InMemoryRateLimiter
 from app.executors.runtime import platform_rate_limiter
+from app.network_safety.runtime import network_execution_controller
 from app.policies.scope_policy import ScopePolicyEngine
 from app.scanners.openapi import OpenAPIScanner
 from tests.network_gateway_fakes import HandlerNetworkGateway, StaticJSONNetworkGateway
@@ -72,6 +73,7 @@ def test_production_paths_share_limiter_identity() -> None:
         is openapi_routes.scanner.rate_limiter
     )
     assert test_run_routes.executor.network_gateway is openapi_routes.scanner.network_gateway
+    assert test_run_routes.executor.network_gateway.controller is network_execution_controller
 
 
 def test_cross_path_reservations_share_target_schedule(

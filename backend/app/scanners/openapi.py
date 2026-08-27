@@ -388,6 +388,7 @@ class OpenAPIScanner:
     ) -> dict[str, Any]:
         try:
             response = self.network_gateway.request(
+                target_id=target.id,
                 network_mode=target.network_mode,
                 method="GET",
                 url=url,

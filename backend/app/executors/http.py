@@ -169,6 +169,7 @@ class PolicyEnforcedHTTPExecutor:
 
         try:
             result = self.network_gateway.request(
+                target_id=target.id,
                 network_mode=target.network_mode,
                 method=normalized_method,
                 url=url,

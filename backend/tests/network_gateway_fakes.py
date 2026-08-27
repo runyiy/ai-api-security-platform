@@ -11,10 +11,12 @@ class HandlerNetworkGateway:
     def __init__(self, handler) -> None:
         self.handler = handler
         self.calls = 0
+        self.target_ids: list[int] = []
 
-    def request(self, *, method: str, url: str, headers: dict[str, str],
+    def request(self, *, target_id: int, method: str, url: str, headers: dict[str, str],
                 max_response_bytes: int, **kwargs) -> NetworkGatewayResult:
         self.calls += 1
+        self.target_ids.append(target_id)
         request = httpx.Request(method, url, headers=headers)
         try:
             response = self.handler(request)

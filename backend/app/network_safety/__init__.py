@@ -14,6 +14,7 @@ from app.network_safety.gateway import (
     NetworkGatewayError,
     NetworkGatewayResult,
 )
+from app.network_safety.controller import NetworkExecutionController
 
 __all__ = [
     "AddressCategory",
@@ -28,4 +29,5 @@ __all__ = [
     "NetworkGateway",
     "NetworkGatewayError",
     "NetworkGatewayResult",
+    "NetworkExecutionController",
 ]
