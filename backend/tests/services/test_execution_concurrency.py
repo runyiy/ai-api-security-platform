@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import delete, func, select
 
 from app.db.models.authorization_profile import AuthorizationProfile
+from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.endpoint import Endpoint
 from app.db.models.resource import Resource
 from app.db.models.scope import Scope
@@ -14,7 +15,7 @@ from app.db.models.test_case import TestCase as StoredCase
 from app.db.models.test_identity import TestIdentity as StoredIdentity
 from app.db.models.test_run import TestRun as StoredRun
 from app.db.session import SessionLocal
-from app.executors.http import HTTPExecutionResult
+from app.executors.http import HTTPExecutionError, HTTPExecutionResult
 from app.services.test_execution import (
     TestExecutionError as ExecutionError,
     TestExecutionService as ExecutionService,
@@ -64,6 +65,11 @@ class ImmediateExecutor:
         )
 
 
+class FailingExecutor:
+    def execute(self, **kwargs):
+        raise HTTPExecutionError("synthetic HTTP failure")
+
+
 @pytest.fixture
 def executable_test_case_id() -> Iterator[int]:
     unique_name = f"concurrency-{uuid4()}"
@@ -79,12 +85,27 @@ def executable_test_case_id() -> Iterator[int]:
         )
         db.add(profile)
         db.flush()
+        revision = AuthorizationRevision(
+            authorization_profile_id=profile.id,
+            revision_number=1,
+            lifecycle_state="active",
+            name=profile.name,
+            program_name=profile.program_name,
+            authorization_type=profile.authorization_type,
+            automation_allowed=True,
+            max_requests_per_second=1000.0,
+            allow_get=True,
+            require_human_execution_approval=False,
+        )
+        db.add(revision)
+        db.flush()
         target = Target(
             name=unique_name,
             base_url="https://example.test",
             environment="test",
             is_enabled=True,
             authorization_profile_id=profile.id,
+            authorization_revision_id=revision.id,
         )
         db.add(target)
         db.flush()
@@ -175,6 +196,12 @@ def executable_test_case_id() -> Iterator[int]:
                 )
             )
             db.execute(
+                delete(AuthorizationRevision).where(
+                    AuthorizationRevision.authorization_profile_id
+                    == profile_id
+                )
+            )
+            db.execute(
                 delete(AuthorizationProfile).where(
                     AuthorizationProfile.id == profile_id
                 )
@@ -254,6 +281,7 @@ def test_concurrent_execute_acquires_once(
     assert run_count == 1
     assert test_case is not None
     assert test_case.status == "completed"
+    assert runs[0].authorization_revision_id is not None
 
 
 def test_completed_case_can_run_again_sequentially(
@@ -280,3 +308,22 @@ def test_completed_case_can_run_again_sequentially(
 
     assert executor.call_count == 2
     assert run_count == 2
+
+
+def test_http_error_run_records_exact_revision_provenance(
+    executable_test_case_id: int,
+) -> None:
+    with SessionLocal() as db:
+        run = ExecutionService(
+            db=db,
+            executor=FailingExecutor(),
+        ).execute(test_case_id=executable_test_case_id)
+        target_revision_id = db.scalar(
+            select(Target.authorization_revision_id)
+            .join(Endpoint, Endpoint.target_id == Target.id)
+            .join(StoredCase, StoredCase.endpoint_id == Endpoint.id)
+            .where(StoredCase.id == executable_test_case_id)
+        )
+
+    assert run.error_message == "synthetic HTTP failure"
+    assert run.authorization_revision_id == target_revision_id

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import ipaddress
 from urllib.parse import unquote, urlsplit
 
-from app.db.models.authorization_profile import AuthorizationProfile
+from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.scope import Scope
 from app.db.models.target import Target
 
@@ -39,6 +39,7 @@ class PolicyDecision:
     code: str
     reason: str
     authorization_profile_id: int | None
+    authorization_revision_id: int | None
     evaluated_at: datetime
     matched_scope_id: int | None = None
 
@@ -215,7 +216,7 @@ class ScopePolicyEngine:
         self,
         *,
         target: Target,
-        authorization_profile: AuthorizationProfile | None,
+        authorization_revision: AuthorizationRevision | None,
         scopes: list[Scope],
         request_url: str,
         method: str,
@@ -228,8 +229,13 @@ class ScopePolicyEngine:
 
         evaluated_at = evaluated_at.astimezone(timezone.utc)
         authorization_profile_id = (
-            authorization_profile.id
-            if authorization_profile is not None
+            authorization_revision.authorization_profile_id
+            if authorization_revision is not None
+            else None
+        )
+        authorization_revision_id = (
+            authorization_revision.id
+            if authorization_revision is not None
             else None
         )
 
@@ -245,6 +251,7 @@ class ScopePolicyEngine:
                 code=code,
                 reason=reason,
                 authorization_profile_id=authorization_profile_id,
+                authorization_revision_id=authorization_revision_id,
                 evaluated_at=evaluated_at,
                 matched_scope_id=matched_scope_id,
             )
@@ -256,40 +263,51 @@ class ScopePolicyEngine:
                 reason="Target is disabled.",
             )
 
-        if target.authorization_profile_id is None:
+        if target.authorization_revision_id is None:
             return decision(
                 allowed=False,
-                code="authorization_profile_missing",
-                reason=(
-                    "Target has no AuthorizationProfile binding."
-                ),
+                code="authorization_revision_missing",
+                reason="Target has no AuthorizationRevision binding.",
             )
 
-        if authorization_profile is None:
+        if authorization_revision is None:
             return decision(
                 allowed=False,
-                code="authorization_profile_missing",
-                reason=(
-                    "The bound AuthorizationProfile was not provided."
-                ),
+                code="authorization_revision_missing",
+                reason="The bound AuthorizationRevision was not provided.",
             )
 
         if (
-            authorization_profile.id
+            authorization_revision.id
+            != target.authorization_revision_id
+        ):
+            return decision(
+                allowed=False,
+                code="authorization_revision_mismatch",
+                reason="AuthorizationRevision does not match the Target binding.",
+            )
+
+        if (
+            target.authorization_profile_id is not None
+            and authorization_revision.authorization_profile_id
             != target.authorization_profile_id
         ):
             return decision(
                 allowed=False,
-                code="authorization_profile_mismatch",
-                reason=(
-                    "AuthorizationProfile does not match "
-                    "the Target binding."
-                ),
+                code="authorization_revision_profile_mismatch",
+                reason="AuthorizationRevision does not belong to the Target profile.",
+            )
+
+        if authorization_revision.lifecycle_state != "active":
+            return decision(
+                allowed=False,
+                code="authorization_revision_inactive",
+                reason="AuthorizationRevision is not active.",
             )
 
         if (
-            authorization_profile.valid_from is not None
-            and evaluated_at < authorization_profile.valid_from
+            authorization_revision.valid_from is not None
+            and evaluated_at < authorization_revision.valid_from
         ):
             return decision(
                 allowed=False,
@@ -298,8 +316,8 @@ class ScopePolicyEngine:
             )
 
         if (
-            authorization_profile.valid_until is not None
-            and evaluated_at >= authorization_profile.valid_until
+            authorization_revision.valid_until is not None
+            and evaluated_at >= authorization_revision.valid_until
         ):
             return decision(
                 allowed=False,
@@ -307,21 +325,21 @@ class ScopePolicyEngine:
                 reason="Authorization has expired.",
             )
 
-        if not authorization_profile.automation_allowed:
+        if not authorization_revision.automation_allowed:
             return decision(
                 allowed=False,
                 code="automation_not_allowed",
                 reason=(
-                    "AuthorizationProfile does not allow automation."
+                    "AuthorizationRevision does not allow automation."
                 ),
             )
 
-        if authorization_profile.require_human_execution_approval:
+        if authorization_revision.require_human_execution_approval:
             return decision(
                 allowed=False,
                 code="human_approval_required",
                 reason=(
-                    "AuthorizationProfile requires human execution "
+                    "AuthorizationRevision requires human execution "
                     "approval, which is not available."
                 ),
             )
@@ -389,12 +407,12 @@ class ScopePolicyEngine:
 
         method_field = AUTHORIZATION_METHOD_FIELDS[normalized_method]
 
-        if not getattr(authorization_profile, method_field):
+        if not getattr(authorization_revision, method_field):
             return decision(
                 allowed=False,
                 code="authorization_method_not_allowed",
                 reason=(
-                    "AuthorizationProfile does not allow "
+                    "AuthorizationRevision does not allow "
                     f"HTTP method {normalized_method!r}."
                 ),
             )

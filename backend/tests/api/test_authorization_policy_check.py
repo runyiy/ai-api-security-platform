@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete
 
 from app.db.models.authorization_profile import AuthorizationProfile
+from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.scope import Scope
 from app.db.models.target import Target
 from app.db.session import SessionLocal
@@ -22,6 +23,12 @@ def delete_policy_rows(
     with SessionLocal() as db:
         db.execute(delete(Target).where(Target.id == target_id))
         if profile_id is not None:
+            db.execute(
+                delete(AuthorizationRevision).where(
+                    AuthorizationRevision.authorization_profile_id
+                    == profile_id
+                )
+            )
             db.execute(
                 delete(AuthorizationProfile).where(
                     AuthorizationProfile.id == profile_id
@@ -56,9 +63,10 @@ def test_policy_check_denies_unbound_target() -> None:
         assert response.json()["allowed"] is False
         assert (
             response.json()["code"]
-            == "authorization_profile_missing"
+            == "authorization_revision_missing"
         )
         assert response.json()["authorization_profile_id"] is None
+        assert response.json()["authorization_revision_id"] is None
         evaluated_at = datetime.fromisoformat(
             response.json()["evaluated_at"]
         )
@@ -68,7 +76,7 @@ def test_policy_check_denies_unbound_target() -> None:
         delete_policy_rows(target_id=target_id)
 
 
-def test_policy_check_uses_loaded_authorization_profile() -> None:
+def test_policy_check_uses_exact_revision_not_mutable_profile() -> None:
     with SessionLocal() as db:
         profile = AuthorizationProfile(
             name=f"policy-profile-{uuid4()}",
@@ -80,12 +88,27 @@ def test_policy_check_uses_loaded_authorization_profile() -> None:
         )
         db.add(profile)
         db.flush()
+        revision = AuthorizationRevision(
+            authorization_profile_id=profile.id,
+            revision_number=1,
+            lifecycle_state="active",
+            name=profile.name,
+            program_name=profile.program_name,
+            authorization_type=profile.authorization_type,
+            automation_allowed=True,
+            max_requests_per_second=10.0,
+            allow_get=True,
+            require_human_execution_approval=False,
+        )
+        db.add(revision)
+        db.flush()
         target = Target(
             name=f"policy-target-{uuid4()}",
             base_url="http://localhost:8001",
             environment="test",
             is_enabled=True,
             authorization_profile_id=profile.id,
+            authorization_revision_id=revision.id,
         )
         db.add(target)
         db.flush()
@@ -101,6 +124,7 @@ def test_policy_check_uses_loaded_authorization_profile() -> None:
         db.commit()
         target_id = target.id
         profile_id = profile.id
+        revision_id = revision.id
 
     try:
         payload = {
@@ -108,25 +132,15 @@ def test_policy_check_uses_loaded_authorization_profile() -> None:
             "url": "http://localhost:8001/projects/1",
             "method": "GET",
         }
-        denied_response = client.post("/api/policy/check", json=payload)
-
-        assert denied_response.status_code == 200
-        assert denied_response.json()["allowed"] is False
-        assert denied_response.json()["code"] == "automation_not_allowed"
-        assert (
-            denied_response.json()["authorization_profile_id"]
-            == profile_id
-        )
-        denied_evaluated_at = datetime.fromisoformat(
-            denied_response.json()["evaluated_at"]
-        )
-        assert denied_evaluated_at.tzinfo is not None
-        assert denied_evaluated_at.utcoffset() == timedelta(0)
+        allowed_response = client.post("/api/policy/check", json=payload)
+        assert allowed_response.status_code == 200
+        assert allowed_response.json()["allowed"] is True
 
         with SessionLocal() as db:
             stored_profile = db.get(AuthorizationProfile, profile_id)
             assert stored_profile is not None
-            stored_profile.automation_allowed = True
+            stored_profile.automation_allowed = False
+            stored_profile.allow_get = False
             db.commit()
 
         allowed_response = client.post("/api/policy/check", json=payload)
@@ -139,6 +153,7 @@ def test_policy_check_uses_loaded_authorization_profile() -> None:
             allowed_response.json()["authorization_profile_id"]
             == profile_id
         )
+        assert allowed_response.json()["authorization_revision_id"] == revision_id
         allowed_evaluated_at = datetime.fromisoformat(
             allowed_response.json()["evaluated_at"]
         )
@@ -150,6 +165,7 @@ def test_policy_check_uses_loaded_authorization_profile() -> None:
             "reason",
             "matched_scope_id",
             "authorization_profile_id",
+            "authorization_revision_id",
             "evaluated_at",
         }
     finally:

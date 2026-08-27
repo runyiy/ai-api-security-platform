@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
-from app.db.models.authorization_profile import AuthorizationProfile
+from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.scope import Scope
 from app.db.models.target import Target
 from app.executors.rate_limit import InMemoryRateLimiter
@@ -218,6 +218,7 @@ def build_target() -> Target:
     return Target(
         id=1,
         authorization_profile_id=100,
+        authorization_revision_id=200,
         name="Example",
         base_url="https://example.test",
         environment="test",
@@ -225,9 +226,12 @@ def build_target() -> Target:
     )
 
 
-def build_profile() -> AuthorizationProfile:
-    return AuthorizationProfile(
-        id=100,
+def build_revision() -> AuthorizationRevision:
+    return AuthorizationRevision(
+        id=200,
+        authorization_profile_id=100,
+        revision_number=1,
+        lifecycle_state="active",
         name="Local authorization",
         program_name="Self-controlled lab",
         authorization_type="self_owned",
@@ -267,7 +271,7 @@ def test_scanner_wraps_schema_parse_error(
     ) as exc_info:
         scanner.scan(
             target=build_target(),
-            authorization_profile=build_profile(),
+            authorization_revision=build_revision(),
             scopes=[build_scope()],
         )
 
@@ -346,6 +350,7 @@ def allowed_decision() -> PolicyDecision:
         code="allowed_by_scope",
         reason="Request matches an active scope.",
         authorization_profile_id=100,
+        authorization_revision_id=200,
         evaluated_at=datetime.now(timezone.utc),
         matched_scope_id=1,
     )
@@ -357,6 +362,7 @@ def denied_decision(code: str) -> PolicyDecision:
         code=code,
         reason="Request denied for test.",
         authorization_profile_id=100,
+        authorization_revision_id=200,
         evaluated_at=datetime.now(timezone.utc),
     )
 
@@ -379,7 +385,7 @@ def test_scan_orders_policy_rate_limit_policy_network(
 
     scanner.scan(
         target=build_target(),
-        authorization_profile=build_profile(),
+        authorization_revision=build_revision(),
         scopes=[build_scope()],
     )
 
@@ -405,7 +411,7 @@ def test_first_policy_denial_skips_limiter_and_network(
     with pytest.raises(OpenAPIPolicyDenied) as exc_info:
         scanner.scan(
             target=build_target(),
-            authorization_profile=build_profile(),
+            authorization_revision=build_revision(),
             scopes=[],
         )
 
@@ -433,7 +439,7 @@ def test_final_policy_denial_after_wait_skips_network(
     with pytest.raises(OpenAPIPolicyDenied) as exc_info:
         scanner.scan(
             target=build_target(),
-            authorization_profile=build_profile(),
+            authorization_revision=build_revision(),
             scopes=[build_scope()],
         )
 
@@ -458,13 +464,13 @@ def test_invalid_runtime_rate_fails_closed_before_network(
         return {"paths": {}}
 
     monkeypatch.setattr(scanner, "_fetch_schema", fetch_schema)
-    profile = build_profile()
-    profile.max_requests_per_second = invalid_rate
+    revision = build_revision()
+    revision.max_requests_per_second = invalid_rate
 
     with pytest.raises(OpenAPIPolicyDenied) as exc_info:
         scanner.scan(
             target=build_target(),
-            authorization_profile=profile,
+            authorization_revision=revision,
             scopes=[build_scope()],
         )
 

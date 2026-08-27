@@ -10,6 +10,7 @@ from pydantic import (
 class TestRunRead(BaseModel):
     id: int
     test_case_id: int
+    authorization_revision_id: int | None
 
     request_data: dict[str, Any]
 

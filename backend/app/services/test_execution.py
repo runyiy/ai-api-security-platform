@@ -10,7 +10,7 @@ from app.auth.context import (
     build_authentication_context,
 )
 from app.credentials.bearer import BearerCredentialError, BearerCredentialService
-from app.db.models.authorization_profile import AuthorizationProfile
+from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.endpoint import Endpoint
 from app.db.models.resource import Resource
 from app.db.models.scope import Scope
@@ -27,6 +27,9 @@ from app.executors.http import (
 )
 from app.generators.bola import (
     detect_resource_binding,
+)
+from app.services.execution_authorization import (
+    build_execution_authorization_refresh,
 )
 
 
@@ -219,12 +222,12 @@ class TestExecutionService:
                 "Target not found."
             )
 
-        authorization_profile = None
+        authorization_revision = None
 
-        if target.authorization_profile_id is not None:
-            authorization_profile = self.db.get(
-                AuthorizationProfile,
-                target.authorization_profile_id,
+        if target.authorization_revision_id is not None:
+            authorization_revision = self.db.get(
+                AuthorizationRevision,
+                target.authorization_revision_id,
             )
 
         if actor.target_id != target.id:
@@ -319,15 +322,20 @@ class TestExecutionService:
         # 关闭 SELECT 阶段开启的事务，
         # 不要拿着数据库事务等待网络。
         self.db.commit()
+        refresh_authorization = build_execution_authorization_refresh(
+            self.db.get_bind(),
+            target.id,
+        )
 
         try:
             result = self.executor.execute(
                 target=target,
-                authorization_profile=authorization_profile,
+                authorization_revision=authorization_revision,
                 scopes=scopes,
                 method=endpoint.method,
                 url=request_url,
                 headers=request_headers,
+                refresh_authorization=refresh_authorization,
             )
 
         except ExecutionBlockedError:
@@ -338,6 +346,7 @@ class TestExecutionService:
         except HTTPExecutionError as exc:
             test_run = TestRun(
                 test_case_id=test_case.id,
+                authorization_revision_id=authorization_revision.id,
                 request_data=request_data,
                 response_status=None,
                 response_body=None,
@@ -356,6 +365,7 @@ class TestExecutionService:
 
         test_run = TestRun(
             test_case_id=test_case.id,
+            authorization_revision_id=authorization_revision.id,
             request_data=request_data,
             response_status=result.status_code,
             response_body=decode_response_body(

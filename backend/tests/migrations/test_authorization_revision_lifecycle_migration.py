@@ -6,6 +6,7 @@ from sqlalchemy import inspect
 from app.db.session import engine
 
 
+LATEST_REVISION = "c3e5a7b9d1f2"
 HEAD_REVISION = "b2d4f6a8c0e1"
 PARENT_REVISION = "f8c6d5e4b3a2"
 
@@ -19,6 +20,8 @@ def test_m4_02_migration_round_trip_preserves_m4_01_schema() -> None:
     alembic_config = Config("alembic.ini")
 
     try:
+        assert current_revision() == LATEST_REVISION
+        command.downgrade(alembic_config, HEAD_REVISION)
         assert current_revision() == HEAD_REVISION
         inspector = inspect(engine)
         tables_at_head = set(inspector.get_table_names())
@@ -75,7 +78,7 @@ def test_m4_02_migration_round_trip_preserves_m4_01_schema() -> None:
             for index in inspector.get_indexes("authorization_revisions")
         }
 
-        command.upgrade(alembic_config, "head")
+        command.upgrade(alembic_config, HEAD_REVISION)
         assert current_revision() == HEAD_REVISION
     finally:
         command.upgrade(alembic_config, "head")

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import httpx
 import pytest
 
-from app.db.models.authorization_profile import AuthorizationProfile
+from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.scope import Scope
 from app.db.models.target import Target
 from app.executors.http import (
@@ -25,6 +25,7 @@ def build_target() -> Target:
     return Target(
         id=1,
         authorization_profile_id=100,
+        authorization_revision_id=200,
         name="Local Lab",
         base_url="http://localhost:8001",
         environment="development",
@@ -32,9 +33,12 @@ def build_target() -> Target:
     )
 
 
-def build_profile() -> AuthorizationProfile:
-    return AuthorizationProfile(
-        id=100,
+def build_revision() -> AuthorizationRevision:
+    return AuthorizationRevision(
+        id=200,
+        authorization_profile_id=100,
+        revision_number=1,
+        lifecycle_state="active",
         name="Local authorization",
         program_name="Self-controlled lab",
         authorization_type="self_owned",
@@ -104,7 +108,7 @@ def test_executes_allowed_get() -> None:
 
     result = executor.execute(
         target=build_target(),
-        authorization_profile=build_profile(),
+        authorization_revision=build_revision(),
         scopes=[
             build_scope(),
         ],
@@ -143,7 +147,7 @@ def test_denies_request_outside_scope() -> None:
     ):
         executor.execute(
             target=build_target(),
-            authorization_profile=build_profile(),
+            authorization_revision=build_revision(),
             scopes=[
                 build_scope(),
             ],
@@ -181,7 +185,7 @@ def test_blocks_mutating_methods_before_network(method: str) -> None:
     ) as exc_info:
         executor.execute(
             target=build_target(),
-            authorization_profile=build_profile(),
+            authorization_revision=build_revision(),
             scopes=[
                 build_scope(),
             ],
@@ -224,7 +228,7 @@ def test_does_not_follow_redirect() -> None:
 
     result = executor.execute(
         target=build_target(),
-        authorization_profile=build_profile(),
+        authorization_revision=build_revision(),
         scopes=[
             build_scope(),
         ],
@@ -258,6 +262,7 @@ def test_revalidates_policy_after_rate_limit_wait() -> None:
                     code="allowed_by_scope",
                     reason="Request matches an active scope.",
                     authorization_profile_id=100,
+                    authorization_revision_id=200,
                     evaluated_at=datetime.now(timezone.utc),
                     matched_scope_id=1,
                 )
@@ -267,6 +272,7 @@ def test_revalidates_policy_after_rate_limit_wait() -> None:
                 code="authorization_expired",
                 reason="Authorization has expired.",
                 authorization_profile_id=100,
+                authorization_revision_id=200,
                 evaluated_at=datetime.now(timezone.utc),
             )
 
@@ -304,7 +310,7 @@ def test_revalidates_policy_after_rate_limit_wait() -> None:
     with pytest.raises(ExecutionBlockedError) as exc_info:
         executor.execute(
             target=build_target(),
-            authorization_profile=build_profile(),
+            authorization_revision=build_revision(),
             scopes=[build_scope()],
             method="GET",
             url="http://localhost:8001/api/projects/2001",
@@ -326,7 +332,7 @@ def test_timeout_behavior_remains_bounded() -> None:
     with pytest.raises(HTTPExecutionError, match="HTTP request failed"):
         build_executor(handler).execute(
             target=build_target(),
-            authorization_profile=build_profile(),
+            authorization_revision=build_revision(),
             scopes=[build_scope()],
             method="GET",
             url="http://localhost:8001/api/projects/2001",
@@ -344,7 +350,7 @@ def test_response_size_cap_remains_enforced() -> None:
     with pytest.raises(HTTPExecutionError, match="maximum allowed size"):
         build_executor(handler).execute(
             target=build_target(),
-            authorization_profile=build_profile(),
+            authorization_revision=build_revision(),
             scopes=[build_scope()],
             method="GET",
             url="http://localhost:8001/api/projects/2001",
@@ -366,14 +372,14 @@ def test_invalid_profile_rate_fails_closed_before_network(
         transport_called = True
         return httpx.Response(200)
 
-    profile = build_profile()
-    profile.max_requests_per_second = invalid_rate
+    revision = build_revision()
+    revision.max_requests_per_second = invalid_rate
     executor = build_executor(handler)
 
     with pytest.raises(ExecutionBlockedError) as exc_info:
         executor.execute(
             target=build_target(),
-            authorization_profile=profile,
+            authorization_revision=revision,
             scopes=[build_scope()],
             method="GET",
             url="http://localhost:8001/api/projects/2001",
