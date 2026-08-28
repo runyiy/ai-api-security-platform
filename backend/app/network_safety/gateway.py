@@ -24,6 +24,7 @@ from app.network_safety.destination import (
 )
 from app.network_safety.controller import (
     NetworkExecutionController,
+    NetworkExecutionControllerProtocol,
     NetworkExecutionDenied,
 )
 
@@ -103,7 +104,7 @@ class _BoundNetworkBackend(httpcore.NetworkBackend):
         logical_hostname: str,
         selected_ip: IPAddress,
         mode: str,
-        controller: NetworkExecutionController,
+        controller: NetworkExecutionControllerProtocol,
         target_id: int,
     ) -> None:
         self.connector = connector
@@ -170,7 +171,7 @@ class NetworkGateway:
         resolver: DNSResolver | None = None,
         connector: TCPConnector | None = None,
         ssl_context: ssl.SSLContext | None = None,
-        controller: NetworkExecutionController | None = None,
+        controller: NetworkExecutionControllerProtocol | None = None,
     ) -> None:
         self.resolver = resolver or SystemDNSResolver()
         self.connector = connector or DirectTCPConnector()
@@ -304,7 +305,7 @@ class NetworkGateway:
 
 
 def _check_network_enabled(
-    controller: NetworkExecutionController, target_id: int
+    controller: NetworkExecutionControllerProtocol, target_id: int
 ) -> None:
     try:
         controller.check_enabled(target_id)
