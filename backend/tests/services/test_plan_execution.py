@@ -249,4 +249,5 @@ def test_legacy_execution_remains_compatible_without_required_approval(
     )
 
     assert result.response_status == 200
+    assert result.execution_plan_id is None
     executor.execute.assert_called_once()

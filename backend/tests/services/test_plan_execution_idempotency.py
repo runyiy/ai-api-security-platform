@@ -1,4 +1,6 @@
 import time
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from sqlalchemy import delete, func, select
@@ -24,6 +26,8 @@ from app.services.execution_plan_claim import (
     ExecutionClaimCoordinationError,
     ExecutionPlanClaimService,
 )
+from app.services.plan_execution import PlanExecutionService
+from app.services.safety_audit import SafetyAuditService
 from tests.services.test_plan_execution_integration import (
     FailingGateway,
     MutatingRateLimiter,
@@ -297,6 +301,14 @@ def test_stale_generation_after_network_cannot_persist_result(
     assert raised.value.code == "execution_plan_result_fencing_lost"
     with SessionLocal() as db:
         assert db.scalar(select(TestRun).where(TestRun.execution_plan_id == plan_id)) is None
+        audit = db.scalar(
+            select(SafetyDecisionRecord).where(
+                SafetyDecisionRecord.execution_plan_id == plan_id,
+                SafetyDecisionRecord.code == "execution_plan_result_fencing_lost",
+            )
+        )
+        assert audit is not None
+        assert audit.outcome == "failed"
 
 
 def test_result_fencing_coordination_failure_is_sanitized_and_writes_no_result(
@@ -325,3 +337,170 @@ def test_result_fencing_coordination_failure_is_sanitized_and_writes_no_result(
     assert "private" not in raised.value.reason
     with SessionLocal() as db:
         assert db.scalar(select(TestRun).where(TestRun.execution_plan_id == plan_id)) is None
+        audit = db.scalar(
+            select(SafetyDecisionRecord).where(
+                SafetyDecisionRecord.execution_plan_id == plan_id,
+                SafetyDecisionRecord.code == "execution_plan_result_fencing_failed",
+            )
+        )
+        assert audit is not None
+        assert audit.outcome == "failed"
+
+
+def _synthetic_integrity_error(constraint_name: str) -> IntegrityError:
+    original = RuntimeError("private PostgreSQL details")
+    original.sqlstate = "23505"
+    original.diag = SimpleNamespace(constraint_name=constraint_name)
+    return IntegrityError("private SQL", {}, original)
+
+
+@pytest.mark.parametrize(
+    ("constraint_name", "returns_canonical"),
+    [
+        ("uq_test_runs_execution_plan_id", True),
+        ("some_unrelated_constraint", False),
+    ],
+)
+def test_only_exact_plan_unique_conflict_is_recovered_as_replay(
+    approved_plan: tuple[int, int, int, int],
+    monkeypatch: pytest.MonkeyPatch,
+    constraint_name: str,
+    returns_canonical: bool,
+) -> None:
+    plan_id, target_id, revision_id, _ = approved_plan
+    with SessionLocal() as db:
+        action = db.scalar(
+            select(PlanAction).where(PlanAction.execution_plan_id == plan_id)
+        )
+        assert action is not None
+        test_case = db.get(TestCase, action.test_case_id)
+        assert test_case is not None
+        canonical = TestRun(
+            test_case_id=test_case.id,
+            authorization_revision_id=revision_id,
+            execution_plan_id=plan_id,
+            request_data={"canonical": True},
+            response_status=200,
+        )
+        db.add(canonical)
+        db.commit()
+        canonical_id = canonical.id
+        claims = SimpleNamespace(assert_current=lambda *args, **kwargs: None)
+        service = PlanExecutionService(
+            db=db, executor=Mock(), claim_service=claims
+        )
+        monkeypatch.setattr(
+            db,
+            "flush",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                _synthetic_integrity_error(constraint_name)
+            ),
+        )
+
+        if returns_canonical:
+            result = service._finish(
+                claim_handle=object(),
+                test_case=test_case,
+                request_data={},
+                target_id=target_id,
+                revision_id=revision_id,
+                plan_id=plan_id,
+                action_id=action.id,
+                outcome="succeeded",
+                response_status=201,
+            )
+            assert result.id == canonical_id
+        else:
+            with pytest.raises(ExecutionBlockedError) as raised:
+                service._finish(
+                    claim_handle=object(),
+                    test_case=test_case,
+                    request_data={},
+                    target_id=target_id,
+                    revision_id=revision_id,
+                    plan_id=plan_id,
+                    action_id=action.id,
+                    outcome="succeeded",
+                    response_status=201,
+                )
+            assert raised.value.code == "execution_plan_result_persistence_failed"
+            assert "private" not in raised.value.reason
+        assert db.scalar(
+            select(func.count(TestRun.id)).where(TestRun.execution_plan_id == plan_id)
+        ) == 1
+
+
+def test_outcome_audit_failure_rolls_back_result_before_exact_claim_release(
+    approved_plan: tuple[int, int, int, int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_id, _, _, _ = approved_plan
+    delegate = ExecutionPlanClaimService(bind=engine, attempt_timeout_seconds=0.1)
+
+    class TrackingClaims:
+        def __init__(self) -> None:
+            self.handle = None
+            self.released = []
+
+        def acquire(self, *args, **kwargs):
+            self.handle = delegate.acquire(*args, **kwargs)
+            return self.handle
+
+        def renew(self, *args, **kwargs):
+            self.handle = delegate.renew(*args, **kwargs)
+            return self.handle
+
+        def assert_current(self, handle, **kwargs):
+            return delegate.assert_current(handle, **kwargs)
+
+        def release(self, handle):
+            delegate.release(handle)
+            self.released.append(handle)
+
+    claims = TrackingClaims()
+    original = SafetyAuditService.append_execution_outcome
+
+    def fail_terminal_outcome(self, **kwargs):
+        if kwargs.get("test_run") is not None:
+            raise RuntimeError("private audit persistence details")
+        return original(self, **kwargs)
+
+    monkeypatch.setattr(
+        SafetyAuditService, "append_execution_outcome", fail_terminal_outcome
+    )
+    gateway = RecordingGateway()
+
+    with pytest.raises(ExecutionBlockedError) as raised:
+        execute(
+            plan_id,
+            limiter=MutatingRateLimiter(),
+            gateway=gateway,
+            claim_service=claims,
+        )
+
+    assert raised.value.code == "execution_plan_result_persistence_failed"
+    assert "private" not in raised.value.reason
+    assert len(gateway.target_ids) == 1
+    assert claims.released == [claims.handle]
+    with SessionLocal() as db:
+        assert db.scalar(select(TestRun).where(TestRun.execution_plan_id == plan_id)) is None
+        claim = db.get(ExecutionPlanClaim, plan_id)
+        assert claim is not None
+        assert claim.owner_id is None
+        assert not db.scalars(
+            select(SafetyDecisionRecord).where(
+                SafetyDecisionRecord.execution_plan_id == plan_id,
+                SafetyDecisionRecord.code.in_(
+                    ["http_execution_succeeded", "http_execution_failed"]
+                ),
+            )
+        ).all()
+        failure = db.scalar(
+            select(SafetyDecisionRecord).where(
+                SafetyDecisionRecord.execution_plan_id == plan_id,
+                SafetyDecisionRecord.code
+                == "execution_plan_result_persistence_failed",
+            )
+        )
+        assert failure is not None
+        assert failure.outcome == "failed"

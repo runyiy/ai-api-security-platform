@@ -399,7 +399,8 @@ class PlanExecutionService:
         try:
             self.claim_service.assert_current(claim_handle, db=self.db)
         except ExecutionClaimLostError as exc:
-            self._raise_preflight_blocked(
+            self.db.rollback()
+            self._raise_post_network_failure(
                 target_id=target_id,
                 revision_id=revision_id,
                 test_case_id=test_case_id,
@@ -411,7 +412,7 @@ class PlanExecutionService:
             raise AssertionError from exc
         except ExecutionClaimCoordinationError as exc:
             self.db.rollback()
-            self._raise_preflight_blocked(
+            self._raise_post_network_failure(
                 target_id=target_id,
                 revision_id=revision_id,
                 test_case_id=test_case_id,
@@ -421,6 +422,33 @@ class PlanExecutionService:
                 reason="ExecutionPlan result fencing could not be verified.",
             )
             raise AssertionError from exc
+
+    def _raise_post_network_failure(
+        self,
+        *,
+        target_id: int,
+        revision_id: int,
+        test_case_id: int,
+        plan_id: int,
+        action_id: int,
+        code: str,
+        reason: str,
+    ) -> None:
+        try:
+            SafetyAuditService(self.db).append_execution_outcome(
+                outcome="failed",
+                target_id=target_id,
+                authorization_revision_id=revision_id,
+                test_case_id=test_case_id,
+                execution_plan_id=plan_id,
+                plan_action_id=action_id,
+                code=code,
+                reason=reason,
+            )
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+        raise ExecutionBlockedError(code=code, reason=reason)
 
     def _release_claim(
         self,
@@ -560,16 +588,51 @@ class PlanExecutionService:
             )
             test_case.status = "completed" if outcome == "succeeded" else "failed"
             self.db.commit()
-            self.db.refresh(run)
             return run
         except IntegrityError as exc:
             self.db.rollback()
-            canonical = self.db.scalar(
-                select(TestRun).where(TestRun.execution_plan_id == plan_id)
+            if self._is_canonical_unique_conflict(exc):
+                try:
+                    canonical = self.db.scalar(
+                        select(TestRun).where(TestRun.execution_plan_id == plan_id)
+                    )
+                except Exception:
+                    self.db.rollback()
+                    canonical = None
+                if canonical is not None:
+                    return canonical
+            self._raise_post_network_failure(
+                target_id=target_id,
+                revision_id=revision_id,
+                test_case_id=test_case.id,
+                plan_id=plan_id,
+                action_id=action_id,
+                code="execution_plan_result_persistence_failed",
+                reason="Canonical ExecutionPlan result could not be persisted.",
             )
-            if canonical is not None:
-                return canonical
-            raise ExecutionBlockedError(
-                code="execution_plan_result_coordination_failed",
-                reason="Canonical ExecutionPlan result coordination failed.",
-            ) from exc
+            raise AssertionError from exc
+        except Exception as exc:
+            self.db.rollback()
+            self._raise_post_network_failure(
+                target_id=target_id,
+                revision_id=revision_id,
+                test_case_id=test_case.id,
+                plan_id=plan_id,
+                action_id=action_id,
+                code="execution_plan_result_persistence_failed",
+                reason="Canonical ExecutionPlan result could not be persisted.",
+            )
+            raise AssertionError from exc
+
+    @staticmethod
+    def _is_canonical_unique_conflict(exc: IntegrityError) -> bool:
+        original = exc.orig
+        sqlstate = getattr(original, "sqlstate", None) or getattr(
+            original, "pgcode", None
+        )
+        diagnostic = getattr(original, "diag", None)
+        return (
+            sqlstate == "23505"
+            and getattr(diagnostic, "constraint_name", None)
+            == "uq_test_runs_execution_plan_id"
+        )

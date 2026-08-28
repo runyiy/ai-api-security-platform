@@ -217,6 +217,8 @@ def test_approval_revoked_during_rate_wait_blocks_gateway(
 
     assert raised.value.code == "execution_plan_approval_changed"
     assert gateway.target_ids == []
+    with SessionLocal() as db:
+        assert db.scalar(select(TestRun).where(TestRun.execution_plan_id == plan_id)) is None
 
 
 @pytest.mark.parametrize("change", ["rebind", "revision_inactive"])
@@ -259,6 +261,8 @@ def test_authorization_change_during_rate_wait_blocks_gateway(
         )
 
     assert gateway.target_ids == []
+    with SessionLocal() as db:
+        assert db.scalar(select(TestRun).where(TestRun.execution_plan_id == plan_id)) is None
 
 
 def test_scope_narrowing_during_rate_wait_blocks_gateway(
@@ -283,6 +287,8 @@ def test_scope_narrowing_during_rate_wait_blocks_gateway(
 
     assert raised.value.code == "no_matching_scope"
     assert gateway.target_ids == []
+    with SessionLocal() as db:
+        assert db.scalar(select(TestRun).where(TestRun.execution_plan_id == plan_id)) is None
 
 
 def test_success_audits_exact_plan_action_and_uses_refreshed_target(
@@ -345,6 +351,8 @@ def test_external_public_mode_remains_blocked_before_gateway(
 
     assert raised.value.code == "external_network_mode_not_ready"
     assert gateway.target_ids == []
+    with SessionLocal() as db:
+        assert db.scalar(select(TestRun).where(TestRun.execution_plan_id == plan_id)) is None
 
 
 def test_expired_claim_taken_over_during_rate_wait_fences_stale_worker(
