@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.auth.context import (
@@ -53,6 +54,10 @@ class PlanExecutionNotFoundError(PlanExecutionError):
     pass
 
 
+class CanonicalResultLookupError(PlanExecutionError):
+    pass
+
+
 class PlanExecutionService:
     def __init__(
         self,
@@ -95,6 +100,12 @@ class PlanExecutionService:
             raise PlanExecutionError("ExecutionPlan action must be GET.")
         if action.test_case_id is None or action.resource_id is None:
             raise PlanExecutionError("ExecutionPlan action provenance is incomplete.")
+
+        canonical = self.db.scalar(
+            select(TestRun).where(TestRun.execution_plan_id == plan.id)
+        )
+        if canonical is not None:
+            return canonical
 
         target = self.db.get(Target, plan.target_id)
         revision = self.db.get(AuthorizationRevision, plan.authorization_revision_id)
@@ -205,6 +216,20 @@ class PlanExecutionService:
                 lease_seconds=self.claim_lease_seconds,
             )
         except ExecutionClaimUnavailableError:
+            try:
+                canonical = self._load_fresh_canonical(plan.id)
+            except CanonicalResultLookupError:
+                self._raise_preflight_blocked(
+                    target_id=target.id,
+                    revision_id=revision.id,
+                    test_case_id=test_case.id,
+                    plan_id=plan.id,
+                    action_id=action.id,
+                    code="execution_plan_result_lookup_failed",
+                    reason="Canonical ExecutionPlan result lookup failed.",
+                )
+            if canonical is not None:
+                return canonical
             self._raise_preflight_blocked(
                 target_id=target.id,
                 revision_id=revision.id,
@@ -224,6 +249,37 @@ class PlanExecutionService:
                 code="execution_plan_claim_coordination_failed",
                 reason="ExecutionPlan claim coordination failed.",
             )
+
+        try:
+            canonical = self._load_fresh_canonical(plan.id)
+        except CanonicalResultLookupError:
+            self._release_claim(
+                claim_handle=claim_handle,
+                target_id=target.id,
+                revision_id=revision.id,
+                test_case_id=test_case.id,
+                plan_id=plan.id,
+                action_id=action.id,
+            )
+            self._raise_preflight_blocked(
+                target_id=target.id,
+                revision_id=revision.id,
+                test_case_id=test_case.id,
+                plan_id=plan.id,
+                action_id=action.id,
+                code="execution_plan_result_lookup_failed",
+                reason="Canonical ExecutionPlan result lookup failed.",
+            )
+        if canonical is not None:
+            self._release_claim(
+                claim_handle=claim_handle,
+                target_id=target.id,
+                revision_id=revision.id,
+                test_case_id=test_case.id,
+                plan_id=plan.id,
+                action_id=action.id,
+            )
+            return canonical
 
         # ExecutionPlanClaim is the ownership boundary. TestCase status is only
         # compatibility/UI state and may be stale after a worker disappears.
@@ -328,6 +384,7 @@ class PlanExecutionService:
             raise
         except HTTPExecutionError as exc:
             return self._finish(
+                claim_handle=claim_handle,
                 test_case=test_case,
                 request_data=request_data,
                 target_id=target_id,
@@ -339,6 +396,7 @@ class PlanExecutionService:
             )
         else:
             return self._finish(
+                claim_handle=claim_handle,
                 test_case=test_case,
                 request_data=request_data,
                 target_id=target_id,
@@ -351,21 +409,115 @@ class PlanExecutionService:
                 duration_ms=result.duration_ms,
             )
         finally:
-            try:
-                self.claim_service.release(claim_handle)
-            except ExecutionClaimLostError:
-                # A stale owner must not alter the successor's durable claim.
-                pass
-            except ExecutionClaimCoordinationError:
-                # The execution outcome is already durable. Cleanup is
-                # best-effort and the finite lease safely expires on failure.
-                self._audit_claim_cleanup_failure(
-                    target_id=target_id,
-                    revision_id=revision_id,
-                    test_case_id=test_case.id,
-                    plan_id=plan_id,
-                    action_id=action_id,
+            self._release_claim(
+                claim_handle=claim_handle,
+                target_id=target_id,
+                revision_id=revision_id,
+                test_case_id=test_case.id,
+                plan_id=plan_id,
+                action_id=action_id,
+            )
+
+    def _load_fresh_canonical(self, plan_id: int) -> TestRun | None:
+        try:
+            with Session(bind=self.db.get_bind(), expire_on_commit=False) as fresh_db:
+                canonical = fresh_db.scalar(
+                    select(TestRun).where(TestRun.execution_plan_id == plan_id)
                 )
+                if canonical is not None:
+                    fresh_db.expunge(canonical)
+                return canonical
+        except Exception as exc:
+            raise CanonicalResultLookupError(
+                "Canonical ExecutionPlan result lookup failed."
+            ) from exc
+
+    def _assert_result_writer(
+        self,
+        *,
+        claim_handle,
+        target_id: int,
+        revision_id: int,
+        test_case_id: int,
+        plan_id: int,
+        action_id: int,
+    ) -> None:
+        try:
+            self.claim_service.assert_current(claim_handle, db=self.db)
+        except ExecutionClaimLostError as exc:
+            self.db.rollback()
+            self._raise_post_network_failure(
+                target_id=target_id,
+                revision_id=revision_id,
+                test_case_id=test_case_id,
+                plan_id=plan_id,
+                action_id=action_id,
+                code="execution_plan_result_fencing_lost",
+                reason="ExecutionPlan result fencing was lost before persistence.",
+            )
+            raise AssertionError from exc
+        except ExecutionClaimCoordinationError as exc:
+            self.db.rollback()
+            self._raise_post_network_failure(
+                target_id=target_id,
+                revision_id=revision_id,
+                test_case_id=test_case_id,
+                plan_id=plan_id,
+                action_id=action_id,
+                code="execution_plan_result_fencing_failed",
+                reason="ExecutionPlan result fencing could not be verified.",
+            )
+            raise AssertionError from exc
+
+    def _raise_post_network_failure(
+        self,
+        *,
+        target_id: int,
+        revision_id: int,
+        test_case_id: int,
+        plan_id: int,
+        action_id: int,
+        code: str,
+        reason: str,
+    ) -> None:
+        try:
+            SafetyAuditService(self.db).append_execution_outcome(
+                outcome="failed",
+                target_id=target_id,
+                authorization_revision_id=revision_id,
+                test_case_id=test_case_id,
+                execution_plan_id=plan_id,
+                plan_action_id=action_id,
+                code=code,
+                reason=reason,
+            )
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+        raise ExecutionBlockedError(code=code, reason=reason)
+
+    def _release_claim(
+        self,
+        *,
+        claim_handle,
+        target_id: int,
+        revision_id: int,
+        test_case_id: int,
+        plan_id: int,
+        action_id: int,
+    ) -> None:
+        try:
+            self.claim_service.release(claim_handle)
+        except ExecutionClaimLostError:
+            pass
+        except ExecutionClaimCoordinationError:
+            self._audit_claim_cleanup_failure(
+                target_id=target_id,
+                revision_id=revision_id,
+                test_case_id=test_case_id,
+                plan_id=plan_id,
+                action_id=action_id,
+            )
 
     def _audit_claim_cleanup_failure(
         self,
@@ -427,6 +579,7 @@ class PlanExecutionService:
     def _finish(
         self,
         *,
+        claim_handle,
         test_case: TestCase,
         request_data: dict[str, object],
         target_id: int,
@@ -439,37 +592,93 @@ class PlanExecutionService:
         duration_ms: int | None = None,
         error_message: str | None = None,
     ) -> TestRun:
+        self._assert_result_writer(
+            claim_handle=claim_handle,
+            target_id=target_id,
+            revision_id=revision_id,
+            test_case_id=test_case.id,
+            plan_id=plan_id,
+            action_id=action_id,
+        )
         run = TestRun(
             test_case_id=test_case.id,
             authorization_revision_id=revision_id,
+            execution_plan_id=plan_id,
             request_data=request_data,
             response_status=response_status,
             response_body=response_body,
             duration_ms=duration_ms,
             error_message=error_message,
         )
-        self.db.add(run)
-        self.db.flush()
-        SafetyAuditService(self.db).append_execution_outcome(
-            outcome=outcome,
-            target_id=target_id,
-            authorization_revision_id=revision_id,
-            test_case_id=test_case.id,
-            execution_plan_id=plan_id,
-            plan_action_id=action_id,
-            test_run=run,
-            code=(
-                "http_execution_succeeded"
-                if outcome == "succeeded"
-                else "http_execution_failed"
-            ),
-            reason=(
-                "HTTP execution completed."
-                if outcome == "succeeded"
-                else "HTTP execution failed."
-            ),
+        try:
+            self.db.add(run)
+            self.db.flush()
+            SafetyAuditService(self.db).append_execution_outcome(
+                outcome=outcome,
+                target_id=target_id,
+                authorization_revision_id=revision_id,
+                test_case_id=test_case.id,
+                execution_plan_id=plan_id,
+                plan_action_id=action_id,
+                test_run=run,
+                code=(
+                    "http_execution_succeeded"
+                    if outcome == "succeeded"
+                    else "http_execution_failed"
+                ),
+                reason=(
+                    "HTTP execution completed."
+                    if outcome == "succeeded"
+                    else "HTTP execution failed."
+                ),
+            )
+            test_case.status = "completed" if outcome == "succeeded" else "failed"
+            self.db.commit()
+            return run
+        except IntegrityError as exc:
+            self.db.rollback()
+            if self._is_canonical_unique_conflict(exc):
+                try:
+                    canonical = self.db.scalar(
+                        select(TestRun).where(TestRun.execution_plan_id == plan_id)
+                    )
+                except Exception:
+                    self.db.rollback()
+                    canonical = None
+                if canonical is not None:
+                    return canonical
+            self._raise_post_network_failure(
+                target_id=target_id,
+                revision_id=revision_id,
+                test_case_id=test_case.id,
+                plan_id=plan_id,
+                action_id=action_id,
+                code="execution_plan_result_persistence_failed",
+                reason="Canonical ExecutionPlan result could not be persisted.",
+            )
+            raise AssertionError from exc
+        except Exception as exc:
+            self.db.rollback()
+            self._raise_post_network_failure(
+                target_id=target_id,
+                revision_id=revision_id,
+                test_case_id=test_case.id,
+                plan_id=plan_id,
+                action_id=action_id,
+                code="execution_plan_result_persistence_failed",
+                reason="Canonical ExecutionPlan result could not be persisted.",
+            )
+            raise AssertionError from exc
+
+    @staticmethod
+    def _is_canonical_unique_conflict(exc: IntegrityError) -> bool:
+        original = exc.orig
+        sqlstate = getattr(original, "sqlstate", None) or getattr(
+            original, "pgcode", None
         )
-        test_case.status = "completed" if outcome == "succeeded" else "failed"
-        self.db.commit()
-        self.db.refresh(run)
-        return run
+        diagnostic = getattr(original, "diag", None)
+        return (
+            sqlstate == "23505"
+            and getattr(diagnostic, "constraint_name", None)
+            == "uq_test_runs_execution_plan_id"
+        )
