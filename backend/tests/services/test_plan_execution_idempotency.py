@@ -11,6 +11,7 @@ from app.db.models import (
     ExecutionPlan,
     ExecutionPlanApprovalRecord,
     ExecutionPlanClaim,
+    ExecutionPlanCancellation,
     ExecutionPlanProgress,
     PlanAction,
     SafetyDecisionRecord,
@@ -378,6 +379,11 @@ def test_two_plans_for_same_reusable_test_case_have_independent_results(
             db.execute(
                 delete(ExecutionPlanApprovalRecord).where(
                     ExecutionPlanApprovalRecord.execution_plan_id == second_plan_id
+                )
+            )
+            db.execute(
+                delete(ExecutionPlanCancellation).where(
+                    ExecutionPlanCancellation.execution_plan_id == second_plan_id
                 )
             )
             db.execute(

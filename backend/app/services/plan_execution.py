@@ -39,10 +39,15 @@ from app.services.execution_plan_claim import (
     ExecutionClaimUnavailableError,
     ExecutionPlanClaimService,
 )
+from app.services.execution_plan_cancellation import (
+    ExecutionPlanCancellationCoordinationError,
+    ExecutionPlanCancellationService,
+)
 from app.services.execution_plan_progress import (
     ExecutionInDoubtError,
     ExecutionPlanProgressService,
     ExecutionProgressCoordinationError,
+    ExecutionProgressCancelledError,
     ExecutionProgressLostError,
 )
 from app.services.safety_audit import (
@@ -74,6 +79,7 @@ class PlanExecutionService:
         claim_lease_seconds: float = 30.0,
         claim_owner_id: str | None = None,
         progress_service: ExecutionPlanProgressService | None = None,
+        cancellation_service: ExecutionPlanCancellationService | None = None,
     ) -> None:
         self.db = db
         self.executor = executor
@@ -84,6 +90,10 @@ class PlanExecutionService:
         self.claim_owner_id = claim_owner_id or str(uuid4())
         self.progress_service = progress_service or ExecutionPlanProgressService(
             bind=db.get_bind()
+        )
+        self.cancellation_service = (
+            cancellation_service
+            or ExecutionPlanCancellationService(bind=db.get_bind())
         )
 
     def execute(self, *, execution_plan_id: int) -> TestRun:
@@ -116,6 +126,29 @@ class PlanExecutionService:
         )
         if canonical is not None:
             return canonical
+
+        try:
+            cancelled = self.cancellation_service.get_cancellation(plan.id)
+        except ExecutionPlanCancellationCoordinationError:
+            self._raise_preflight_blocked(
+                target_id=plan.target_id,
+                revision_id=plan.authorization_revision_id,
+                test_case_id=action.test_case_id,
+                plan_id=plan.id,
+                action_id=action.id,
+                code="execution_plan_cancellation_coordination_failed",
+                reason="ExecutionPlan cancellation coordination failed.",
+            )
+        if cancelled is not None:
+            self._raise_preflight_blocked(
+                target_id=plan.target_id,
+                revision_id=plan.authorization_revision_id,
+                test_case_id=action.test_case_id,
+                plan_id=plan.id,
+                action_id=action.id,
+                code="execution_plan_cancelled",
+                reason="ExecutionPlan was cancelled before network execution.",
+            )
 
         target = self.db.get(Target, plan.target_id)
         revision = self.db.get(AuthorizationRevision, plan.authorization_revision_id)
@@ -292,6 +325,45 @@ class PlanExecutionService:
             return canonical
 
         try:
+            cancelled = self.cancellation_service.get_cancellation(plan.id)
+        except ExecutionPlanCancellationCoordinationError:
+            self._release_claim(
+                claim_handle=claim_handle,
+                target_id=target.id,
+                revision_id=revision.id,
+                test_case_id=test_case.id,
+                plan_id=plan.id,
+                action_id=action.id,
+            )
+            self._raise_preflight_blocked(
+                target_id=target.id,
+                revision_id=revision.id,
+                test_case_id=test_case.id,
+                plan_id=plan.id,
+                action_id=action.id,
+                code="execution_plan_cancellation_coordination_failed",
+                reason="ExecutionPlan cancellation coordination failed.",
+            )
+        if cancelled is not None:
+            self._release_claim(
+                claim_handle=claim_handle,
+                target_id=target.id,
+                revision_id=revision.id,
+                test_case_id=test_case.id,
+                plan_id=plan.id,
+                action_id=action.id,
+            )
+            self._raise_preflight_blocked(
+                target_id=target.id,
+                revision_id=revision.id,
+                test_case_id=test_case.id,
+                plan_id=plan.id,
+                action_id=action.id,
+                code="execution_plan_cancelled",
+                reason="ExecutionPlan was cancelled before network execution.",
+            )
+
+        try:
             self.progress_service.prepare_attempt(claim_handle)
         except ExecutionInDoubtError:
             self._release_claim(
@@ -432,6 +504,11 @@ class PlanExecutionService:
                 raise ExecutionBlockedError(
                     code="execution_plan_progress_lost",
                     reason="ExecutionPlan progress fencing was lost before network.",
+                ) from exc
+            except ExecutionProgressCancelledError as exc:
+                raise ExecutionBlockedError(
+                    code="execution_plan_cancelled",
+                    reason="ExecutionPlan was cancelled before network execution.",
                 ) from exc
             except ExecutionProgressCoordinationError as exc:
                 raise ExecutionBlockedError(

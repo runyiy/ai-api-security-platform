@@ -26,6 +26,10 @@ class ExecutionProgressCoordinationError(ExecutionProgressError):
     pass
 
 
+class ExecutionProgressCancelledError(ExecutionProgressError):
+    pass
+
+
 @dataclass(frozen=True)
 class ProgressState:
     execution_plan_id: int
@@ -101,49 +105,89 @@ class ExecutionPlanProgressService:
         raise ExecutionProgressLostError("ExecutionPlan progress fencing was lost.")
 
     def mark_network_started(self, handle: ClaimHandle) -> ProgressState:
-        row = self._run(
-            text(
-                """WITH current_claim AS MATERIALIZED (
-                    SELECT execution_plan_id FROM execution_plan_claims
-                    WHERE execution_plan_id=:plan_id AND owner_id=:owner_id
-                      AND fencing_generation=:generation
-                      AND lease_expires_at > clock_timestamp()
-                    FOR UPDATE
-                )
-                UPDATE execution_plan_progress AS progress SET
-                    phase='network_started', updated_at=clock_timestamp()
-                FROM current_claim
-                WHERE progress.execution_plan_id=:plan_id
-                  AND progress.fencing_generation=:generation
-                  AND progress.phase='pre_network'
-                RETURNING progress.execution_plan_id,
-                          progress.fencing_generation, progress.phase,
-                          progress.updated_at"""
-            ),
-            self._values(handle),
+        values = self._values(handle)
+        for _ in range(self._max_retries):
+            try:
+                with self._sessions.begin() as db:
+                    self._set_timeouts(db)
+                    db.execute(
+                        text(
+                            "SELECT id FROM execution_plans "
+                            "WHERE id=:plan_id FOR UPDATE"
+                        ),
+                        values,
+                    ).one()
+                    current = db.execute(
+                        text(
+                            "SELECT execution_plan_id FROM execution_plan_claims "
+                            "WHERE execution_plan_id=:plan_id AND owner_id=:owner_id "
+                            "AND fencing_generation=:generation "
+                            "AND lease_expires_at > clock_timestamp() FOR UPDATE"
+                        ),
+                        values,
+                    ).first()
+                    if current is None:
+                        raise ExecutionProgressLostError(
+                            "ExecutionPlan progress fencing was lost."
+                        )
+                    cancelled = db.execute(
+                        text(
+                            "SELECT execution_plan_id "
+                            "FROM execution_plan_cancellations "
+                            "WHERE execution_plan_id=:plan_id"
+                        ),
+                        values,
+                    ).first()
+                    if cancelled is not None:
+                        raise ExecutionProgressCancelledError(
+                            "ExecutionPlan was cancelled."
+                        )
+                    row = db.execute(
+                        text(
+                            "UPDATE execution_plan_progress SET "
+                            "phase='network_started', updated_at=clock_timestamp() "
+                            "WHERE execution_plan_id=:plan_id "
+                            "AND fencing_generation=:generation "
+                            "AND phase='pre_network' "
+                            "RETURNING execution_plan_id, fencing_generation, "
+                            "phase, updated_at"
+                        ),
+                        values,
+                    ).first()
+                    if row is None:
+                        raise ExecutionProgressLostError(
+                            "ExecutionPlan progress fencing was lost."
+                        )
+                    return ProgressState(*row)
+            except (ExecutionProgressLostError, ExecutionProgressCancelledError):
+                raise
+            except Exception:
+                continue
+        raise ExecutionProgressCoordinationError(
+            "ExecutionPlan progress coordination failed."
         )
-        if row is None:
-            raise ExecutionProgressLostError("ExecutionPlan progress fencing was lost.")
-        return ProgressState(*row)
 
     def _run(self, statement, values: dict[str, object]):
         for _ in range(self._max_retries):
             try:
                 with self._sessions.begin() as db:
-                    db.execute(
-                        text("SELECT set_config('lock_timeout', :value, true)"),
-                        {"value": self._timeout},
-                    )
-                    db.execute(
-                        text("SELECT set_config('statement_timeout', :value, true)"),
-                        {"value": self._timeout},
-                    )
+                    self._set_timeouts(db)
                     result = db.execute(statement, values).first()
                     return tuple(result) if result is not None else None
             except Exception:
                 continue
         raise ExecutionProgressCoordinationError(
             "ExecutionPlan progress coordination failed."
+        )
+
+    def _set_timeouts(self, db) -> None:
+        db.execute(
+            text("SELECT set_config('lock_timeout', :value, true)"),
+            {"value": self._timeout},
+        )
+        db.execute(
+            text("SELECT set_config('statement_timeout', :value, true)"),
+            {"value": self._timeout},
         )
 
     @staticmethod

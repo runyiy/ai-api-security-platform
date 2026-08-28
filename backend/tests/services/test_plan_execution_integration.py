@@ -11,6 +11,7 @@ from app.db.models import (
     Endpoint,
     ExecutionPlan,
     ExecutionPlanApprovalRecord,
+    ExecutionPlanCancellation,
     ExecutionPlanClaim,
     ExecutionPlanProgress,
     PlanAction,
@@ -33,6 +34,7 @@ from app.services.execution_plan_claim import (
     ExecutionClaimCoordinationError,
     ExecutionPlanClaimService,
 )
+from app.services.execution_plan_cancellation import ExecutionPlanCancellationService
 from app.services.execution_plan_progress import (
     ExecutionPlanProgressService,
     ExecutionProgressCoordinationError,
@@ -141,6 +143,11 @@ def approved_plan() -> tuple[int, int, int, int]:
                 )
             )
             db.execute(
+                delete(ExecutionPlanCancellation).where(
+                    ExecutionPlanCancellation.execution_plan_id == plan_id
+                )
+            )
+            db.execute(
                 delete(ExecutionPlanProgress).where(
                     ExecutionPlanProgress.execution_plan_id == plan_id
                 )
@@ -180,6 +187,7 @@ def execute(
     claim_service: ExecutionPlanClaimService | None = None,
     claim_lease_seconds: float = 30.0,
     progress_service: ExecutionPlanProgressService | None = None,
+    cancellation_service: ExecutionPlanCancellationService | None = None,
 ) -> TestRun:
     with SessionLocal() as db:
         return PlanExecutionService(
@@ -187,6 +195,7 @@ def execute(
             claim_service=claim_service,
             claim_lease_seconds=claim_lease_seconds,
             progress_service=progress_service,
+            cancellation_service=cancellation_service,
             executor=PolicyEnforcedHTTPExecutor(
                 policy_engine=ScopePolicyEngine({"example.test"}),
                 rate_limiter=limiter,
