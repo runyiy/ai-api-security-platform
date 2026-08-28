@@ -10,6 +10,7 @@ from app.db.models.execution_plan_cancellation import ExecutionPlanCancellation
 from app.db.models.execution_plan_progress import ExecutionPlanProgress
 from app.db.models.finding import Finding
 from app.db.models.finding_ai_analysis import FindingAIAnalysis
+from app.db.models.network_control import NetworkDisabledTarget, NetworkGlobalControl
 from app.db.models.resource import Resource
 from app.db.models.plan_action import PlanAction
 from app.db.models.rate_reservation_state import RateReservationState
@@ -44,5 +45,7 @@ __all__ = [
     "TestRun",
     "Finding",
     "FindingAIAnalysis",
+    "NetworkDisabledTarget",
+    "NetworkGlobalControl",
     "SecurityReport",
 ]

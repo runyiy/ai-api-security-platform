@@ -11,7 +11,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import math
 from threading import BoundedSemaphore, Lock
-from typing import Iterator
+from typing import Iterator, Protocol
 
 
 DEFAULT_MAX_CONCURRENT_NETWORK_REQUESTS = 4
@@ -23,6 +23,12 @@ class NetworkExecutionDenied(RuntimeError):
         self.code = code
         self.reason = reason
         super().__init__(f"{code}: {reason}")
+
+
+class NetworkExecutionControllerProtocol(Protocol):
+    def check_enabled(self, target_id: int) -> None: ...
+
+    def admission(self, target_id: int): ...
 
 
 class NetworkExecutionController:
