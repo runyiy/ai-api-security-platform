@@ -11,6 +11,7 @@ from app.db.models import (
     ExecutionPlan,
     ExecutionPlanApprovalRecord,
     ExecutionPlanClaim,
+    ExecutionPlanProgress,
     PlanAction,
     SafetyDecisionRecord,
     Scope,
@@ -380,6 +381,11 @@ def test_two_plans_for_same_reusable_test_case_have_independent_results(
                 )
             )
             db.execute(
+                delete(ExecutionPlanProgress).where(
+                    ExecutionPlanProgress.execution_plan_id == second_plan_id
+                )
+            )
+            db.execute(
                 delete(ExecutionPlanClaim).where(
                     ExecutionPlanClaim.execution_plan_id == second_plan_id
                 )
@@ -692,3 +698,15 @@ def test_outcome_audit_failure_rolls_back_result_before_exact_claim_release(
         )
         assert failure is not None
         assert failure.outcome == "failed"
+
+    retry_limiter = MutatingRateLimiter()
+    retry_gateway = RecordingGateway()
+    with pytest.raises(ExecutionBlockedError) as retry_error:
+        execute(
+            plan_id,
+            limiter=retry_limiter,
+            gateway=retry_gateway,
+        )
+    assert retry_error.value.code == "execution_plan_in_doubt"
+    assert retry_limiter.calls == 0
+    assert retry_gateway.target_ids == []

@@ -80,6 +80,7 @@ class PolicyEnforcedHTTPExecutor:
             [], tuple[Target, AuthorizationRevision | None, list[Scope]]
         ] | None = None,
         policy_decision_observer: Callable[[PolicyDecision], None] | None = None,
+        before_network: Callable[[], None] | None = None,
     ) -> HTTPExecutionResult:
         normalized_method = (
             method.strip().upper()
@@ -172,6 +173,9 @@ class PolicyEnforcedHTTPExecutor:
                     "available until the remaining release gates exist."
                 ),
             )
+
+        if before_network is not None:
+            before_network()
 
         try:
             result = self.network_gateway.request(

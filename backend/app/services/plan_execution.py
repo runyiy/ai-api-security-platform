@@ -39,6 +39,12 @@ from app.services.execution_plan_claim import (
     ExecutionClaimUnavailableError,
     ExecutionPlanClaimService,
 )
+from app.services.execution_plan_progress import (
+    ExecutionInDoubtError,
+    ExecutionPlanProgressService,
+    ExecutionProgressCoordinationError,
+    ExecutionProgressLostError,
+)
 from app.services.safety_audit import (
     SafetyAuditService,
     build_policy_decision_observer,
@@ -67,6 +73,7 @@ class PlanExecutionService:
         claim_service: ExecutionPlanClaimService | None = None,
         claim_lease_seconds: float = 30.0,
         claim_owner_id: str | None = None,
+        progress_service: ExecutionPlanProgressService | None = None,
     ) -> None:
         self.db = db
         self.executor = executor
@@ -75,6 +82,9 @@ class PlanExecutionService:
         )
         self.claim_lease_seconds = claim_lease_seconds
         self.claim_owner_id = claim_owner_id or str(uuid4())
+        self.progress_service = progress_service or ExecutionPlanProgressService(
+            bind=db.get_bind()
+        )
 
     def execute(self, *, execution_plan_id: int) -> TestRun:
         if self.db.get(ExecutionPlan, execution_plan_id) is None:
@@ -281,6 +291,63 @@ class PlanExecutionService:
             )
             return canonical
 
+        try:
+            self.progress_service.prepare_attempt(claim_handle)
+        except ExecutionInDoubtError:
+            self._release_claim(
+                claim_handle=claim_handle,
+                target_id=target.id,
+                revision_id=revision.id,
+                test_case_id=test_case.id,
+                plan_id=plan.id,
+                action_id=action.id,
+            )
+            self._raise_post_network_failure(
+                target_id=target.id,
+                revision_id=revision.id,
+                test_case_id=test_case.id,
+                plan_id=plan.id,
+                action_id=action.id,
+                code="execution_plan_in_doubt",
+                reason="ExecutionPlan may have crossed the network boundary.",
+            )
+        except ExecutionProgressLostError:
+            self._release_claim(
+                claim_handle=claim_handle,
+                target_id=target.id,
+                revision_id=revision.id,
+                test_case_id=test_case.id,
+                plan_id=plan.id,
+                action_id=action.id,
+            )
+            self._raise_preflight_blocked(
+                target_id=target.id,
+                revision_id=revision.id,
+                test_case_id=test_case.id,
+                plan_id=plan.id,
+                action_id=action.id,
+                code="execution_plan_progress_lost",
+                reason="ExecutionPlan progress fencing was lost.",
+            )
+        except ExecutionProgressCoordinationError:
+            self._release_claim(
+                claim_handle=claim_handle,
+                target_id=target.id,
+                revision_id=revision.id,
+                test_case_id=test_case.id,
+                plan_id=plan.id,
+                action_id=action.id,
+            )
+            self._raise_preflight_blocked(
+                target_id=target.id,
+                revision_id=revision.id,
+                test_case_id=test_case.id,
+                plan_id=plan.id,
+                action_id=action.id,
+                code="execution_plan_progress_coordination_failed",
+                reason="ExecutionPlan progress coordination failed.",
+            )
+
         # ExecutionPlanClaim is the ownership boundary. TestCase status is only
         # compatibility/UI state and may be stale after a worker disappears.
         test_case.status = "running"
@@ -357,6 +424,21 @@ class PlanExecutionService:
             execution_plan_id=plan_id,
             plan_action_id=action_id,
         )
+
+        def before_network() -> None:
+            try:
+                self.progress_service.mark_network_started(claim_handle)
+            except ExecutionProgressLostError as exc:
+                raise ExecutionBlockedError(
+                    code="execution_plan_progress_lost",
+                    reason="ExecutionPlan progress fencing was lost before network.",
+                ) from exc
+            except ExecutionProgressCoordinationError as exc:
+                raise ExecutionBlockedError(
+                    code="execution_plan_progress_coordination_failed",
+                    reason="ExecutionPlan progress coordination failed.",
+                ) from exc
+
         try:
             result = self.executor.execute(
                 target=target,
@@ -367,6 +449,7 @@ class PlanExecutionService:
                 headers=request_headers,
                 refresh_authorization=refresh_authorization,
                 policy_decision_observer=observer,
+                before_network=before_network,
             )
         except ExecutionBlockedError as exc:
             test_case.status = "blocked"
