@@ -27,7 +27,10 @@ from app.services.execution_plan_claim import (
     ExecutionClaimUnavailableError,
     ExecutionPlanClaimService,
 )
-from app.services.plan_execution import PlanExecutionService
+from app.services.plan_execution import (
+    CanonicalResultLookupError,
+    PlanExecutionService,
+)
 from app.services.safety_audit import SafetyAuditService
 from tests.services.test_plan_execution_integration import (
     FailingGateway,
@@ -186,6 +189,97 @@ def test_claim_unavailable_race_returns_fresh_canonical_result(
         assert claim is not None
         assert claim.owner_id == active.owner_id
         assert claim.fencing_generation == active.fencing_generation
+
+
+def test_post_claim_canonical_lookup_failure_releases_claim_and_fails_closed(
+    approved_plan: tuple[int, int, int, int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_id, _, _, _ = approved_plan
+    delegate = ExecutionPlanClaimService(bind=engine, attempt_timeout_seconds=0.1)
+
+    class TrackingClaims:
+        def __init__(self) -> None:
+            self.acquired = None
+            self.released = []
+
+        def acquire(self, *args, **kwargs):
+            self.acquired = delegate.acquire(*args, **kwargs)
+            return self.acquired
+
+        def release(self, handle):
+            delegate.release(handle)
+            self.released.append(handle)
+
+    claims = TrackingClaims()
+    monkeypatch.setattr(
+        PlanExecutionService,
+        "_load_fresh_canonical",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            CanonicalResultLookupError("private database details")
+        ),
+    )
+    limiter = MutatingRateLimiter()
+    gateway = RecordingGateway()
+
+    with pytest.raises(ExecutionBlockedError) as raised:
+        execute(
+            plan_id,
+            limiter=limiter,
+            gateway=gateway,
+            claim_service=claims,
+        )
+
+    assert raised.value.code == "execution_plan_result_lookup_failed"
+    assert "private" not in raised.value.reason
+    assert limiter.calls == 0
+    assert gateway.target_ids == []
+    assert claims.released == [claims.acquired]
+    with SessionLocal() as db:
+        assert db.scalar(
+            select(TestRun).where(TestRun.execution_plan_id == plan_id)
+        ) is None
+        claim = db.get(ExecutionPlanClaim, plan_id)
+        assert claim is not None
+        assert claim.owner_id is None
+
+
+def test_claim_unavailable_canonical_lookup_failure_fails_closed(
+    approved_plan: tuple[int, int, int, int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_id, _, _, _ = approved_plan
+
+    class UnavailableClaims:
+        def acquire(self, *args, **kwargs):
+            raise ExecutionClaimUnavailableError("private owner details")
+
+    monkeypatch.setattr(
+        PlanExecutionService,
+        "_load_fresh_canonical",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            CanonicalResultLookupError("private database details")
+        ),
+    )
+    limiter = MutatingRateLimiter()
+    gateway = RecordingGateway()
+
+    with pytest.raises(ExecutionBlockedError) as raised:
+        execute(
+            plan_id,
+            limiter=limiter,
+            gateway=gateway,
+            claim_service=UnavailableClaims(),
+        )
+
+    assert raised.value.code == "execution_plan_result_lookup_failed"
+    assert "private" not in raised.value.reason
+    assert limiter.calls == 0
+    assert gateway.target_ids == []
+    with SessionLocal() as db:
+        assert db.scalar(
+            select(TestRun).where(TestRun.execution_plan_id == plan_id)
+        ) is None
 
 
 def test_replay_does_not_mutate_status_or_duplicate_outcome_audit(

@@ -54,6 +54,10 @@ class PlanExecutionNotFoundError(PlanExecutionError):
     pass
 
 
+class CanonicalResultLookupError(PlanExecutionError):
+    pass
+
+
 class PlanExecutionService:
     def __init__(
         self,
@@ -212,7 +216,18 @@ class PlanExecutionService:
                 lease_seconds=self.claim_lease_seconds,
             )
         except ExecutionClaimUnavailableError:
-            canonical = self._load_fresh_canonical(plan.id)
+            try:
+                canonical = self._load_fresh_canonical(plan.id)
+            except CanonicalResultLookupError:
+                self._raise_preflight_blocked(
+                    target_id=target.id,
+                    revision_id=revision.id,
+                    test_case_id=test_case.id,
+                    plan_id=plan.id,
+                    action_id=action.id,
+                    code="execution_plan_result_lookup_failed",
+                    reason="Canonical ExecutionPlan result lookup failed.",
+                )
             if canonical is not None:
                 return canonical
             self._raise_preflight_blocked(
@@ -235,7 +250,26 @@ class PlanExecutionService:
                 reason="ExecutionPlan claim coordination failed.",
             )
 
-        canonical = self._load_fresh_canonical(plan.id)
+        try:
+            canonical = self._load_fresh_canonical(plan.id)
+        except CanonicalResultLookupError:
+            self._release_claim(
+                claim_handle=claim_handle,
+                target_id=target.id,
+                revision_id=revision.id,
+                test_case_id=test_case.id,
+                plan_id=plan.id,
+                action_id=action.id,
+            )
+            self._raise_preflight_blocked(
+                target_id=target.id,
+                revision_id=revision.id,
+                test_case_id=test_case.id,
+                plan_id=plan.id,
+                action_id=action.id,
+                code="execution_plan_result_lookup_failed",
+                reason="Canonical ExecutionPlan result lookup failed.",
+            )
         if canonical is not None:
             self._release_claim(
                 claim_handle=claim_handle,
@@ -393,8 +427,10 @@ class PlanExecutionService:
                 if canonical is not None:
                     fresh_db.expunge(canonical)
                 return canonical
-        except Exception:
-            return None
+        except Exception as exc:
+            raise CanonicalResultLookupError(
+                "Canonical ExecutionPlan result lookup failed."
+            ) from exc
 
     def _assert_result_writer(
         self,
