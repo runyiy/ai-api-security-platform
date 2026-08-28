@@ -19,6 +19,7 @@ def current_revision() -> str | None:
 def test_m8_02_migration_round_trip() -> None:
     config = Config("alembic.ini")
     try:
+        command.downgrade(config, REVISION)
         command.upgrade(config, REVISION)
         assert current_revision() == REVISION
         inspector = inspect(engine)

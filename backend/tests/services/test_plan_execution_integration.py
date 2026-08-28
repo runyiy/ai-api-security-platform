@@ -83,6 +83,9 @@ class ReleaseCoordinationFailureClaims:
         self.renewed.append(handle)
         return handle
 
+    def assert_current(self, handle, **kwargs) -> None:
+        self.delegate.assert_current(handle, **kwargs)
+
     def release(self, handle) -> None:
         self.release_attempts.append(handle)
         raise ExecutionClaimCoordinationError("private owner and database details")

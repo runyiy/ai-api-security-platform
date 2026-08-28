@@ -70,3 +70,13 @@ class TestRun(Base):
         nullable=True,
         index=True,
     )
+
+    execution_plan_id: Mapped[int | None] = mapped_column(
+        ForeignKey(
+            "execution_plans.id",
+            name="fk_test_runs_execution_plan_id",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
+        unique=True,
+    )

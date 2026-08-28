@@ -109,12 +109,13 @@ def test_required_exact_approval_executes_and_missing_or_revoked_blocks(
     assert blocked.plan_action_id == plan.actions[0].id
 
     record_plan_decision(db, execution_plan_id=plan.id, decision="approved")
-    assert service.execute(execution_plan_id=plan.id).response_status == 200
+    completed = service.execute(execution_plan_id=plan.id)
+    assert completed.response_status == 200
 
     executor.reset_mock()
     record_plan_decision(db, execution_plan_id=plan.id, decision="revoked")
-    with pytest.raises(Exception, match="approval"):
-        service.execute(execution_plan_id=plan.id)
+    replay = service.execute(execution_plan_id=plan.id)
+    assert replay.id == completed.id
     executor.execute.assert_not_called()
 
 

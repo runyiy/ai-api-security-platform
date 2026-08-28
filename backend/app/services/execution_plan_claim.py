@@ -5,7 +5,7 @@ from datetime import datetime
 import math
 
 from sqlalchemy import Engine, text
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
 
 class ExecutionClaimError(RuntimeError):
@@ -85,16 +85,34 @@ class ExecutionPlanClaimService:
             raise ExecutionClaimUnavailableError("ExecutionPlan claim is unavailable.")
         return ClaimHandle(*row)
 
-    def assert_current(self, handle: ClaimHandle) -> None:
-        row = self._run(
-            text(
-                """SELECT execution_plan_id FROM execution_plan_claims
-                WHERE execution_plan_id=:plan_id AND owner_id=:owner_id
-                  AND fencing_generation=:generation
-                  AND lease_expires_at > clock_timestamp()"""
-            ),
-            self._handle_values(handle),
+    def assert_current(
+        self, handle: ClaimHandle, *, db: Session | None = None
+    ) -> None:
+        statement = text(
+            """SELECT execution_plan_id FROM execution_plan_claims
+            WHERE execution_plan_id=:plan_id AND owner_id=:owner_id
+              AND fencing_generation=:generation
+              AND lease_expires_at > clock_timestamp()
+            FOR UPDATE"""
         )
+        if db is None:
+            row = self._run(statement, self._handle_values(handle))
+        else:
+            try:
+                db.execute(
+                    text("SELECT set_config('lock_timeout', :value, true)"),
+                    {"value": self._timeout},
+                )
+                db.execute(
+                    text("SELECT set_config('statement_timeout', :value, true)"),
+                    {"value": self._timeout},
+                )
+                result = db.execute(statement, self._handle_values(handle)).first()
+                row = tuple(result) if result is not None else None
+            except Exception as exc:
+                raise ExecutionClaimCoordinationError(
+                    "Execution claim coordination failed."
+                ) from exc
         if row is None:
             raise ExecutionClaimLostError("ExecutionPlan claim was lost.")
 
