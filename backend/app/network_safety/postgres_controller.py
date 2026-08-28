@@ -113,18 +113,24 @@ class PostgresNetworkExecutionController:
         yielded = False
         try:
             connection = self.bind.connect()
+            self._raise_if_permit_deadline_expired(deadline)
             while acquired_slot is None:
                 try:
                     maximum = self._read_limit(connection)
                     for slot in range(1, maximum + 1):
+                        self._raise_if_permit_deadline_expired(deadline)
                         acquired = connection.scalar(
                             text("SELECT pg_try_advisory_lock(:namespace, :slot)"),
                             {"namespace": ADVISORY_LOCK_NAMESPACE, "slot": slot},
                         )
                         if acquired is True:
                             acquired_slot = slot
+                        self._raise_if_permit_deadline_expired(deadline)
+                        if acquired_slot is not None:
                             break
                     connection.commit()
+                    if acquired_slot is not None:
+                        self._raise_if_permit_deadline_expired(deadline)
                 except NetworkExecutionDenied:
                     connection.rollback()
                     raise
@@ -136,10 +142,7 @@ class PostgresNetworkExecutionController:
                     break
                 remaining = deadline - self._monotonic()
                 if remaining <= 0:
-                    raise NetworkExecutionDenied(
-                        code="network_concurrency_timeout",
-                        reason="Network concurrency permit wait timed out.",
-                    )
+                    self._raise_concurrency_timeout()
                 self._sleep(min(self._poll_interval, remaining))
 
             fresh_maximum = self._read_enabled_and_limit(connection, target_id)
@@ -205,6 +208,17 @@ class PostgresNetworkExecutionController:
                 reason="Network execution is disabled for this Target.",
             )
         return row.maximum_concurrency
+
+    def _raise_if_permit_deadline_expired(self, deadline: float) -> None:
+        if self._monotonic() >= deadline:
+            self._raise_concurrency_timeout()
+
+    @staticmethod
+    def _raise_concurrency_timeout() -> None:
+        raise NetworkExecutionDenied(
+            code="network_concurrency_timeout",
+            reason="Network concurrency permit wait timed out.",
+        )
 
     def _read_limit(self, connection) -> int:
         maximum = connection.scalar(

@@ -180,6 +180,89 @@ def test_cross_process_exact_cap_two_rejects_third(approved_plan) -> None:
                 owner.wait(timeout=3)
 
 
+def test_gateway_slot_scan_rejects_and_releases_permit_acquired_after_deadline(
+    approved_plan,
+) -> None:
+    _, target_id, _, _ = approved_plan
+    with engine.begin() as db:
+        db.execute(
+            text("UPDATE network_global_control SET maximum_concurrency=4 WHERE id=1")
+        )
+    owners = [network_coordination_engine.connect() for _ in range(2)]
+    for slot, owner in enumerate(owners, start=1):
+        assert owner.scalar(
+            text("SELECT pg_try_advisory_lock(:namespace, :slot)"),
+            {"namespace": ADVISORY_LOCK_NAMESPACE, "slot": slot},
+        ) is True
+        owner.commit()
+
+    clock = {"now": 0.0}
+    attempts = []
+
+    class SlowSlotConnection:
+        def __init__(self, delegate):
+            self.delegate = delegate
+
+        def scalar(self, statement, values=None):
+            if "pg_try_advisory_lock" in str(statement):
+                attempts.append(values["slot"])
+                statement = text(
+                    "WITH delay AS MATERIALIZED (SELECT pg_sleep(0.01)) "
+                    "SELECT pg_try_advisory_lock(:namespace, :slot) FROM delay"
+                )
+                result = self.delegate.scalar(statement, values)
+                clock["now"] += 1.0
+                return result
+            return self.delegate.scalar(statement, values)
+
+        def __getattr__(self, name):
+            return getattr(self.delegate, name)
+
+    class SlowSlotBind:
+        _network_coordination_statement_timeout_ms = 1000
+
+        def connect(self):
+            return SlowSlotConnection(network_coordination_engine.connect())
+
+    shared = PostgresNetworkExecutionController(
+        bind=SlowSlotBind(), permit_wait_seconds=2.5,
+        monotonic=lambda: clock["now"],
+    )
+    resolver = Resolver(("127.0.0.1",))
+    connector = Connector(Stream("127.0.0.1"))
+    gateway = NetworkGateway(
+        controller=shared, resolver=resolver, connector=connector
+    )
+    try:
+        with pytest.raises(NetworkGatewayError) as raised:
+            gateway.request(
+                target_id=target_id, network_mode="private_local", method="GET",
+                url="http://lab.test/x", headers={},
+            )
+        assert raised.value.code == "network_concurrency_timeout"
+        assert resolver.calls == []
+        assert connector.calls == []
+        assert attempts == [1, 2, 3]
+        with network_coordination_engine.connect() as verifier:
+            assert verifier.scalar(
+                text("SELECT pg_try_advisory_lock(:namespace, 3)"),
+                {"namespace": ADVISORY_LOCK_NAMESPACE},
+            ) is True
+            assert verifier.scalar(
+                text("SELECT pg_advisory_unlock(:namespace, 3)"),
+                {"namespace": ADVISORY_LOCK_NAMESPACE},
+            ) is True
+            verifier.commit()
+    finally:
+        for slot, owner in enumerate(owners, start=1):
+            owner.scalar(
+                text("SELECT pg_advisory_unlock(:namespace, :slot)"),
+                {"namespace": ADVISORY_LOCK_NAMESPACE, "slot": slot},
+            )
+            owner.commit()
+            owner.close()
+
+
 @pytest.mark.parametrize("target_only", [False, True])
 def test_gateway_waiter_rechecks_cross_process_disable_after_permit(
     approved_plan, target_only
