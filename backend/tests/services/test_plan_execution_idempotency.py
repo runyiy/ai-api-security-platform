@@ -24,6 +24,7 @@ from app.services.execution_plan import PlanActionInput, create_execution_plan
 from app.services.execution_plan_approval import record_plan_decision
 from app.services.execution_plan_claim import (
     ExecutionClaimCoordinationError,
+    ExecutionClaimUnavailableError,
     ExecutionPlanClaimService,
 )
 from app.services.plan_execution import PlanExecutionService
@@ -85,13 +86,106 @@ def test_http_failed_replay_returns_same_result_without_outbound_execution(
     first = execute(plan_id, limiter=MutatingRateLimiter(), gateway=FailingGateway())
     limiter = MutatingRateLimiter()
     gateway = RecordingGateway()
+    claims = ExecutionPlanClaimService(bind=engine)
+    claims.acquire = lambda *args, **kwargs: pytest.fail("claim acquired on replay")
 
-    replay = execute(plan_id, limiter=limiter, gateway=gateway)
+    replay = execute(
+        plan_id, limiter=limiter, gateway=gateway, claim_service=claims
+    )
 
     assert replay.id == first.id
     assert replay.error_message == "synthetic_network_failure: failed"
     assert limiter.calls == 0
     assert gateway.target_ids == []
+
+
+def test_claim_unavailable_race_returns_fresh_canonical_result(
+    approved_plan: tuple[int, int, int, int],
+) -> None:
+    plan_id, target_id, revision_id, _ = approved_plan
+    delegate = ExecutionPlanClaimService(bind=engine, attempt_timeout_seconds=0.1)
+    active = delegate.acquire(plan_id, "active-writer", lease_seconds=10)
+    committed_run_id: list[int] = []
+    acquire_calls = 0
+
+    class UnavailableAfterCommit:
+        def acquire(self, *args, **kwargs):
+            nonlocal acquire_calls
+            acquire_calls += 1
+            with SessionLocal() as db:
+                action = db.scalar(
+                    select(PlanAction).where(PlanAction.execution_plan_id == plan_id)
+                )
+                assert action is not None
+                run = TestRun(
+                    test_case_id=action.test_case_id,
+                    authorization_revision_id=revision_id,
+                    execution_plan_id=plan_id,
+                    request_data={"race": "active-owner"},
+                    response_status=200,
+                )
+                db.add(run)
+                db.flush()
+                SafetyAuditService(db).append_execution_outcome(
+                    outcome="succeeded",
+                    target_id=target_id,
+                    authorization_revision_id=revision_id,
+                    test_case_id=action.test_case_id,
+                    execution_plan_id=plan_id,
+                    plan_action_id=action.id,
+                    test_run=run,
+                    code="http_execution_succeeded",
+                    reason="HTTP execution completed.",
+                )
+                db.commit()
+                committed_run_id.append(run.id)
+            raise ExecutionClaimUnavailableError("private owner details")
+
+        def release(self, handle):
+            pytest.fail("unavailable contender attempted claim release")
+
+    with SessionLocal() as db:
+        action = db.scalar(
+            select(PlanAction).where(PlanAction.execution_plan_id == plan_id)
+        )
+        assert action is not None
+        test_case = db.get(TestCase, action.test_case_id)
+        assert test_case is not None
+        test_case.status = "pending"
+        db.commit()
+        assert db.scalar(
+            select(TestRun).where(TestRun.execution_plan_id == plan_id)
+        ) is None
+
+    limiter = MutatingRateLimiter()
+    gateway = RecordingGateway()
+    result = execute(
+        plan_id,
+        limiter=limiter,
+        gateway=gateway,
+        claim_service=UnavailableAfterCommit(),
+    )
+
+    assert result.id == committed_run_id[0]
+    assert acquire_calls == 1
+    assert result.request_data == {"race": "active-owner"}
+    assert limiter.calls == 0
+    assert gateway.target_ids == []
+    with SessionLocal() as db:
+        assert db.get(TestCase, result.test_case_id).status == "pending"
+        assert db.scalar(
+            select(func.count(TestRun.id)).where(TestRun.execution_plan_id == plan_id)
+        ) == 1
+        assert db.scalar(
+            select(func.count(SafetyDecisionRecord.id)).where(
+                SafetyDecisionRecord.execution_plan_id == plan_id,
+                SafetyDecisionRecord.test_run_id.is_not(None),
+            )
+        ) == 1
+        claim = db.get(ExecutionPlanClaim, plan_id)
+        assert claim is not None
+        assert claim.owner_id == active.owner_id
+        assert claim.fencing_generation == active.fencing_generation
 
 
 def test_replay_does_not_mutate_status_or_duplicate_outcome_audit(

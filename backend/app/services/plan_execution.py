@@ -212,6 +212,9 @@ class PlanExecutionService:
                 lease_seconds=self.claim_lease_seconds,
             )
         except ExecutionClaimUnavailableError:
+            canonical = self._load_fresh_canonical(plan.id)
+            if canonical is not None:
+                return canonical
             self._raise_preflight_blocked(
                 target_id=target.id,
                 revision_id=revision.id,
@@ -232,12 +235,7 @@ class PlanExecutionService:
                 reason="ExecutionPlan claim coordination failed.",
             )
 
-        with Session(bind=self.db.get_bind(), expire_on_commit=False) as fresh_db:
-            canonical = fresh_db.scalar(
-                select(TestRun).where(TestRun.execution_plan_id == plan.id)
-            )
-            if canonical is not None:
-                fresh_db.expunge(canonical)
+        canonical = self._load_fresh_canonical(plan.id)
         if canonical is not None:
             self._release_claim(
                 claim_handle=claim_handle,
@@ -385,6 +383,18 @@ class PlanExecutionService:
                 plan_id=plan_id,
                 action_id=action_id,
             )
+
+    def _load_fresh_canonical(self, plan_id: int) -> TestRun | None:
+        try:
+            with Session(bind=self.db.get_bind(), expire_on_commit=False) as fresh_db:
+                canonical = fresh_db.scalar(
+                    select(TestRun).where(TestRun.execution_plan_id == plan_id)
+                )
+                if canonical is not None:
+                    fresh_db.expunge(canonical)
+                return canonical
+        except Exception:
+            return None
 
     def _assert_result_writer(
         self,
