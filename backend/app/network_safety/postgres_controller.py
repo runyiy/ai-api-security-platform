@@ -43,9 +43,20 @@ class PostgresNetworkExecutionController:
                 raise ValueError(f"{name} must be finite and positive")
         self.bind = bind
         self.permit_wait_seconds = float(permit_wait_seconds)
-        self._statement_timeout = (
-            f"{max(1, math.ceil(coordination_timeout_seconds * 1000))}ms"
+        configured_timeout_ms = getattr(
+            bind, "_network_coordination_statement_timeout_ms", None
         )
+        required_timeout_ms = max(
+            1, math.ceil(coordination_timeout_seconds * 1000)
+        )
+        if (
+            not isinstance(configured_timeout_ms, int)
+            or configured_timeout_ms <= 0
+            or configured_timeout_ms > required_timeout_ms
+        ):
+            raise ValueError(
+                "bind must configure a bounded startup statement timeout"
+            )
         self._poll_interval = float(poll_interval_seconds)
         self._monotonic = monotonic
         self._sleep = sleep
@@ -77,7 +88,6 @@ class PostgresNetworkExecutionController:
         connection = None
         try:
             connection = self.bind.connect()
-            self._set_timeout(connection)
             self._read_enabled_and_limit(connection, target_id)
             connection.commit()
         except NetworkExecutionDenied:
@@ -105,7 +115,6 @@ class PostgresNetworkExecutionController:
             connection = self.bind.connect()
             while acquired_slot is None:
                 try:
-                    self._set_timeout(connection)
                     maximum = self._read_limit(connection)
                     for slot in range(1, maximum + 1):
                         acquired = connection.scalar(
@@ -133,7 +142,6 @@ class PostgresNetworkExecutionController:
                     )
                 self._sleep(min(self._poll_interval, remaining))
 
-            self._set_timeout(connection)
             fresh_maximum = self._read_enabled_and_limit(connection, target_id)
             if acquired_slot > fresh_maximum:
                 raise RuntimeError("acquired slot exceeds shared configuration")
@@ -223,7 +231,6 @@ class PostgresNetworkExecutionController:
         connection = None
         try:
             connection = self.bind.connect()
-            self._set_timeout(connection)
             result = connection.execute(text(statement), values)
             if require_row and result.first() is None:
                 raise RuntimeError("missing network coordination state")
@@ -237,12 +244,6 @@ class PostgresNetworkExecutionController:
         finally:
             if connection is not None:
                 connection.close()
-
-    def _set_timeout(self, connection) -> None:
-        connection.execute(
-            text("SELECT set_config('statement_timeout', :value, true)"),
-            {"value": self._statement_timeout},
-        )
 
     @staticmethod
     def _coordination_failed(exc: Exception) -> None:
