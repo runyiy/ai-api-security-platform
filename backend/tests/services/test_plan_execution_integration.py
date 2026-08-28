@@ -12,6 +12,7 @@ from app.db.models import (
     ExecutionPlan,
     ExecutionPlanApprovalRecord,
     ExecutionPlanClaim,
+    ExecutionPlanProgress,
     PlanAction,
     RateReservationState,
     Resource,
@@ -31,6 +32,10 @@ from app.services.execution_plan_approval import record_plan_decision
 from app.services.execution_plan_claim import (
     ExecutionClaimCoordinationError,
     ExecutionPlanClaimService,
+)
+from app.services.execution_plan_progress import (
+    ExecutionPlanProgressService,
+    ExecutionProgressCoordinationError,
 )
 from app.services.plan_execution import PlanExecutionService
 from app.services.safety_audit import SafetyAuditService
@@ -135,6 +140,11 @@ def approved_plan() -> tuple[int, int, int, int]:
                 )
             )
             db.execute(
+                delete(ExecutionPlanProgress).where(
+                    ExecutionPlanProgress.execution_plan_id == plan_id
+                )
+            )
+            db.execute(
                 delete(ExecutionPlanClaim).where(
                     ExecutionPlanClaim.execution_plan_id == plan_id
                 )
@@ -168,12 +178,14 @@ def execute(
     gateway: RecordingGateway,
     claim_service: ExecutionPlanClaimService | None = None,
     claim_lease_seconds: float = 30.0,
+    progress_service: ExecutionPlanProgressService | None = None,
 ) -> TestRun:
     with SessionLocal() as db:
         return PlanExecutionService(
             db=db,
             claim_service=claim_service,
             claim_lease_seconds=claim_lease_seconds,
+            progress_service=progress_service,
             executor=PolicyEnforcedHTTPExecutor(
                 policy_engine=ScopePolicyEngine({"example.test"}),
                 rate_limiter=limiter,
@@ -219,6 +231,7 @@ def test_approval_revoked_during_rate_wait_blocks_gateway(
     assert gateway.target_ids == []
     with SessionLocal() as db:
         assert db.scalar(select(TestRun).where(TestRun.execution_plan_id == plan_id)) is None
+        assert db.get(ExecutionPlanProgress, plan_id).phase == "pre_network"
 
 
 @pytest.mark.parametrize("change", ["rebind", "revision_inactive"])
@@ -263,6 +276,7 @@ def test_authorization_change_during_rate_wait_blocks_gateway(
     assert gateway.target_ids == []
     with SessionLocal() as db:
         assert db.scalar(select(TestRun).where(TestRun.execution_plan_id == plan_id)) is None
+        assert db.get(ExecutionPlanProgress, plan_id).phase == "pre_network"
 
 
 def test_scope_narrowing_during_rate_wait_blocks_gateway(
@@ -289,6 +303,7 @@ def test_scope_narrowing_during_rate_wait_blocks_gateway(
     assert gateway.target_ids == []
     with SessionLocal() as db:
         assert db.scalar(select(TestRun).where(TestRun.execution_plan_id == plan_id)) is None
+        assert db.get(ExecutionPlanProgress, plan_id).phase == "pre_network"
 
 
 def test_success_audits_exact_plan_action_and_uses_refreshed_target(
@@ -353,6 +368,95 @@ def test_external_public_mode_remains_blocked_before_gateway(
     assert gateway.target_ids == []
     with SessionLocal() as db:
         assert db.scalar(select(TestRun).where(TestRun.execution_plan_id == plan_id)) is None
+        progress = db.get(ExecutionPlanProgress, plan_id)
+        assert progress is not None
+        assert progress.phase == "pre_network"
+
+
+def test_network_marker_and_final_audit_commit_before_unlocked_gateway(
+    approved_plan: tuple[int, int, int, int],
+) -> None:
+    plan_id, _, _, _ = approved_plan
+
+    class InspectingGateway(RecordingGateway):
+        def request(self, **kwargs):
+            with SessionLocal() as db:
+                progress = db.execute(
+                    text(
+                        "SELECT phase FROM execution_plan_progress "
+                        "WHERE execution_plan_id=:plan_id FOR UPDATE NOWAIT"
+                    ),
+                    {"plan_id": plan_id},
+                ).one()
+                assert progress.phase == "network_started"
+                final_audit = db.scalar(
+                    select(SafetyDecisionRecord).where(
+                        SafetyDecisionRecord.execution_plan_id == plan_id,
+                        SafetyDecisionRecord.stage == "policy",
+                        SafetyDecisionRecord.outcome == "allowed",
+                    )
+                )
+                assert final_audit is not None
+                db.commit()
+            return super().request(**kwargs)
+
+    gateway = InspectingGateway()
+    result = execute(plan_id, limiter=MutatingRateLimiter(), gateway=gateway)
+    assert result.response_status == 200
+    assert len(gateway.target_ids) == 1
+
+
+def test_progress_row_is_unlocked_during_rate_wait(
+    approved_plan: tuple[int, int, int, int],
+) -> None:
+    plan_id, _, _, _ = approved_plan
+    observed: list[str] = []
+
+    def lock_progress() -> None:
+        with SessionLocal() as db:
+            row = db.execute(
+                text(
+                    "SELECT phase FROM execution_plan_progress "
+                    "WHERE execution_plan_id=:plan_id FOR UPDATE NOWAIT"
+                ),
+                {"plan_id": plan_id},
+            ).one()
+            observed.append(row.phase)
+            db.commit()
+
+    result = execute(
+        plan_id,
+        limiter=MutatingRateLimiter(lock_progress),
+        gateway=RecordingGateway(),
+    )
+    assert result.response_status == 200
+    assert observed == ["pre_network"]
+
+
+def test_network_marker_coordination_failure_calls_zero_gateway(
+    approved_plan: tuple[int, int, int, int],
+) -> None:
+    plan_id, _, _, _ = approved_plan
+    delegate = ExecutionPlanProgressService(bind=engine)
+
+    class FailingMarker:
+        def prepare_attempt(self, handle):
+            return delegate.prepare_attempt(handle)
+
+        def mark_network_started(self, handle):
+            raise ExecutionProgressCoordinationError("private database details")
+
+    gateway = RecordingGateway()
+    with pytest.raises(ExecutionBlockedError) as raised:
+        execute(
+            plan_id,
+            limiter=MutatingRateLimiter(),
+            gateway=gateway,
+            progress_service=FailingMarker(),
+        )
+    assert raised.value.code == "execution_plan_progress_coordination_failed"
+    assert "private" not in raised.value.reason
+    assert gateway.target_ids == []
 
 
 def test_expired_claim_taken_over_during_rate_wait_fences_stale_worker(
