@@ -59,7 +59,8 @@ class ExecutionPlanProgressService:
                       AND fencing_generation=:generation
                       AND lease_expires_at > clock_timestamp()
                     FOR UPDATE
-                ), db_time AS MATERIALIZED (SELECT clock_timestamp() AS now)
+                ), db_time AS MATERIALIZED (SELECT clock_timestamp() AS now),
+                prepared AS (
                 INSERT INTO execution_plan_progress AS progress (
                     execution_plan_id, fencing_generation, phase, updated_at
                 )
@@ -70,14 +71,32 @@ class ExecutionPlanProgressService:
                     phase='pre_network', updated_at=EXCLUDED.updated_at
                 WHERE progress.phase='pre_network'
                   AND progress.fencing_generation <= EXCLUDED.fencing_generation
-                RETURNING execution_plan_id, fencing_generation, phase, updated_at"""
+                RETURNING execution_plan_id, fencing_generation, phase, updated_at
+                )
+                SELECT 'prepared', execution_plan_id, fencing_generation,
+                       phase, updated_at
+                FROM prepared
+                UNION ALL
+                SELECT CASE
+                         WHEN NOT EXISTS (SELECT 1 FROM current_claim) THEN 'lost'
+                         WHEN progress.phase IN ('network_started', 'in_doubt')
+                           THEN 'in_doubt'
+                         ELSE 'lost'
+                       END,
+                       progress.execution_plan_id, progress.fencing_generation,
+                       progress.phase, progress.updated_at
+                FROM (VALUES (1)) AS singleton(value)
+                LEFT JOIN execution_plan_progress AS progress
+                  ON progress.execution_plan_id=:plan_id
+                WHERE NOT EXISTS (SELECT 1 FROM prepared)
+                LIMIT 1"""
             ),
             self._values(handle),
         )
-        if row is not None:
-            return ProgressState(*row)
-        phase = self._read_phase(handle.execution_plan_id)
-        if phase in {"network_started", "in_doubt"}:
+        classification = row[0]
+        if classification == "prepared":
+            return ProgressState(*row[1:])
+        if classification == "in_doubt":
             raise ExecutionInDoubtError("ExecutionPlan execution is in doubt.")
         raise ExecutionProgressLostError("ExecutionPlan progress fencing was lost.")
 
@@ -106,13 +125,6 @@ class ExecutionPlanProgressService:
         if row is None:
             raise ExecutionProgressLostError("ExecutionPlan progress fencing was lost.")
         return ProgressState(*row)
-
-    def _read_phase(self, plan_id: int) -> str | None:
-        row = self._run(
-            text("SELECT phase FROM execution_plan_progress WHERE execution_plan_id=:plan_id"),
-            {"plan_id": plan_id},
-        )
-        return row[0] if row is not None else None
 
     def _run(self, statement, values: dict[str, object]):
         for _ in range(self._max_retries):

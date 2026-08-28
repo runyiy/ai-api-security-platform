@@ -1,7 +1,9 @@
+import re
+
 from alembic import command
 from alembic.config import Config
 from alembic.migration import MigrationContext
-from sqlalchemy import inspect, text
+from sqlalchemy import BigInteger, DateTime, inspect, text
 
 from app.db.session import engine
 from app.services.execution_plan_claim import ExecutionPlanClaimService
@@ -32,11 +34,33 @@ def test_m8_04_schema_backfill_and_round_trip(
         command.upgrade(config, REVISION)
         assert current_revision() == REVISION
         inspector = inspect(engine)
-        assert {item["name"] for item in inspector.get_columns(TABLE)} == {
+        columns = {item["name"]: item for item in inspector.get_columns(TABLE)}
+        assert set(columns) == {
             "execution_plan_id", "fencing_generation", "phase", "updated_at"
         }
-        assert inspector.get_foreign_keys(TABLE)[0]["options"] == {
+        assert inspector.get_pk_constraint(TABLE)["constrained_columns"] == [
+            "execution_plan_id"
+        ]
+        assert isinstance(columns["fencing_generation"]["type"], BigInteger)
+        assert isinstance(columns["updated_at"]["type"], DateTime)
+        assert columns["updated_at"]["type"].timezone is True
+        foreign_keys = inspector.get_foreign_keys(TABLE)
+        assert len(foreign_keys) == 1
+        assert foreign_keys[0]["constrained_columns"] == ["execution_plan_id"]
+        assert foreign_keys[0]["options"] == {
             "ondelete": "RESTRICT"
+        }
+        checks = {
+            item["name"]: " ".join(item["sqltext"].split())
+            for item in inspector.get_check_constraints(TABLE)
+        }
+        assert "ck_execution_plan_progress_generation" in checks
+        assert "fencing_generation > 0" in checks[
+            "ck_execution_plan_progress_generation"
+        ]
+        phase_check = checks["ck_execution_plan_progress_phase"]
+        assert set(re.findall(r"'([^']+)'", phase_check)) == {
+            "pre_network", "network_started", "in_doubt"
         }
         with engine.connect() as connection:
             row = connection.execute(

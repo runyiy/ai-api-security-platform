@@ -67,6 +67,24 @@ def test_only_exact_generation_marks_network_started_and_then_is_in_doubt(
         progress.prepare_attempt(second)
 
 
+def test_stale_prepare_is_lost_even_when_new_generation_is_network_started(
+    approved_plan: tuple[int, int, int, int],
+) -> None:
+    plan_id, _, _, _ = approved_plan
+    claims, progress = services()
+    first = claims.acquire(plan_id, "first", lease_seconds=1)
+    progress.prepare_attempt(first)
+    claims.release(first)
+    second = claims.acquire(plan_id, "second", lease_seconds=1)
+    progress.prepare_attempt(second)
+    progress.mark_network_started(second)
+
+    with pytest.raises(ExecutionProgressLostError):
+        progress.prepare_attempt(first)
+    with pytest.raises(ExecutionInDoubtError):
+        progress.prepare_attempt(second)
+
+
 def test_progress_lock_contention_exhausts_bounded_retries_sanitized(
     approved_plan: tuple[int, int, int, int],
 ) -> None:
@@ -167,3 +185,11 @@ def test_real_subprocess_network_started_then_retry_is_in_doubt(
     assert raised.value.code == "execution_plan_in_doubt"
     assert limiter.calls == 0
     assert gateway.target_ids == []
+    with SessionLocal() as db:
+        claim = db.get(ExecutionPlanClaim, plan_id)
+        assert claim is not None
+        assert claim.fencing_generation == 2
+        assert claim.owner_id is None
+        assert db.scalar(
+            select(TestRun).where(TestRun.execution_plan_id == plan_id)
+        ) is None
