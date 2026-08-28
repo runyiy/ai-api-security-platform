@@ -6,6 +6,7 @@ from app.db.models.endpoint import Endpoint
 from app.db.models.execution_plan import ExecutionPlan
 from app.db.models.execution_plan_approval_record import ExecutionPlanApprovalRecord
 from app.db.models.execution_plan_claim import ExecutionPlanClaim
+from app.db.models.execution_plan_cancellation import ExecutionPlanCancellation
 from app.db.models.execution_plan_progress import ExecutionPlanProgress
 from app.db.models.finding import Finding
 from app.db.models.finding_ai_analysis import FindingAIAnalysis
@@ -29,6 +30,7 @@ __all__ = [
     "ExecutionPlan",
     "ExecutionPlanApprovalRecord",
     "ExecutionPlanClaim",
+    "ExecutionPlanCancellation",
     "ExecutionPlanProgress",
     "PlanAction",
     "RateReservationState",

@@ -32,6 +32,14 @@ from app.services.plan_execution import (
     PlanExecutionNotFoundError,
     PlanExecutionService,
 )
+from app.schemas.execution_plan_cancellation import ExecutionPlanCancellationRead
+from app.services.execution_plan_cancellation import (
+    ExecutionPlanAlreadyCompletedError,
+    ExecutionPlanCancellationCoordinationError,
+    ExecutionPlanCancellationInDoubtError,
+    ExecutionPlanCancellationNotFoundError,
+    ExecutionPlanCancellationService,
+)
 
 
 router = APIRouter(
@@ -51,6 +59,38 @@ executor = PolicyEnforcedHTTPExecutor(
     rate_limiter=platform_rate_limiter,
     network_gateway=network_gateway,
 )
+
+
+@router.post(
+    "/execution-plans/{execution_plan_id}/cancel",
+    response_model=ExecutionPlanCancellationRead,
+)
+def cancel_execution_plan(
+    execution_plan_id: int,
+    db: Session = Depends(get_db),
+):
+    try:
+        return ExecutionPlanCancellationService(
+            bind=db.get_bind()
+        ).request_cancel(execution_plan_id)
+    except ExecutionPlanCancellationNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": exc.code, "reason": "ExecutionPlan not found."},
+        ) from exc
+    except (ExecutionPlanAlreadyCompletedError, ExecutionPlanCancellationInDoubtError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": exc.code, "reason": str(exc)},
+        ) from exc
+    except ExecutionPlanCancellationCoordinationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": exc.code,
+                "reason": "ExecutionPlan cancellation coordination failed.",
+            },
+        ) from exc
 
 
 @router.post(
