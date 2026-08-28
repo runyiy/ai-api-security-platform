@@ -36,6 +36,7 @@ from app.services.execution_plan_claim import (
 from app.services.execution_plan_progress import (
     ExecutionPlanProgressService,
     ExecutionProgressCoordinationError,
+    ExecutionProgressLostError,
 )
 from app.services.plan_execution import PlanExecutionService
 from app.services.safety_audit import SafetyAuditService
@@ -234,6 +235,49 @@ def test_approval_revoked_during_rate_wait_blocks_gateway(
         assert db.get(ExecutionPlanProgress, plan_id).phase == "pre_network"
 
 
+def test_blocked_pre_network_approval_is_retryable_by_higher_generation(
+    approved_plan: tuple[int, int, int, int],
+) -> None:
+    plan_id, target_id, _, _ = approved_plan
+
+    def revoke() -> None:
+        with SessionLocal() as db:
+            record_plan_decision(db, execution_plan_id=plan_id, decision="revoked")
+            db.commit()
+
+    gateway = RecordingGateway()
+    with pytest.raises(ExecutionBlockedError):
+        execute(
+            plan_id,
+            limiter=MutatingRateLimiter(revoke),
+            gateway=gateway,
+        )
+
+    with SessionLocal() as db:
+        progress = db.get(ExecutionPlanProgress, plan_id)
+        assert progress is not None
+        assert progress.phase == "pre_network"
+        assert progress.fencing_generation == 1
+        record_plan_decision(db, execution_plan_id=plan_id, decision="approved")
+        db.commit()
+
+    result = execute(
+        plan_id,
+        limiter=MutatingRateLimiter(),
+        gateway=gateway,
+    )
+    assert result.response_status == 200
+    assert gateway.target_ids == [target_id]
+    with SessionLocal() as db:
+        progress = db.get(ExecutionPlanProgress, plan_id)
+        assert progress is not None
+        assert progress.fencing_generation == 2
+        assert progress.phase == "network_started"
+        assert db.scalars(
+            select(TestRun).where(TestRun.execution_plan_id == plan_id)
+        ).all() == [db.get(TestRun, result.id)]
+
+
 @pytest.mark.parametrize("change", ["rebind", "revision_inactive"])
 def test_authorization_change_during_rate_wait_blocks_gateway(
     approved_plan: tuple[int, int, int, int], change: str
@@ -378,6 +422,30 @@ def test_network_marker_and_final_audit_commit_before_unlocked_gateway(
 ) -> None:
     plan_id, _, _, _ = approved_plan
 
+    events: list[str] = []
+    delegate = ExecutionPlanProgressService(bind=engine)
+
+    class TrackingProgress:
+        def prepare_attempt(self, handle):
+            return delegate.prepare_attempt(handle)
+
+        def mark_network_started(self, handle):
+            with SessionLocal() as db:
+                final_audit = db.scalar(
+                    select(SafetyDecisionRecord).where(
+                        SafetyDecisionRecord.execution_plan_id == plan_id,
+                        SafetyDecisionRecord.stage == "policy",
+                        SafetyDecisionRecord.outcome == "allowed",
+                    )
+                )
+                assert final_audit is not None
+            events.append("audit_visible_inside_marker")
+            state = delegate.mark_network_started(handle)
+            with SessionLocal() as db:
+                assert db.get(ExecutionPlanProgress, plan_id).phase == "network_started"
+            events.append("marker_committed")
+            return state
+
     class InspectingGateway(RecordingGateway):
         def request(self, **kwargs):
             with SessionLocal() as db:
@@ -398,12 +466,65 @@ def test_network_marker_and_final_audit_commit_before_unlocked_gateway(
                 )
                 assert final_audit is not None
                 db.commit()
+            events.append("gateway")
             return super().request(**kwargs)
 
     gateway = InspectingGateway()
-    result = execute(plan_id, limiter=MutatingRateLimiter(), gateway=gateway)
+    result = execute(
+        plan_id,
+        limiter=MutatingRateLimiter(),
+        gateway=gateway,
+        progress_service=TrackingProgress(),
+    )
     assert result.response_status == 200
     assert len(gateway.target_ids) == 1
+    assert events == ["audit_visible_inside_marker", "marker_committed", "gateway"]
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_code"),
+    [
+        (
+            ExecutionProgressLostError("private owner fencing details"),
+            "execution_plan_progress_lost",
+        ),
+        (
+            ExecutionProgressCoordinationError("private database details"),
+            "execution_plan_progress_coordination_failed",
+        ),
+    ],
+)
+def test_prepare_progress_failure_is_sanitized_distinct_and_releases_claim(
+    approved_plan: tuple[int, int, int, int],
+    error: Exception,
+    expected_code: str,
+) -> None:
+    plan_id, _, _, _ = approved_plan
+
+    class FailingPrepare:
+        def prepare_attempt(self, handle):
+            raise error
+
+        def mark_network_started(self, handle):
+            raise AssertionError("marker must not run")
+
+    limiter = MutatingRateLimiter()
+    gateway = RecordingGateway()
+    with pytest.raises(ExecutionBlockedError) as raised:
+        execute(
+            plan_id,
+            limiter=limiter,
+            gateway=gateway,
+            progress_service=FailingPrepare(),
+        )
+    assert raised.value.code == expected_code
+    assert "private" not in raised.value.reason
+    assert limiter.calls == 0
+    assert gateway.target_ids == []
+    with SessionLocal() as db:
+        claim = db.get(ExecutionPlanClaim, plan_id)
+        assert claim is not None
+        assert claim.owner_id is None
 
 
 def test_progress_row_is_unlocked_during_rate_wait(

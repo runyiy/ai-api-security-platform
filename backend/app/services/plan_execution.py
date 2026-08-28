@@ -311,7 +311,25 @@ class PlanExecutionService:
                 code="execution_plan_in_doubt",
                 reason="ExecutionPlan may have crossed the network boundary.",
             )
-        except (ExecutionProgressCoordinationError, ExecutionProgressLostError):
+        except ExecutionProgressLostError:
+            self._release_claim(
+                claim_handle=claim_handle,
+                target_id=target.id,
+                revision_id=revision.id,
+                test_case_id=test_case.id,
+                plan_id=plan.id,
+                action_id=action.id,
+            )
+            self._raise_preflight_blocked(
+                target_id=target.id,
+                revision_id=revision.id,
+                test_case_id=test_case.id,
+                plan_id=plan.id,
+                action_id=action.id,
+                code="execution_plan_progress_lost",
+                reason="ExecutionPlan progress fencing was lost.",
+            )
+        except ExecutionProgressCoordinationError:
             self._release_claim(
                 claim_handle=claim_handle,
                 target_id=target.id,
