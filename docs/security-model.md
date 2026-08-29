@@ -15,7 +15,7 @@ The platform is intended only for:
 
 The platform must fail closed when authorization or scope cannot be proven.
 
-Execution-capable v1 currently supports one trusted operator, one execution process, and local/private lab use. Public SRC or bug-bounty execution is currently unsupported, is not an approved deployment mode, and is operationally prohibited. The current codebase does not yet provide the complete machine-enforced public-network readiness boundary and must not be assumed to prevent every possible public destination if configured with a public hostname. No real public SRC request may be intentionally executed until the Public SRC Readiness controls are implemented and satisfied.
+Execution-capable v1 supports one trusted operator and local/private lab use. `execution_topology` defaults to `single_process`; explicit `multi_process` supports multiple FastAPI processes only for immutable exact-plan execution backed by shared PostgreSQL coordination. The legacy direct TestCase execute route is blocked before execution work in that topology. Public SRC or bug-bounty execution remains unsupported and operationally prohibited, and `external_public_authorized` remains blocked at runtime.
 
 ## 2. Trust Boundaries
 
@@ -122,7 +122,7 @@ Requests must be rate limited at least per target. Later milestones may add prog
 
 Authorization does not imply unlimited request volume.
 
-The current in-memory limiter is safe only under the documented single-process execution assumption. Multiple FastAPI execution workers or background execution workers are prohibited until rate limiting, claims, leases, idempotency, and concurrency coordination are process-safe. PostgreSQL is the first shared coordination mechanism; Redis is not mandatory for v1.
+The exact-plan M8 stack uses PostgreSQL-backed rate reservations, claims and leases, canonical idempotency, progress/recovery, cancellation, kill switches, and advisory-lock network permits. These controls are process-safe for local/private exact-plan requests under explicit `multi_process` topology. The legacy direct TestCase execution path remains single-process-only and is fail-closed in multi-process mode. No background worker, scheduler, or automatic in-doubt recovery is implied; Redis is not mandatory for v1.
 
 ## 4. Authentication Security
 

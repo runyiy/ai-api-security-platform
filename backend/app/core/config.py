@@ -1,9 +1,15 @@
+from typing import Literal
+
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     database_url: str
+
+    execution_topology: Literal["single_process", "multi_process"] = (
+        "single_process"
+    )
 
     allowed_target_hosts: str = "localhost,127.0.0.1,::1"
 
