@@ -129,6 +129,7 @@ def test_rate_wait_revalidation_blocks_persisted_revision_change(
             target=target,
             authorization_revision=revision,
             scopes=scopes,
+            source_url="https://example.test/openapi.json",
             refresh_authorization=refresh,
             policy_decision_observer=lambda decision: None,
         )

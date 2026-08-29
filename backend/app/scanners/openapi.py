@@ -255,25 +255,19 @@ class OpenAPIScanner:
         target: Target,
         authorization_revision: AuthorizationRevision | None,
         scopes: list[Scope],
+        source_url: str,
         refresh_authorization: Callable[
             [], tuple[Target, AuthorizationRevision | None, list[Scope]]
         ] | None = None,
         policy_decision_observer: Callable[[PolicyDecision], None] | None = None,
-    ) -> tuple[
-        str,
-        list[ParsedEndpoint],
-    ]:
-        openapi_url = (
-            f"{target.base_url.rstrip('/')}"
-            "/openapi.json"
-        )
+    ) -> tuple[str, bytes, list[ParsedEndpoint]]:
 
         decision = (
             self.policy_engine.evaluate(
                 target=target,
                 authorization_revision=authorization_revision,
                 scopes=scopes,
-                request_url=openapi_url,
+                request_url=source_url,
                 method="GET",
             )
         )
@@ -331,7 +325,7 @@ class OpenAPIScanner:
                 target=target,
                 authorization_revision=authorization_revision,
                 scopes=scopes,
-                request_url=openapi_url,
+                request_url=source_url,
                 method="GET",
             )
         )
@@ -352,7 +346,9 @@ class OpenAPIScanner:
                 ),
             )
 
-        schema = self._fetch_schema(target=target, url=openapi_url)
+        document_bytes, schema = self._fetch_schema(
+            target=target, url=source_url
+        )
 
         try:
             endpoints = (
@@ -366,7 +362,8 @@ class OpenAPIScanner:
             ) from exc
 
         return (
-            openapi_url,
+            source_url,
+            document_bytes,
             endpoints,
         )
 
@@ -391,7 +388,7 @@ class OpenAPIScanner:
         *,
         target: Target,
         url: str,
-    ) -> dict[str, Any]:
+    ) -> tuple[bytes, dict[str, Any]]:
         try:
             response = self.network_gateway.request(
                 target_id=target.id,
@@ -421,4 +418,4 @@ class OpenAPIScanner:
                 "OpenAPI root must be a JSON object"
             )
 
-        return data
+        return response.body, data

@@ -35,9 +35,7 @@ def test_import_returns_502_for_malformed_schema(
     monkeypatch.setattr(
         scanner,
         "_fetch_schema",
-        lambda **kwargs: {
-            "paths": [],
-        },
+        lambda **kwargs: (b'{"paths":[]}', {"paths": []}),
     )
     monkeypatch.setattr(
         openapi_routes,
@@ -69,7 +67,8 @@ def test_import_returns_502_for_malformed_schema(
     with pytest.raises(HTTPException) as exc_info:
         openapi_routes.import_openapi(
             payload=OpenAPIImportRequest(
-                target_id=1
+                target_id=1,
+                source_url="https://example.test/openapi.json",
             ),
             db=db,
         )
@@ -78,6 +77,10 @@ def test_import_returns_502_for_malformed_schema(
     assert exc_info.value.detail == (
         "OpenAPI schema structure is invalid"
     )
+    db.add.assert_not_called()
+    db.scalar.assert_not_called()
+    db.rollback.assert_not_called()
+    db.commit.assert_called_once()
 
 
 def test_import_ends_read_transaction_before_scan(
@@ -119,6 +122,7 @@ def test_import_ends_read_transaction_before_scan(
     db.scalars.side_effect = read_scopes
     db.scalar.side_effect = insert_endpoint
     db.commit.side_effect = commit
+    db.flush.side_effect = lambda: setattr(db.add.call_args.args[0], "id", 123)
     db.in_transaction.side_effect = (
         lambda: transaction_active["value"]
     )
@@ -132,6 +136,7 @@ def test_import_ends_read_transaction_before_scan(
             target,
             authorization_revision,
             scopes,
+            source_url,
             refresh_authorization,
             policy_decision_observer,
         ):
@@ -139,7 +144,8 @@ def test_import_ends_read_transaction_before_scan(
             assert db.in_transaction() is False
             assert authorization_revision.id == 200
             return (
-                "https://example.test/openapi.json",
+                source_url,
+                b'{"paths":{"/projects":{"get":{}}}}',
                 [
                     ParsedEndpoint(
                         path="/projects",
@@ -160,7 +166,10 @@ def test_import_ends_read_transaction_before_scan(
     )
 
     result = openapi_routes.import_openapi(
-        payload=OpenAPIImportRequest(target_id=1),
+        payload=OpenAPIImportRequest(
+            target_id=1,
+            source_url="https://example.test/openapi.json",
+        ),
         db=db,
     )
 
@@ -176,4 +185,5 @@ def test_import_ends_read_transaction_before_scan(
     assert result.created == 1
     assert result.updated == 0
     assert result.unchanged == 0
-    db.add.assert_not_called()
+    db.add.assert_called_once()
+    db.expunge_all.assert_called_once()

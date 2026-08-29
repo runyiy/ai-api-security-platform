@@ -1,3 +1,5 @@
+import hashlib
+
 from fastapi import (
     APIRouter,
     Depends,
@@ -11,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.endpoint import Endpoint
+from app.db.models.openapi_import_record import OpenAPIImportRecord
 from app.db.models.scope import Scope
 from app.db.models.target import Target
 from app.db.session import get_db
@@ -119,6 +122,9 @@ def import_openapi(
         ).all()
     )
 
+    # Keep the authorization snapshot usable without allowing expired ORM
+    # attributes to reopen a transaction during rate, DNS, or network work.
+    db.expunge_all()
     db.commit()
     refresh_authorization = build_execution_authorization_refresh(
         db.get_bind(),
@@ -132,12 +138,14 @@ def import_openapi(
 
     try:
         (
-            openapi_url,
+            source_url,
+            document_bytes,
             parsed_endpoints,
         ) = scanner.scan(
             target=target,
             authorization_revision=authorization_revision,
             scopes=scopes,
+            source_url=payload.source_url,
             refresh_authorization=refresh_authorization,
             policy_decision_observer=policy_decision_observer,
         )
@@ -170,84 +178,69 @@ def import_openapi(
     created = 0
     updated = 0
     unchanged = 0
+    document_sha256 = hashlib.sha256(document_bytes).hexdigest()
 
-    for parsed in parsed_endpoints:
-        endpoint_values = {
-            "target_id": target.id,
-            "path": parsed.path,
-            "method": parsed.method,
-            "operation_id": parsed.operation_id,
-            "requires_auth": parsed.requires_auth,
-            "parameters": parsed.parameters,
-            "request_body": parsed.request_body,
-            "security": parsed.security,
-        }
-
-        inserted_id = db.scalar(
-            insert(Endpoint)
-            .values(endpoint_values)
-            .on_conflict_do_nothing(
-                constraint=(
-                    "uq_endpoint_target_path_method"
+    try:
+        for parsed in parsed_endpoints:
+            endpoint_values = {
+                "target_id": target.id,
+                "path": parsed.path,
+                "method": parsed.method,
+                "operation_id": parsed.operation_id,
+                "requires_auth": parsed.requires_auth,
+                "parameters": parsed.parameters,
+                "request_body": parsed.request_body,
+                "security": parsed.security,
+            }
+            inserted_id = db.scalar(
+                insert(Endpoint)
+                .values(endpoint_values)
+                .on_conflict_do_nothing(
+                    constraint="uq_endpoint_target_path_method"
+                )
+                .returning(Endpoint.id)
+            )
+            if inserted_id is not None:
+                created += 1
+                continue
+            endpoint = db.scalar(
+                select(Endpoint).where(
+                    Endpoint.target_id == target.id,
+                    Endpoint.path == parsed.path,
+                    Endpoint.method == parsed.method,
                 )
             )
-            .returning(Endpoint.id)
+            if endpoint is None:
+                raise RuntimeError("Endpoint conflict row not found.")
+            if not endpoint_changed(endpoint, parsed):
+                unchanged += 1
+                continue
+            endpoint.operation_id = parsed.operation_id
+            endpoint.requires_auth = parsed.requires_auth
+            endpoint.parameters = parsed.parameters
+            endpoint.request_body = parsed.request_body
+            endpoint.security = parsed.security
+            updated += 1
+
+        record = OpenAPIImportRecord(
+            target_id=target.id,
+            source_url=source_url,
+            document_sha256=document_sha256,
+            document_size_bytes=len(document_bytes),
+            discovered_endpoint_count=len(parsed_endpoints),
         )
-
-        if inserted_id is not None:
-            created += 1
-            continue
-
-        endpoint = db.scalar(
-            select(Endpoint).where(
-                Endpoint.target_id
-                == target.id,
-                Endpoint.path
-                == parsed.path,
-                Endpoint.method
-                == parsed.method,
-            )
-        )
-
-        if endpoint is None:
-            raise RuntimeError(
-                "Endpoint conflict row not found."
-            )
-
-        if not endpoint_changed(
-            endpoint,
-            parsed,
-        ):
-            unchanged += 1
-            continue
-
-        endpoint.operation_id = (
-            parsed.operation_id
-        )
-
-        endpoint.requires_auth = (
-            parsed.requires_auth
-        )
-
-        endpoint.parameters = (
-            parsed.parameters
-        )
-
-        endpoint.request_body = (
-            parsed.request_body
-        )
-
-        endpoint.security = (
-            parsed.security
-        )
-
-        updated += 1
-
-    db.commit()
+        db.add(record)
+        db.flush()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     return OpenAPIImportResponse(
         target_id=target.id,
-        openapi_url=openapi_url,
+        source_url=source_url,
+        import_record_id=record.id,
+        document_sha256=document_sha256,
         discovered=len(
             parsed_endpoints
         ),

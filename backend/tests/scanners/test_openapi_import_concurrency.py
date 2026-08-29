@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+import hashlib
 import threading
 from uuid import uuid4
 
@@ -11,6 +12,7 @@ from app.api.routes import openapi as openapi_routes
 from app.db.models.authorization_profile import AuthorizationProfile
 from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.endpoint import Endpoint
+from app.db.models.openapi_import_record import OpenAPIImportRecord
 from app.db.models.scope import Scope
 from app.db.models.target import Target
 from app.db.session import engine
@@ -79,6 +81,11 @@ def openapi_target_id() -> Iterator[int]:
         yield target_id
     finally:
         with TestSession() as db:
+            db.execute(
+                delete(OpenAPIImportRecord).where(
+                    OpenAPIImportRecord.target_id == target_id
+                )
+            )
             db.execute(
                 delete(Endpoint).where(Endpoint.target_id == target_id)
             )
@@ -166,6 +173,7 @@ def test_concurrent_import_is_endpoint_conflict_safe(
             target,
             authorization_revision,
             scopes,
+            source_url,
             refresh_authorization,
             policy_decision_observer,
         ):
@@ -175,7 +183,8 @@ def test_concurrent_import_is_endpoint_conflict_safe(
             assert authorization_revision.id == target.authorization_revision_id
             scan_ready.wait(timeout=10)
             return (
-                "https://example.test/openapi.json",
+                source_url,
+                b'{"paths":{"/projects":{"get":{}}}}',
                 parsed_endpoints(),
             )
 
@@ -184,7 +193,10 @@ def test_concurrent_import_is_endpoint_conflict_safe(
         "scanner",
         BarrierScanner(),
     )
-    payload = OpenAPIImportRequest(target_id=openapi_target_id)
+    payload = OpenAPIImportRequest(
+        target_id=openapi_target_id,
+        source_url="https://example.test/openapi.json",
+    )
     responses = []
     errors: list[Exception] = []
 
@@ -222,6 +234,13 @@ def test_concurrent_import_is_endpoint_conflict_safe(
                 ).where(Endpoint.target_id == openapi_target_id)
             ).all()
         )
+        records = list(
+            db.scalars(
+                select(OpenAPIImportRecord)
+                .where(OpenAPIImportRecord.target_id == openapi_target_id)
+                .order_by(OpenAPIImportRecord.id)
+            ).all()
+        )
 
     assert errors == []
     assert len(responses) == 2
@@ -231,6 +250,10 @@ def test_concurrent_import_is_endpoint_conflict_safe(
     assert sum(response.unchanged for response in responses) == 2
     assert len(keys) == 2
     assert len(set(keys)) == 2
+    assert len(records) == 2
+    assert {record.id for record in records} == {
+        response.import_record_id for response in responses
+    }
 
 
 def test_sequential_import_preserves_create_unchanged_update_counts(
@@ -251,12 +274,14 @@ def test_sequential_import_preserves_create_unchanged_update_counts(
             target,
             authorization_revision,
             scopes,
+            source_url,
             refresh_authorization,
             policy_decision_observer,
         ):
             assert authorization_revision.id == target.authorization_revision_id
             return (
-                "https://example.test/openapi.json",
+                source_url,
+                b'{"paths":{"/projects":{"get":{}}}}',
                 current_endpoints,
             )
 
@@ -265,7 +290,10 @@ def test_sequential_import_preserves_create_unchanged_update_counts(
         "scanner",
         MutableScanner(),
     )
-    payload = OpenAPIImportRequest(target_id=openapi_target_id)
+    payload = OpenAPIImportRequest(
+        target_id=openapi_target_id,
+        source_url="https://example.test/openapi.json",
+    )
 
     with TestSession() as db:
         first = openapi_routes.import_openapi(payload=payload, db=db)
@@ -278,6 +306,72 @@ def test_sequential_import_preserves_create_unchanged_update_counts(
     with TestSession() as db:
         changed = openapi_routes.import_openapi(payload=payload, db=db)
 
+    document = b'{"paths":{"/projects":{"get":{}}}}'
+    with TestSession() as db:
+        records = list(
+            db.scalars(
+                select(OpenAPIImportRecord)
+                .where(OpenAPIImportRecord.target_id == openapi_target_id)
+                .order_by(OpenAPIImportRecord.id)
+            ).all()
+        )
+
     assert (first.created, first.updated, first.unchanged) == (2, 0, 0)
     assert (second.created, second.updated, second.unchanged) == (0, 0, 2)
     assert (changed.created, changed.updated, changed.unchanged) == (0, 1, 1)
+    assert len(records) == 3
+    assert [record.id for record in records] == [
+        first.import_record_id,
+        second.import_record_id,
+        changed.import_record_id,
+    ]
+    assert all(record.source_url == payload.source_url for record in records)
+    assert all(
+        record.document_sha256 == hashlib.sha256(document).hexdigest()
+        for record in records
+    )
+    assert all(record.document_size_bytes == len(document) for record in records)
+    assert all(record.discovered_endpoint_count == 2 for record in records)
+    assert all(record.fetched_at.tzinfo is not None for record in records)
+
+
+def test_real_provenance_failure_rolls_back_endpoint_insert(
+    openapi_target_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ProvenanceFailingSession(Session):
+        def flush(self, objects=None) -> None:
+            if any(isinstance(item, OpenAPIImportRecord) for item in self.new):
+                raise RuntimeError("synthetic provenance failure")
+            super().flush(objects)
+
+    FailingSession = sessionmaker(
+        bind=engine,
+        class_=ProvenanceFailingSession,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+    body = b'{"paths":{"/projects":{"get":{}}}}'
+
+    class Scanner:
+        def scan(self, *, source_url, **kwargs):
+            return source_url, body, parsed_endpoints()
+
+    monkeypatch.setattr(openapi_routes, "scanner", Scanner())
+    payload = OpenAPIImportRequest(
+        target_id=openapi_target_id,
+        source_url="https://example.test/openapi.json",
+    )
+    with FailingSession() as db:
+        with pytest.raises(RuntimeError, match="synthetic provenance failure"):
+            openapi_routes.import_openapi(payload=payload, db=db)
+
+    with FailingSession() as db:
+        assert db.scalar(
+            select(Endpoint.id).where(Endpoint.target_id == openapi_target_id)
+        ) is None
+        assert db.scalar(
+            select(OpenAPIImportRecord.id).where(
+                OpenAPIImportRecord.target_id == openapi_target_id
+            )
+        ) is None
