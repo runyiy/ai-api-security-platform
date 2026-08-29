@@ -1,3 +1,4 @@
+import hashlib
 import json
 from collections.abc import Callable
 
@@ -69,6 +70,14 @@ class ParsedEndpoint:
     parameters: list[dict[str, Any]]
     request_body: dict[str, Any] | None
     security: list[dict[str, Any]] | None
+
+
+@dataclass(frozen=True)
+class OpenAPIScanResult:
+    source_url: str
+    document_sha256: str
+    document_size_bytes: int
+    endpoints: list[ParsedEndpoint]
 
 def merge_parameters(
     path_parameters: list[dict[str, Any]],
@@ -255,25 +264,19 @@ class OpenAPIScanner:
         target: Target,
         authorization_revision: AuthorizationRevision | None,
         scopes: list[Scope],
+        source_url: str,
         refresh_authorization: Callable[
             [], tuple[Target, AuthorizationRevision | None, list[Scope]]
         ] | None = None,
         policy_decision_observer: Callable[[PolicyDecision], None] | None = None,
-    ) -> tuple[
-        str,
-        list[ParsedEndpoint],
-    ]:
-        openapi_url = (
-            f"{target.base_url.rstrip('/')}"
-            "/openapi.json"
-        )
+    ) -> OpenAPIScanResult:
 
         decision = (
             self.policy_engine.evaluate(
                 target=target,
                 authorization_revision=authorization_revision,
                 scopes=scopes,
-                request_url=openapi_url,
+                request_url=source_url,
                 method="GET",
             )
         )
@@ -331,7 +334,7 @@ class OpenAPIScanner:
                 target=target,
                 authorization_revision=authorization_revision,
                 scopes=scopes,
-                request_url=openapi_url,
+                request_url=source_url,
                 method="GET",
             )
         )
@@ -352,7 +355,9 @@ class OpenAPIScanner:
                 ),
             )
 
-        schema = self._fetch_schema(target=target, url=openapi_url)
+        document_sha256, document_size_bytes, schema = self._fetch_schema(
+            target=target, url=source_url
+        )
 
         try:
             endpoints = (
@@ -365,9 +370,11 @@ class OpenAPIScanner:
                 "OpenAPI schema structure is invalid"
             ) from exc
 
-        return (
-            openapi_url,
-            endpoints,
+        return OpenAPIScanResult(
+            source_url=source_url,
+            document_sha256=document_sha256,
+            document_size_bytes=document_size_bytes,
+            endpoints=endpoints,
         )
 
     @staticmethod
@@ -391,7 +398,7 @@ class OpenAPIScanner:
         *,
         target: Target,
         url: str,
-    ) -> dict[str, Any]:
+    ) -> tuple[str, int, dict[str, Any]]:
         try:
             response = self.network_gateway.request(
                 target_id=target.id,
@@ -409,6 +416,11 @@ class OpenAPIScanner:
         if response.status_code >= 400:
             raise OpenAPIScanError("OpenAPI retrieval returned an error status")
 
+        # Provenance is derived once from the exact bounded gateway body before
+        # decoding or parsing can transform it.
+        document_sha256 = hashlib.sha256(response.body).hexdigest()
+        document_size_bytes = len(response.body)
+
         try:
             data = json.loads(response.body)
         except json.JSONDecodeError as exc:
@@ -421,4 +433,4 @@ class OpenAPIScanner:
                 "OpenAPI root must be a JSON object"
             )
 
-        return data
+        return document_sha256, document_size_bytes, data

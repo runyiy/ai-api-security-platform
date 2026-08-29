@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import hashlib
 import httpx
 import pytest
 
@@ -266,9 +267,7 @@ def test_scanner_wraps_schema_parse_error(
     monkeypatch.setattr(
         scanner,
         "_fetch_schema",
-        lambda **kwargs: {
-            "paths": [],
-        },
+        lambda **kwargs: (hashlib.sha256(b'{"paths":[]}').hexdigest(), 12, {"paths": []}),
     )
 
     with pytest.raises(
@@ -279,6 +278,7 @@ def test_scanner_wraps_schema_parse_error(
             target=build_target(),
             authorization_revision=build_revision(),
             scopes=[build_scope()],
+            source_url="https://example.test/openapi.json",
             refresh_authorization=refresh_authorization,
             policy_decision_observer=lambda decision: None,
         )
@@ -295,12 +295,17 @@ def test_human_execution_approval_does_not_block_openapi_import(
     scanner = build_scanner()
     revision = build_revision()
     revision.require_human_execution_approval = True
-    monkeypatch.setattr(scanner, "_fetch_schema", lambda **kwargs: {"paths": {}})
+    monkeypatch.setattr(
+        scanner,
+        "_fetch_schema",
+        lambda **kwargs: (hashlib.sha256(b'{"paths":{}}').hexdigest(), 12, {"paths": {}}),
+    )
 
-    source_url, endpoints = scanner.scan(
+    result = scanner.scan(
         target=build_target(),
         authorization_revision=revision,
         scopes=[build_scope()],
+            source_url="https://example.test/openapi.json",
         refresh_authorization=lambda: (
             build_target(),
             revision,
@@ -309,8 +314,10 @@ def test_human_execution_approval_does_not_block_openapi_import(
         policy_decision_observer=lambda decision: None,
     )
 
-    assert source_url == "https://example.test/openapi.json"
-    assert endpoints == []
+    assert result.source_url == "https://example.test/openapi.json"
+    assert result.document_sha256 == hashlib.sha256(b'{"paths":{}}').hexdigest()
+    assert result.document_size_bytes == 12
+    assert result.endpoints == []
 
 
 def test_missing_refresh_fails_closed_without_fetch(
@@ -330,6 +337,7 @@ def test_missing_refresh_fails_closed_without_fetch(
             target=build_target(),
             authorization_revision=build_revision(),
             scopes=[build_scope()],
+        source_url="https://example.test/openapi.json",
         )
 
     assert exc_info.value.code == "authorization_refresh_missing"
@@ -358,6 +366,7 @@ def test_shared_rate_coordination_failure_blocks_without_fetch(
             target=build_target(),
             authorization_revision=build_revision(),
             scopes=[build_scope()],
+            source_url="https://example.test/openapi.json",
             refresh_authorization=refresh_authorization,
             policy_decision_observer=lambda decision: None,
         )
@@ -383,6 +392,7 @@ def test_missing_audit_observer_fails_closed_without_fetch(
             target=build_target(),
             authorization_revision=build_revision(),
             scopes=[build_scope()],
+            source_url="https://example.test/openapi.json",
             refresh_authorization=refresh_authorization,
         )
 
@@ -397,7 +407,8 @@ def test_external_network_mode_is_audited_then_blocked_without_fetch(
     monkeypatch.setattr(
         scanner,
         "_fetch_schema",
-        lambda **kwargs: events.append("network") or {"paths": {}},
+        lambda **kwargs: events.append("network")
+        or (hashlib.sha256(b'{"paths":{}}').hexdigest(), 12, {"paths": {}}),
     )
     target = build_target()
     target.network_mode = "external_public_authorized"
@@ -407,6 +418,7 @@ def test_external_network_mode_is_audited_then_blocked_without_fetch(
             target=target,
             authorization_revision=build_revision(),
             scopes=[build_scope()],
+            source_url="https://example.test/openapi.json",
             refresh_authorization=lambda: (
                 target,
                 build_revision(),
@@ -490,13 +502,15 @@ def test_scan_orders_policy_rate_limit_policy_network(
     monkeypatch.setattr(
         scanner,
         "_fetch_schema",
-        lambda **kwargs: events.append("network") or {"paths": {}},
+        lambda **kwargs: events.append("network")
+        or (hashlib.sha256(b'{"paths":{}}').hexdigest(), 12, {"paths": {}}),
     )
 
     scanner.scan(
         target=build_target(),
         authorization_revision=build_revision(),
         scopes=[build_scope()],
+        source_url="https://example.test/openapi.json",
         refresh_authorization=lambda: (
             events.append("refresh")
             or (build_target(), build_revision(), [build_scope()])
@@ -527,6 +541,7 @@ def test_gateway_receives_refreshed_exact_target_id() -> None:
         target=build_target(),
         authorization_revision=build_revision(),
         scopes=[build_scope()],
+        source_url="https://example.test/openapi.json",
         refresh_authorization=lambda: (
             refreshed_target,
             build_revision(),
@@ -558,6 +573,7 @@ def test_first_policy_denial_skips_limiter_and_network(
             target=build_target(),
             authorization_revision=build_revision(),
             scopes=[],
+            source_url="https://example.test/openapi.json",
             policy_decision_observer=lambda decision: events.append("audit"),
         )
 
@@ -588,6 +604,7 @@ def test_final_policy_denial_after_wait_skips_network(
             target=build_target(),
             authorization_revision=build_revision(),
             scopes=[build_scope()],
+            source_url="https://example.test/openapi.json",
             refresh_authorization=refresh_authorization,
             policy_decision_observer=lambda decision: events.append("audit"),
         )
@@ -621,6 +638,7 @@ def test_invalid_runtime_rate_fails_closed_before_network(
             target=build_target(),
             authorization_revision=revision,
             scopes=[build_scope()],
+            source_url="https://example.test/openapi.json",
             refresh_authorization=refresh_authorization,
         )
 
