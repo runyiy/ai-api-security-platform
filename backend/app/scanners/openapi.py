@@ -412,7 +412,7 @@ class OpenAPIScanner:
 
         try:
             data = json.loads(response.body)
-        except json.JSONDecodeError as exc:
+        except (ValueError, UnicodeDecodeError) as exc:
             raise OpenAPIScanError(
                 "OpenAPI response is not valid JSON"
             ) from exc

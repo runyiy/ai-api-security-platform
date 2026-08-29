@@ -2,6 +2,7 @@ from collections.abc import Iterator
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import sys
 import threading
 from unittest.mock import Mock
 from uuid import uuid4
@@ -844,3 +845,78 @@ def test_no_import_transaction_spans_json_or_structure_validation(
             ), db
         )
     assert result.created == 1
+
+
+@pytest.mark.parametrize(
+    "body,expected_exception,attacker_marker",
+    [
+        pytest.param(
+            b'{"paths":{},"attacker":'
+            + b"7" * (sys.get_int_max_str_digits() + 1)
+            + b"}",
+            ValueError,
+            "777777",
+            id="oversized-json-integer",
+        ),
+        pytest.param(
+            b'{"paths":{},"attacker":"\xff"}',
+            UnicodeDecodeError,
+            "attacker",
+            id="invalid-json-byte-encoding",
+        ),
+    ],
+)
+def test_decoder_failures_are_sanitized_and_atomic_in_postgresql(
+    openapi_target_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+    body: bytes,
+    expected_exception: type[Exception],
+    attacker_marker: str,
+) -> None:
+    with pytest.raises(expected_exception) as decoder_raised:
+        json.loads(body)
+    assert type(decoder_raised.value) is expected_exception
+
+    gateway = HandlerNetworkGateway(
+        lambda request: Mock(status_code=200, content=body)
+    )
+    monkeypatch.setattr(openapi_routes, "scanner", OpenAPIScanner(
+        ScopePolicyEngine(platform_allowed_hosts={"example.test"}),
+        InMemoryRateLimiter(requests_per_second=1000.0),
+        gateway,
+    ))
+    TestSession = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    with TestSession() as db:
+        db.add(Endpoint(
+            target_id=openapi_target_id, path="/existing", method="GET",
+            operation_id="original", requires_auth=False, parameters=[],
+            request_body=None, security=None,
+        ))
+        db.commit()
+
+    with TestSession() as db:
+        with pytest.raises(HTTPException) as raised:
+            openapi_routes.import_openapi(
+                OpenAPIImportRequest(
+                    target_id=openapi_target_id,
+                    source_url="https://example.test/openapi.json",
+                ),
+                db,
+            )
+
+    assert raised.value.status_code == 502
+    assert raised.value.detail == "OpenAPI response is not valid JSON"
+    assert str(decoder_raised.value) not in str(raised.value.detail)
+    assert attacker_marker not in str(raised.value.detail)
+    assert gateway.calls == 1
+    with TestSession() as db:
+        endpoints = list(db.scalars(select(Endpoint).where(
+            Endpoint.target_id == openapi_target_id
+        )))
+        records = list(db.scalars(select(OpenAPIImportRecord).where(
+            OpenAPIImportRecord.target_id == openapi_target_id
+        )))
+    assert [(item.path, item.operation_id) for item in endpoints] == [
+        ("/existing", "original")
+    ]
+    assert records == []
