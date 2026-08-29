@@ -1,5 +1,3 @@
-import hashlib
-
 from fastapi import (
     APIRouter,
     Depends,
@@ -137,11 +135,7 @@ def import_openapi(
     )
 
     try:
-        (
-            source_url,
-            document_bytes,
-            parsed_endpoints,
-        ) = scanner.scan(
+        scan_result = scanner.scan(
             target=target,
             authorization_revision=authorization_revision,
             scopes=scopes,
@@ -178,7 +172,7 @@ def import_openapi(
     created = 0
     updated = 0
     unchanged = 0
-    document_sha256 = hashlib.sha256(document_bytes).hexdigest()
+    parsed_endpoints = scan_result.endpoints
 
     try:
         for parsed in parsed_endpoints:
@@ -224,9 +218,9 @@ def import_openapi(
 
         record = OpenAPIImportRecord(
             target_id=target.id,
-            source_url=source_url,
-            document_sha256=document_sha256,
-            document_size_bytes=len(document_bytes),
+            source_url=scan_result.source_url,
+            document_sha256=scan_result.document_sha256,
+            document_size_bytes=scan_result.document_size_bytes,
             discovered_endpoint_count=len(parsed_endpoints),
         )
         db.add(record)
@@ -238,9 +232,9 @@ def import_openapi(
 
     return OpenAPIImportResponse(
         target_id=target.id,
-        source_url=source_url,
+        source_url=scan_result.source_url,
         import_record_id=record.id,
-        document_sha256=document_sha256,
+        document_sha256=scan_result.document_sha256,
         discovered=len(
             parsed_endpoints
         ),

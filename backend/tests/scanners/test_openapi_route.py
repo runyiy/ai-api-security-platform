@@ -1,3 +1,4 @@
+import hashlib
 from unittest.mock import Mock
 
 import pytest
@@ -9,6 +10,7 @@ from app.executors.rate_limit import InMemoryRateLimiter
 from app.policies.scope_policy import ScopePolicyEngine
 from app.scanners.openapi import (
     OpenAPIScanner,
+    OpenAPIScanResult,
     ParsedEndpoint,
 )
 from app.schemas.openapi import OpenAPIImportRequest
@@ -35,7 +37,7 @@ def test_import_returns_502_for_malformed_schema(
     monkeypatch.setattr(
         scanner,
         "_fetch_schema",
-        lambda **kwargs: (b'{"paths":[]}', {"paths": []}),
+        lambda **kwargs: (hashlib.sha256(b'{"paths":[]}').hexdigest(), 12, {"paths": []}),
     )
     monkeypatch.setattr(
         openapi_routes,
@@ -143,10 +145,12 @@ def test_import_ends_read_transaction_before_scan(
             events.append("scanner-call")
             assert db.in_transaction() is False
             assert authorization_revision.id == 200
-            return (
-                source_url,
-                b'{"paths":{"/projects":{"get":{}}}}',
-                [
+            body = b'{"paths":{"/projects":{"get":{}}}}'
+            return OpenAPIScanResult(
+                source_url=source_url,
+                document_sha256=hashlib.sha256(body).hexdigest(),
+                document_size_bytes=len(body),
+                endpoints=[
                     ParsedEndpoint(
                         path="/projects",
                         method="GET",

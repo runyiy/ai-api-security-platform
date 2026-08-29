@@ -1,3 +1,4 @@
+import hashlib
 import httpx
 
 from app.api.routes import openapi as openapi_routes
@@ -101,7 +102,7 @@ def test_cross_path_reservations_share_target_schedule(
     monkeypatch.setattr(
         scanner,
         "_fetch_schema",
-        lambda **kwargs: (b'{"paths":{}}', {"paths": {}}),
+        lambda **kwargs: (hashlib.sha256(b'{"paths":{}}').hexdigest(), 12, {"paths": {}}),
     )
     target, revision, scope = build_policy_objects(1, 101)
 

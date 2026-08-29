@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import hashlib
 import httpx
 import pytest
 
@@ -266,7 +267,7 @@ def test_scanner_wraps_schema_parse_error(
     monkeypatch.setattr(
         scanner,
         "_fetch_schema",
-        lambda **kwargs: (b'{"paths":[]}', {"paths": []}),
+        lambda **kwargs: (hashlib.sha256(b'{"paths":[]}').hexdigest(), 12, {"paths": []}),
     )
 
     with pytest.raises(
@@ -297,10 +298,10 @@ def test_human_execution_approval_does_not_block_openapi_import(
     monkeypatch.setattr(
         scanner,
         "_fetch_schema",
-        lambda **kwargs: (b'{"paths":{}}', {"paths": {}}),
+        lambda **kwargs: (hashlib.sha256(b'{"paths":{}}').hexdigest(), 12, {"paths": {}}),
     )
 
-    source_url, document_bytes, endpoints = scanner.scan(
+    result = scanner.scan(
         target=build_target(),
         authorization_revision=revision,
         scopes=[build_scope()],
@@ -313,8 +314,10 @@ def test_human_execution_approval_does_not_block_openapi_import(
         policy_decision_observer=lambda decision: None,
     )
 
-    assert source_url == "https://example.test/openapi.json"
-    assert endpoints == []
+    assert result.source_url == "https://example.test/openapi.json"
+    assert result.document_sha256 == hashlib.sha256(b'{"paths":{}}').hexdigest()
+    assert result.document_size_bytes == 12
+    assert result.endpoints == []
 
 
 def test_missing_refresh_fails_closed_without_fetch(
@@ -405,7 +408,7 @@ def test_external_network_mode_is_audited_then_blocked_without_fetch(
         scanner,
         "_fetch_schema",
         lambda **kwargs: events.append("network")
-        or (b'{"paths":{}}', {"paths": {}}),
+        or (hashlib.sha256(b'{"paths":{}}').hexdigest(), 12, {"paths": {}}),
     )
     target = build_target()
     target.network_mode = "external_public_authorized"
@@ -500,7 +503,7 @@ def test_scan_orders_policy_rate_limit_policy_network(
         scanner,
         "_fetch_schema",
         lambda **kwargs: events.append("network")
-        or (b'{"paths":{}}', {"paths": {}}),
+        or (hashlib.sha256(b'{"paths":{}}').hexdigest(), 12, {"paths": {}}),
     )
 
     scanner.scan(

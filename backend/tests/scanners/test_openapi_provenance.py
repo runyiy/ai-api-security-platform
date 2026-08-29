@@ -14,7 +14,8 @@ from app.network_safety.controller import NetworkExecutionController
 from app.network_safety.gateway import NetworkGateway
 from app.policies.scope_policy import ScopePolicyEngine
 from app.schemas.openapi import OpenAPIImportRequest
-from app.scanners.openapi import OpenAPIScanner
+from app.scanners import openapi as openapi_scanner
+from app.scanners.openapi import OpenAPIScanner, OpenAPIScanResult
 from app.scanners.openapi import OpenAPIPolicyDenied
 from tests.network_gateway_fakes import HandlerNetworkGateway
 from tests.scanners.test_openapi import (
@@ -49,7 +50,7 @@ def test_scanner_hash_input_is_exact_anonymous_gateway_bytes() -> None:
     source_url = "https://example.test/docs/spec.json"
     scope = build_scope()
     scope.path_pattern = "/docs/spec.json"
-    fetched_url, fetched_body, endpoints = scanner.scan(
+    result = scanner.scan(
         target=target,
         authorization_revision=build_revision(),
         scopes=[scope],
@@ -57,9 +58,10 @@ def test_scanner_hash_input_is_exact_anonymous_gateway_bytes() -> None:
         refresh_authorization=lambda: (target, build_revision(), [scope]),
         policy_decision_observer=lambda decision: None,
     )
-    assert fetched_url == source_url
-    assert fetched_body == body
-    assert [(item.path, item.method) for item in endpoints] == [("/items", "POST")]
+    assert result.source_url == source_url
+    assert result.document_sha256 == hashlib.sha256(body).hexdigest()
+    assert result.document_size_bytes == len(body)
+    assert [(item.path, item.method) for item in result.endpoints] == [("/items", "POST")]
     assert gateway.requests[0]["method"] == "GET"
     assert gateway.requests[0]["url"] == source_url
     assert gateway.requests[0]["headers"] == {"Accept": "application/json"}
@@ -95,7 +97,7 @@ def test_alternate_in_scope_localhost_source_uses_real_network_gateway() -> None
             InMemoryRateLimiter(requests_per_second=1000.0),
             NetworkGateway(controller=NetworkExecutionController()),
         )
-        fetched_url, fetched_body, endpoints = scanner.scan(
+        result = scanner.scan(
             target=target,
             authorization_revision=build_revision(),
             scopes=[scope],
@@ -108,9 +110,10 @@ def test_alternate_in_scope_localhost_source_uses_real_network_gateway() -> None
         server.server_close()
         thread.join(timeout=5)
 
-    assert fetched_url == source_url
-    assert fetched_body == body
-    assert [(item.path, item.method) for item in endpoints] == [("/local", "GET")]
+    assert result.source_url == source_url
+    assert result.document_sha256 == hashlib.sha256(body).hexdigest()
+    assert result.document_size_bytes == len(body)
+    assert [(item.path, item.method) for item in result.endpoints] == [("/local", "GET")]
     assert observed == [("/docs/spec.json", None)]
 
 
@@ -157,7 +160,11 @@ def test_provenance_failure_rolls_back_endpoint_mutations(
     body = json.dumps({"paths": {"/new": {"get": {}}}}).encode()
     monkeypatch.setattr(
         openapi_routes.scanner, "scan",
-        lambda **kwargs: (kwargs["source_url"], body, [
+        lambda **kwargs: OpenAPIScanResult(
+            source_url=kwargs["source_url"],
+            document_sha256=hashlib.sha256(body).hexdigest(),
+            document_size_bytes=len(body),
+            endpoints=[
             openapi_routes.ParsedEndpoint(
                 path="/new", method="GET", operation_id=None,
                 requires_auth=False, parameters=[], request_body=None,
@@ -176,3 +183,51 @@ def test_provenance_failure_rolls_back_endpoint_mutations(
     db.rollback.assert_called_once()
     db.commit.assert_called_once()  # pre-network read transaction only
     assert hashlib.sha256(body).hexdigest() not in repr(db.commit.call_args_list)
+
+
+def test_provenance_is_computed_before_json_and_openapi_parsing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = b'{"paths":{"/ordered":{"get":{}}}}'
+    events: list[str] = []
+    real_sha256 = hashlib.sha256
+    real_loads = json.loads
+    real_parse = openapi_scanner.parse_openapi_schema
+
+    monkeypatch.setattr(
+        openapi_scanner.hashlib,
+        "sha256",
+        lambda value: events.append("sha256") or real_sha256(value),
+    )
+    monkeypatch.setattr(
+        openapi_scanner.json,
+        "loads",
+        lambda value: events.append("json") or real_loads(value),
+    )
+    monkeypatch.setattr(
+        openapi_scanner,
+        "parse_openapi_schema",
+        lambda schema: events.append("openapi") or real_parse(schema),
+    )
+    scanner = OpenAPIScanner(
+        ScopePolicyEngine(platform_allowed_hosts={"example.test"}),
+        InMemoryRateLimiter(requests_per_second=1000.0),
+        HandlerNetworkGateway(
+            lambda request: Mock(status_code=200, content=body)
+        ),
+    )
+    target = build_target()
+    scope = build_scope()
+
+    result = scanner.scan(
+        target=target,
+        authorization_revision=build_revision(),
+        scopes=[scope],
+        source_url="https://example.test/openapi.json",
+        refresh_authorization=lambda: (target, build_revision(), [scope]),
+        policy_decision_observer=lambda decision: None,
+    )
+
+    assert events == ["sha256", "json", "openapi"]
+    assert result.document_sha256 == real_sha256(body).hexdigest()
+    assert result.document_size_bytes == len(body)
