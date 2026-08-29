@@ -16,12 +16,13 @@ The product is not a general-purpose website attack scanner. It remains focused 
 Execution-capable v1 currently assumes:
 
 - one trusted operator;
-- one execution process;
+- `single_process` execution by default, with explicit `multi_process` support
+  limited to local/private immutable exact-plan execution;
 - self-hosted local/private lab usage.
 
 Public SRC or bug-bounty execution is currently unsupported, is not an approved deployment mode, and is operationally prohibited. Completion of Milestones 0–2 does not provide public readiness. The current codebase does not yet provide the complete machine-enforced public-network readiness boundary and must not be assumed to prevent every possible public destination if configured with a public hostname. No real public SRC request may be intentionally executed until the Public SRC Readiness controls are implemented and satisfied. The target architecture must provide a machine-enforced release and execution gate before public use.
 
-Do not enable multiple execution workers while rate limiting and coordination remain in memory.
+The `multi_process` topology is an explicit operator opt-in and is never inferred from worker count. It requires PostgreSQL shared coordination and disables legacy direct TestCase execution.
 
 ## 3. Non-negotiable principles
 
@@ -163,9 +164,9 @@ Bind human approval to the exact immutable plan digest and bounded action set. M
 
 Approval is necessary when configured but never sufficient. Every action still undergoes immediate pre-network authorization, Scope, Target, credential, rate, kill-switch, and network validation.
 
-### Milestone 8 — Shared execution coordination
+### Milestone 8 — Shared execution coordination (complete)
 
-Use PostgreSQL-first coordination for:
+Completed PostgreSQL-first coordination provides:
 
 - process-safe rate reservations;
 - execution claims and leases;
@@ -173,7 +174,9 @@ Use PostgreSQL-first coordination for:
 - stuck-work recovery and cancellation semantics;
 - multi-process execution readiness.
 
-Do not enable multiple execution workers or claim multi-worker safety until this milestone is complete and tested across OS processes. Redis is not required for v1.
+Deterministic real-OS-process tests cover the complete exact-plan stack against PostgreSQL and self-controlled localhost HTTP. Local/private exact-plan execution may use multiple FastAPI processes only when `execution_topology=multi_process`; the default remains `single_process`, and legacy `POST /test-cases/{id}/execute` is unavailable in multi-process topology. Redis is not required for v1.
+
+Milestone 8 completion does not satisfy the separate Public SRC Readiness release gate. Public execution remains prohibited and `external_public_authorized` remains runtime blocked.
 
 ### Milestone 9 — API discovery
 

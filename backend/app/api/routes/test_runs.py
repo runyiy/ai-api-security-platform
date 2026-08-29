@@ -130,6 +130,14 @@ def execute_test_case(
     test_case_id: int,
     db: Session = Depends(get_db),
 ) -> TestRun:
+    if settings.execution_topology == "multi_process":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "plan_bound_execution_required",
+                "reason": "Execution requires an exact immutable ExecutionPlan.",
+            },
+        )
     service = TestExecutionService(
         db=db,
         executor=executor,
