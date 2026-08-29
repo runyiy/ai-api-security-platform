@@ -29,10 +29,23 @@ SUPPORTED_METHODS = (
 )
 
 MAX_OPENAPI_RESPONSE_BYTES = 1_000_000
+MAX_OPENAPI_NESTING_DEPTH = 32
+MAX_OPENAPI_STRUCTURE_NODES = 20_000
+MAX_OPENAPI_PATHS = 2_000
+MAX_OPENAPI_ENDPOINTS = 4_000
+MAX_OPENAPI_PARAMETERS_PER_ENDPOINT = 128
+MAX_OPENAPI_PATH_LENGTH = 500
+MAX_OPENAPI_OPERATION_ID_LENGTH = 255
 
 
 class OpenAPIScanError(RuntimeError):
     pass
+
+
+class OpenAPIParseError(OpenAPIScanError):
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
 
 
 class OpenAPIAuditError(OpenAPIScanError):
@@ -132,120 +145,96 @@ def security_requires_auth(
 
     return True
 
-def parse_openapi_schema(
-    schema: dict[str, Any],
-) -> list[ParsedEndpoint]:
-    paths = schema.get("paths")
 
+def validate_openapi_structure(document: Any) -> None:
+    nodes_seen = 0
+    pending: list[tuple[Any, int]] = [(document, 1)]
+
+    while pending:
+        value, depth = pending.pop()
+        if depth > MAX_OPENAPI_NESTING_DEPTH:
+            raise OpenAPIParseError("openapi_document_too_deep")
+
+        nodes_seen += 1
+        if nodes_seen > MAX_OPENAPI_STRUCTURE_NODES:
+            raise OpenAPIParseError("openapi_document_too_complex")
+
+        if isinstance(value, dict):
+            if "$ref" in value:
+                raise OpenAPIParseError("openapi_references_not_supported")
+            pending.extend((item, depth + 1) for item in value.values())
+        elif isinstance(value, list):
+            pending.extend((item, depth + 1) for item in value)
+
+
+def parse_openapi_schema(schema: dict[str, Any]) -> list[ParsedEndpoint]:
+    paths = schema.get("paths")
     if not isinstance(paths, dict):
-        raise ValueError(
-            "OpenAPI schema does not contain "
-            "a valid 'paths' object"
-        )
+        raise ValueError("OpenAPI schema does not contain a valid 'paths' object")
+    if len(paths) > MAX_OPENAPI_PATHS:
+        raise OpenAPIParseError("openapi_too_many_paths")
 
     root_security = schema.get("security")
-
-    if root_security is not None:
-        if not isinstance(root_security, list):
-            raise ValueError(
-                "OpenAPI root security must be a list"
-            )
+    if root_security is not None and not isinstance(root_security, list):
+        raise ValueError("OpenAPI root security must be a list")
 
     endpoints: list[ParsedEndpoint] = []
-
     for path, path_item in paths.items():
         if not isinstance(path, str):
             continue
-
+        if len(path) > MAX_OPENAPI_PATH_LENGTH:
+            raise OpenAPIParseError("openapi_path_too_long")
         if not isinstance(path_item, dict):
             continue
 
-        raw_path_parameters = (
-            path_item.get("parameters", [])
-        )
-
+        raw_path_parameters = path_item.get("parameters", [])
         path_parameters = (
-            raw_path_parameters
-            if isinstance(
-                raw_path_parameters,
-                list,
-            )
-            else []
+            raw_path_parameters if isinstance(raw_path_parameters, list) else []
         )
 
         for method in SUPPORTED_METHODS:
             operation = path_item.get(method)
-
             if not isinstance(operation, dict):
                 continue
+            if len(endpoints) >= MAX_OPENAPI_ENDPOINTS:
+                raise OpenAPIParseError("openapi_too_many_endpoints")
 
-            raw_operation_parameters = (
-                operation.get(
-                    "parameters",
-                    [],
-                )
-            )
-
+            raw_operation_parameters = operation.get("parameters", [])
             operation_parameters = (
                 raw_operation_parameters
-                if isinstance(
-                    raw_operation_parameters,
-                    list,
-                )
+                if isinstance(raw_operation_parameters, list)
                 else []
             )
+            parameters = merge_parameters(path_parameters, operation_parameters)
+            if len(parameters) > MAX_OPENAPI_PARAMETERS_PER_ENDPOINT:
+                raise OpenAPIParseError("openapi_too_many_parameters")
 
-            parameters = merge_parameters(
-                path_parameters,
-                operation_parameters,
-            )
+            security = operation.get("security", root_security)
+            if security is not None and not isinstance(security, list):
+                security = None
 
-            security = operation.get(
-                "security",
-                root_security,
-            )
-
-            if security is not None:
-                if not isinstance(security, list):
-                    security = None
-
-            request_body = operation.get(
-                "requestBody"
-            )
-
-            if not isinstance(
-                request_body,
-                dict,
-            ):
+            request_body = operation.get("requestBody")
+            if not isinstance(request_body, dict):
                 request_body = None
 
-            operation_id = operation.get(
-                "operationId"
-            )
-
-            if not isinstance(
-                operation_id,
-                str,
-            ):
+            operation_id = operation.get("operationId")
+            if not isinstance(operation_id, str):
                 operation_id = None
+            elif len(operation_id) > MAX_OPENAPI_OPERATION_ID_LENGTH:
+                raise OpenAPIParseError("openapi_operation_id_too_long")
 
-            endpoints.append(
-                ParsedEndpoint(
-                    path=path,
-                    method=method.upper(),
-                    operation_id=operation_id,
-                    requires_auth=(
-                        security_requires_auth(
-                            security
-                        )
-                    ),
-                    parameters=parameters,
-                    request_body=request_body,
-                    security=security,
-                )
-            )
+            endpoints.append(ParsedEndpoint(
+                path=path,
+                method=method.upper(),
+                operation_id=operation_id,
+                requires_auth=security_requires_auth(security),
+                parameters=parameters,
+                request_body=request_body,
+                security=security,
+            ))
 
     return endpoints
+
 
 class OpenAPIScanner:
     def __init__(
@@ -423,10 +412,14 @@ class OpenAPIScanner:
 
         try:
             data = json.loads(response.body)
-        except json.JSONDecodeError as exc:
+        except (ValueError, UnicodeDecodeError) as exc:
             raise OpenAPIScanError(
                 "OpenAPI response is not valid JSON"
             ) from exc
+        except RecursionError as exc:
+            raise OpenAPIParseError("openapi_document_too_deep") from exc
+
+        validate_openapi_structure(data)
 
         if not isinstance(data, dict):
             raise OpenAPIScanError(
