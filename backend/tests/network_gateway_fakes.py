@@ -39,6 +39,12 @@ class HandlerNetworkGateway:
             is_ip_literal=False,
             ip_address=None,
         )
+        response_headers = getattr(response, "headers", None)
+        content_encoding = (
+            ",".join(response_headers.get_list("content-encoding")) or None
+            if isinstance(response_headers, httpx.Headers)
+            else None
+        )
         return NetworkGatewayResult(
             status_code=response.status_code,
             body=body,
@@ -46,6 +52,7 @@ class HandlerNetworkGateway:
             destination=destination,
             selected_ip="127.0.0.1",
             peer_ip="127.0.0.1",
+            content_encoding=content_encoding,
         )
 
 

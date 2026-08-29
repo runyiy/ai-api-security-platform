@@ -221,6 +221,9 @@ def import_openapi(
             source_url=scan_result.source_url,
             document_sha256=scan_result.document_sha256,
             document_size_bytes=scan_result.document_size_bytes,
+            content_encoding=scan_result.content_encoding,
+            decoded_document_sha256=scan_result.decoded_document_sha256,
+            decoded_document_size_bytes=scan_result.decoded_document_size_bytes,
             discovered_endpoint_count=len(parsed_endpoints),
         )
         db.add(record)
@@ -235,6 +238,8 @@ def import_openapi(
         source_url=scan_result.source_url,
         import_record_id=record.id,
         document_sha256=scan_result.document_sha256,
+        content_encoding=scan_result.content_encoding,
+        decoded_document_sha256=scan_result.decoded_document_sha256,
         discovered=len(
             parsed_endpoints
         ),

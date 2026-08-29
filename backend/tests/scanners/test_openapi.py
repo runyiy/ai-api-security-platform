@@ -267,7 +267,10 @@ def test_scanner_wraps_schema_parse_error(
     monkeypatch.setattr(
         scanner,
         "_fetch_schema",
-        lambda **kwargs: (hashlib.sha256(b'{"paths":[]}').hexdigest(), 12, {"paths": []}),
+        lambda **kwargs: (
+            hashlib.sha256(b'{"paths":[]}').hexdigest(), 12, "identity",
+            hashlib.sha256(b'{"paths":[]}').hexdigest(), 12, {"paths": []},
+        ),
     )
 
     with pytest.raises(
@@ -298,7 +301,10 @@ def test_human_execution_approval_does_not_block_openapi_import(
     monkeypatch.setattr(
         scanner,
         "_fetch_schema",
-        lambda **kwargs: (hashlib.sha256(b'{"paths":{}}').hexdigest(), 12, {"paths": {}}),
+        lambda **kwargs: (
+            hashlib.sha256(b'{"paths":{}}').hexdigest(), 12, "identity",
+            hashlib.sha256(b'{"paths":{}}').hexdigest(), 12, {"paths": {}},
+        ),
     )
 
     result = scanner.scan(
@@ -408,7 +414,10 @@ def test_external_network_mode_is_audited_then_blocked_without_fetch(
         scanner,
         "_fetch_schema",
         lambda **kwargs: events.append("network")
-        or (hashlib.sha256(b'{"paths":{}}').hexdigest(), 12, {"paths": {}}),
+        or (
+            hashlib.sha256(b'{"paths":{}}').hexdigest(), 12, "identity",
+            hashlib.sha256(b'{"paths":{}}').hexdigest(), 12, {"paths": {}},
+        ),
     )
     target = build_target()
     target.network_mode = "external_public_authorized"
@@ -503,7 +512,10 @@ def test_scan_orders_policy_rate_limit_policy_network(
         scanner,
         "_fetch_schema",
         lambda **kwargs: events.append("network")
-        or (hashlib.sha256(b'{"paths":{}}').hexdigest(), 12, {"paths": {}}),
+        or (
+            hashlib.sha256(b'{"paths":{}}').hexdigest(), 12, "identity",
+            hashlib.sha256(b'{"paths":{}}').hexdigest(), 12, {"paths": {}},
+        ),
     )
 
     scanner.scan(

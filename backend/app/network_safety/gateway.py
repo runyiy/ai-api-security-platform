@@ -51,6 +51,7 @@ class NetworkGatewayResult:
     destination: CanonicalDestination
     selected_ip: str
     peer_ip: str
+    content_encoding: str | None = None
 
 
 class TCPConnector(Protocol):
@@ -275,6 +276,7 @@ class NetworkGateway:
                 ) as response:
                     body = _read_bounded(response.iter_stream(), max_response_bytes)
                     status_code = response.status
+                    content_encoding = _content_encoding(response.headers)
         except NetworkGatewayError:
             raise
         except (httpcore.TimeoutException, socket.timeout) as exc:
@@ -301,7 +303,17 @@ class NetworkGateway:
             destination=decision.destination,
             selected_ip=selected_ip.compressed,
             peer_ip=backend.peer_ip.compressed,
+            content_encoding=content_encoding,
         )
+
+
+def _content_encoding(headers: list[tuple[bytes, bytes]]) -> str | None:
+    values = [
+        value.decode("latin-1")
+        for name, value in headers
+        if name.lower() == b"content-encoding"
+    ]
+    return ",".join(values) if values else None
 
 
 def _check_network_enabled(
