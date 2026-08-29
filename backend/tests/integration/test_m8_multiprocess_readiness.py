@@ -21,15 +21,19 @@ from app.db.models import (
     SafetyDecisionRecord,
     Scope,
     Target,
+    TestCase,
     TestRun,
 )
 from app.db.session import SessionLocal, engine
+from app.executors.http import ExecutionBlockedError
+from app.api.routes.test_runs import executor as runtime_executor
 from app.services.execution_plan_approval import recompute_persisted_plan_digest
 from app.services.execution_plan_claim import ClaimHandle, ExecutionPlanClaimService
 from app.services.execution_plan_progress import (
     ExecutionPlanProgressService,
     ExecutionProgressLostError,
 )
+from app.services.plan_execution import PlanExecutionService
 from app.services.test_case_planning import create_test_case_execution_plan
 from app.services.execution_plan_approval import record_plan_decision
 from tests.services.test_plan_execution_integration import approved_plan
@@ -85,7 +89,10 @@ def localhost_server():
         thread.join(timeout=3)
 
 
-def retarget_plan(plan_id: int, target_id: int, port: int, *, rate=100.0) -> None:
+def retarget_plan(
+    plan_id: int, target_id: int, port: int, *, rate=100.0,
+    hostname="127.0.0.1",
+) -> None:
     with SessionLocal() as db:
         target = db.get(Target, target_id)
         action = db.scalar(
@@ -93,11 +100,11 @@ def retarget_plan(plan_id: int, target_id: int, port: int, *, rate=100.0) -> Non
         )
         scope = db.scalar(select(Scope).where(Scope.target_id == target_id))
         assert target is not None and action is not None and scope is not None
-        target.base_url = f"http://127.0.0.1:{port}/api"
+        target.base_url = f"http://{hostname}:{port}/api"
         target.network_mode = "private_local"
         target.authorization_revision.max_requests_per_second = rate
-        action.url = f"http://127.0.0.1:{port}/api/projects/project%20100"
-        scope.hostname = "127.0.0.1"
+        action.url = f"http://{hostname}:{port}/api/projects/project%20100"
+        scope.hostname = hostname
         scope.path_pattern = "/api/projects/*"
         db.flush()
         plan = db.get(ExecutionPlan, plan_id)
@@ -263,6 +270,48 @@ def test_pre_network_crash_allows_higher_generation_safe_takeover(
     )
     with pytest.raises(ExecutionProgressLostError):
         ExecutionPlanProgressService(bind=engine).mark_network_started(stale)
+    with SessionLocal() as db:
+        canonical = db.scalar(
+            select(TestRun).where(TestRun.execution_plan_id == plan_id)
+        )
+        action = db.scalar(
+            select(PlanAction).where(PlanAction.execution_plan_id == plan_id)
+        )
+        assert canonical is not None and action is not None
+        test_case = db.get(TestCase, canonical.test_case_id)
+        assert test_case is not None
+        canonical_snapshot = (
+            canonical.id, canonical.response_status, canonical.response_body,
+            canonical.error_message,
+        )
+        service = PlanExecutionService(db=db, executor=runtime_executor)
+        with pytest.raises(ExecutionBlockedError) as rejected:
+            service._finish(
+                claim_handle=stale,
+                test_case=test_case,
+                request_data={"stale": "must-not-persist"},
+                target_id=target_id,
+                revision_id=canonical.authorization_revision_id,
+                plan_id=plan_id,
+                action_id=action.id,
+                outcome="succeeded",
+                response_status=299,
+                response_body="stale replacement",
+                duration_ms=1,
+            )
+        assert rejected.value.code == "execution_plan_result_fencing_lost"
+    with SessionLocal() as db:
+        persisted = db.scalar(
+            select(TestRun).where(TestRun.execution_plan_id == plan_id)
+        )
+        assert persisted is not None
+        assert (
+            persisted.id, persisted.response_status, persisted.response_body,
+            persisted.error_message,
+        ) == canonical_snapshot
+        assert db.scalar(select(func.count(TestRun.id)).where(
+            TestRun.execution_plan_id == plan_id
+        )) == 1
 
 
 def test_network_started_crash_remains_in_doubt_without_second_request(
@@ -289,22 +338,36 @@ def test_cross_process_cancelled_plan_never_reaches_local_server(
 ) -> None:
     plan_id, target_id, _, _ = approved_plan
     port, state = localhost_server
-    retarget_plan(plan_id, target_id, port)
-    code = (
-        "import sys; from app.db.session import engine; "
-        "from app.services.execution_plan_claim import ExecutionPlanClaimService; "
-        "from app.services.execution_plan_progress import ExecutionPlanProgressService; "
-        "from app.services.execution_plan_cancellation import ExecutionPlanCancellationService; "
-        "c=ExecutionPlanClaimService(bind=engine); h=c.acquire(int(sys.argv[1]),'waiting',lease_seconds=5); "
-        "ExecutionPlanProgressService(bind=engine).prepare_attempt(h); print('ready',flush=True); "
-        "sys.stdin.readline(); print('cancelled' if ExecutionPlanCancellationService(bind=engine).get_cancellation(int(sys.argv[1])) else 'missing',flush=True); c.release(h)"
-    )
-    owner = subprocess.Popen(
-        [sys.executable, "-c", code, str(plan_id)], cwd=".",
-        env=process_environment(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, text=True,
-    )
-    assert owner.stdout.readline().strip() == "ready"
+    retarget_plan(plan_id, target_id, port, rate=1.0)
+    with engine.begin() as db:
+        seeded = db.scalar(text(
+            "INSERT INTO rate_reservation_states AS state (key,next_allowed_at) "
+            "VALUES (:key,clock_timestamp()+interval '2 seconds') "
+            "ON CONFLICT (key) DO UPDATE SET "
+            "next_allowed_at=clock_timestamp()+interval '2 seconds' "
+            "RETURNING next_allowed_at"
+        ), {"key": f"target:{target_id}"})
+    owner = execute_process(plan_id)
+    deadline = time.monotonic() + 5
+    generation = None
+    while time.monotonic() < deadline:
+        with engine.connect() as db:
+            row = db.execute(text(
+                "SELECT claim.owner_id, claim.fencing_generation, progress.phase, "
+                "rate.next_allowed_at FROM execution_plan_claims AS claim "
+                "JOIN execution_plan_progress AS progress USING (execution_plan_id) "
+                "JOIN rate_reservation_states AS rate ON rate.key=:key "
+                "WHERE claim.execution_plan_id=:plan_id"
+            ), {"key": f"target:{target_id}", "plan_id": plan_id}).first()
+        if (
+            row is not None and row.owner_id is not None
+            and row.phase == "pre_network" and row.next_allowed_at > seeded
+        ):
+            generation = row.fencing_generation
+            break
+        time.sleep(0.01)
+    else:
+        pytest.fail("normal plan worker did not enter the rate-wait window")
     cancel_code = (
         "import sys; from fastapi.testclient import TestClient; from app.main import app; "
         "r=TestClient(app).post('/api/execution-plans/'+sys.argv[1]+'/cancel'); print(r.status_code)"
@@ -315,11 +378,9 @@ def test_cross_process_cancelled_plan_never_reaches_local_server(
         check=True, timeout=5,
     )
     assert cancelled.stdout.strip() == "200"
-    owner.stdin.write("continue\n")
-    owner.stdin.flush()
-    output, error = owner.communicate(timeout=5)
-    assert owner.returncode == 0, error
-    assert output.strip() == "cancelled"
+    owner_result = finish_process(owner, timeout=8)
+    assert owner_result["status"] == 403
+    assert owner_result["body"]["detail"]["code"] == "execution_plan_cancelled"
     retry = finish_process(execute_process(plan_id))
     assert retry["status"] == 403
     assert retry["body"]["detail"]["code"] == "execution_plan_cancelled"
@@ -328,6 +389,10 @@ def test_cross_process_cancelled_plan_never_reaches_local_server(
         assert db.scalar(select(TestRun.id).where(
             TestRun.execution_plan_id == plan_id
         )) is None
+        claim = db.get(ExecutionPlanClaim, plan_id)
+        assert claim is not None
+        assert claim.owner_id is None
+        assert claim.fencing_generation == generation
 
 
 def test_shared_rate_reservations_order_full_plan_processes(
@@ -412,7 +477,32 @@ def test_cross_process_target_kill_switch_is_terminal_and_replay_is_zero_network
 ) -> None:
     plan_id, target_id, _, _ = approved_plan
     port, state = localhost_server
-    retarget_plan(plan_id, target_id, port)
+    retarget_plan(plan_id, target_id, port, hostname="localhost")
+    worker_code = (
+        "import json,sys; from app.db.session import SessionLocal; "
+        "from app.api.routes.test_runs import policy_engine; "
+        "from app.executors.http import PolicyEnforcedHTTPExecutor; "
+        "from app.executors.runtime import platform_rate_limiter; "
+        "from app.network_safety.gateway import NetworkGateway; "
+        "from app.network_safety.runtime import network_execution_controller; "
+        "from app.services.plan_execution import PlanExecutionService;\n"
+        "class R:\n"
+        " def resolve(self,hostname):\n"
+        "  print('dns',flush=True); sys.stdin.readline(); return ('127.0.0.1',)\n"
+        "with SessionLocal() as db:\n"
+        " run=PlanExecutionService(db=db,executor=PolicyEnforcedHTTPExecutor("
+        "policy_engine=policy_engine,rate_limiter=platform_rate_limiter,"
+        "network_gateway=NetworkGateway(controller=network_execution_controller,"
+        "resolver=R()))).execute(execution_plan_id=int(sys.argv[1]))\n"
+        " print(json.dumps({'status':200,'body':{'id':run.id,"
+        "'error_message':run.error_message}}),flush=True)"
+    )
+    worker = subprocess.Popen(
+        [sys.executable, "-c", worker_code, str(plan_id)], cwd=".",
+        env=process_environment(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True,
+    )
+    assert worker.stdout.readline().strip() == "dns"
     switch_code = (
         "import sys; from app.network_safety.runtime import network_execution_controller as c; "
         "getattr(c,sys.argv[1])(int(sys.argv[2]))"
@@ -422,12 +512,21 @@ def test_cross_process_target_kill_switch_is_terminal_and_replay_is_zero_network
         cwd=".", env=process_environment(), check=True, timeout=5,
     )
     try:
-        first = finish_process(execute_process(plan_id))
+        worker.stdin.write("continue\n")
+        worker.stdin.flush()
+        first = finish_process(worker)
         assert first["status"] == 200
         assert first["body"]["error_message"].startswith(
             "network_target_disabled:"
         )
         assert state.count == 0
+        with SessionLocal() as db:
+            progress = db.get(ExecutionPlanProgress, plan_id)
+            canonical = db.get(TestRun, first["body"]["id"])
+            assert progress is not None and progress.phase == "network_started"
+            assert canonical is not None
+            assert canonical.execution_plan_id == plan_id
+            assert canonical.response_status is None
         subprocess.run(
             [sys.executable, "-c", switch_code, "enable_target", str(target_id)],
             cwd=".", env=process_environment(), check=True, timeout=5,
