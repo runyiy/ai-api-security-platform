@@ -1,12 +1,16 @@
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
-from sqlalchemy import delete
+from sqlalchemy import delete, func, select
 
 from app.db.models import (
     AssetHostnameRule,
     AuthorizationProfile,
     AuthorizationRevision,
+    ExecutionPlan,
+    Scope,
+    Target,
+    TestRun as StoredTestRun,
 )
 from app.db.session import SessionLocal
 from app.main import app
@@ -94,6 +98,40 @@ def test_draft_rule_crud_normalization_duplicate_and_cross_revision_guards() -> 
         assert client.delete(wrong_revision_delete).status_code == 404
         assert client.delete(f"{url}/{rule['id']}").status_code == 204
         assert client.get(url).json() == []
+    finally:
+        cleanup_profiles(profile_ids)
+
+
+def test_asset_hostname_rule_crud_has_zero_authorization_execution_side_effects(
+) -> None:
+    profile_ids: list[int] = []
+    tracked_models = (Target, Scope, ExecutionPlan, StoredTestRun)
+    try:
+        profile_id, revision_id = create_profile_and_revision()
+        profile_ids = [profile_id]
+        with SessionLocal() as db:
+            before = {
+                model: db.scalar(select(func.count()).select_from(model))
+                for model in tracked_models
+            }
+
+        url = (
+            f"/api/authorization-profiles/{profile_id}/revisions/"
+            f"{revision_id}/asset-hostname-rules"
+        )
+        created = client.post(url, json={
+            "rule_type": "include",
+            "hostname_pattern": "*.side-effect-free.test",
+        })
+        assert created.status_code == 201
+        assert client.delete(f"{url}/{created.json()['id']}").status_code == 204
+
+        with SessionLocal() as db:
+            after = {
+                model: db.scalar(select(func.count()).select_from(model))
+                for model in tracked_models
+            }
+        assert after == before
     finally:
         cleanup_profiles(profile_ids)
 
