@@ -144,9 +144,13 @@ def test_import_ends_read_transaction_before_scan(
             source_url,
             refresh_authorization,
             policy_decision_observer,
+            credential_binding_id,
+            refresh_credential,
         ):
             events.append("scanner-call")
             assert db.in_transaction() is False
+            assert credential_binding_id == 55
+            refresh_credential()
             assert authorization_revision.id == 200
             body = b'{"paths":{"/projects":{"get":{}}}}'
             return OpenAPIScanResult(
@@ -174,11 +178,17 @@ def test_import_ends_read_transaction_before_scan(
         "scanner",
         OrderingScanner(),
     )
+    monkeypatch.setattr(
+        openapi_routes,
+        "build_openapi_credential_refresh",
+        lambda *args, **kwargs: lambda: events.append("credential-refresh"),
+    )
 
     result = openapi_routes.import_openapi(
         payload=OpenAPIImportRequest(
             target_id=1,
             source_url="https://example.test/openapi.json",
+            credential_binding_id=55,
         ),
         db=db,
     )
@@ -189,6 +199,7 @@ def test_import_ends_read_transaction_before_scan(
         "db-read",
         "commit",
         "scanner-call",
+        "credential-refresh",
         "db-write-query",
         "commit",
     ]
