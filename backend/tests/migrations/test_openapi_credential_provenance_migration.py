@@ -11,6 +11,7 @@ from app.db.session import engine
 
 REVISION = "e9a1c3f5b7d9"
 PARENT = "d8f0b2c4e6a9"
+HEAD = "f0b2d4e6a8c1"
 
 
 def current_revision() -> str | None:
@@ -22,7 +23,7 @@ def test_openapi_credential_provenance_migration_round_trip() -> None:
     config = Config("alembic.ini")
     scripts = ScriptDirectory.from_config(config)
     assert scripts.get_revision(REVISION).down_revision == PARENT
-    assert scripts.get_heads() == [REVISION]
+    assert scripts.get_heads() == [HEAD]
     digest = hashlib.sha256(b'{"paths":{}}').hexdigest()
     target_id = identity_id = binding_id = import_record_id = None
     try:
