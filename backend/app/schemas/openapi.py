@@ -1,9 +1,12 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class OpenAPIImportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     target_id: int
     source_url: str = Field(min_length=1, max_length=2048)
+    credential_binding_id: int | None = None
 
 
 class OpenAPIImportResponse(BaseModel):

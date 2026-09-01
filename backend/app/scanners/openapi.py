@@ -3,6 +3,12 @@ import json
 import zlib
 from collections.abc import Callable
 
+from app.auth.context import (
+    AuthenticationContext,
+    AuthenticationContextError,
+    apply_authentication_context,
+)
+
 from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.scope import Scope
 from app.db.models.target import Target
@@ -96,6 +102,7 @@ class OpenAPIScanResult:
     decoded_document_sha256: str
     decoded_document_size_bytes: int
     endpoints: list[ParsedEndpoint]
+    credential_binding_id: int | None = None
 
 def merge_parameters(
     path_parameters: list[dict[str, Any]],
@@ -314,6 +321,8 @@ class OpenAPIScanner:
             [], tuple[Target, AuthorizationRevision | None, list[Scope]]
         ] | None = None,
         policy_decision_observer: Callable[[PolicyDecision], None] | None = None,
+        credential_binding_id: int | None = None,
+        refresh_credential: Callable[[], AuthenticationContext] | None = None,
     ) -> OpenAPIScanResult:
 
         decision = (
@@ -400,6 +409,21 @@ class OpenAPIScanner:
                 ),
             )
 
+        authentication_context = None
+        if credential_binding_id is not None:
+            if refresh_credential is None:
+                raise OpenAPIExecutionBlocked(
+                    code="openapi_credential_unavailable",
+                    reason="The selected OpenAPI credential is unavailable.",
+                )
+            try:
+                authentication_context = refresh_credential()
+            except Exception:
+                raise OpenAPIExecutionBlocked(
+                    code="openapi_credential_unavailable",
+                    reason="The selected OpenAPI credential is unavailable.",
+                ) from None
+
         (
             document_sha256,
             document_size_bytes,
@@ -408,7 +432,9 @@ class OpenAPIScanner:
             decoded_document_size_bytes,
             schema,
         ) = self._fetch_schema(
-            target=target, url=source_url
+            target=target,
+            url=source_url,
+            authentication_context=authentication_context,
         )
 
         try:
@@ -430,6 +456,7 @@ class OpenAPIScanner:
             content_encoding=content_encoding,
             decoded_document_sha256=decoded_document_sha256,
             decoded_document_size_bytes=decoded_document_size_bytes,
+            credential_binding_id=credential_binding_id,
         )
 
     @staticmethod
@@ -453,17 +480,30 @@ class OpenAPIScanner:
         *,
         target: Target,
         url: str,
+        authentication_context: AuthenticationContext | None = None,
     ) -> tuple[str, int, str, str, int, dict[str, Any]]:
+        headers = {
+            "Accept": "application/json",
+            "Accept-Encoding": "gzip",
+        }
+        if authentication_context is not None:
+            try:
+                headers = apply_authentication_context(
+                    request_headers=headers,
+                    context=authentication_context,
+                )
+            except AuthenticationContextError:
+                raise OpenAPIExecutionBlocked(
+                    code="openapi_credential_unavailable",
+                    reason="The selected OpenAPI credential is unavailable.",
+                ) from None
         try:
             response = self.network_gateway.request(
                 target_id=target.id,
                 network_mode=target.network_mode,
                 method="GET",
                 url=url,
-                headers={
-                    "Accept": "application/json",
-                    "Accept-Encoding": "gzip",
-                },
+                headers=headers,
                 max_response_bytes=MAX_OPENAPI_RESPONSE_BYTES,
                 timeout_seconds=5.0,
             )

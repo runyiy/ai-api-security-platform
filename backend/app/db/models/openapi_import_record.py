@@ -39,6 +39,9 @@ class OpenAPIImportRecord(Base):
     target_id: Mapped[int] = mapped_column(
         ForeignKey("targets.id", ondelete="RESTRICT"), nullable=False
     )
+    credential_binding_id: Mapped[int | None] = mapped_column(
+        ForeignKey("credential_bindings.id", ondelete="RESTRICT"), nullable=True
+    )
     source_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     document_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     document_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)

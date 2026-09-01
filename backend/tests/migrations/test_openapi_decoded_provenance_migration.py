@@ -11,6 +11,7 @@ from app.db.session import engine
 
 REVISION = "d8f0b2c4e6a9"
 PARENT = "c4e6a8b0d2f4"
+HEAD = "e9a1c3f5b7d9"
 
 
 def current_revision() -> str | None:
@@ -22,7 +23,7 @@ def test_decoded_provenance_migration_backfill_and_round_trip() -> None:
     config = Config("alembic.ini")
     scripts = ScriptDirectory.from_config(config)
     assert scripts.get_revision(REVISION).down_revision == PARENT
-    assert scripts.get_heads() == [REVISION]
+    assert scripts.get_heads() == [HEAD]
     wire = b'{"paths":{}}'
     digest = hashlib.sha256(wire).hexdigest()
     source_url = "https://migration.test/m9-03.json"
