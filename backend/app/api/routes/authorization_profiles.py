@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models.authorization_profile import AuthorizationProfile
 from app.db.models.authorization_revision import AuthorizationRevision
+from app.db.models.asset_hostname_rule import AssetHostnameRule
 from app.db.session import get_db
 from app.schemas.authorization_profile import (
     AuthorizationProfileCreate,
@@ -20,6 +21,17 @@ from app.schemas.authorization_profile import (
     AuthorizationProfileUpdate,
 )
 from app.schemas.authorization_revision import AuthorizationRevisionRead
+from app.schemas.asset_hostname_rule import (
+    AssetHostnameRuleCreate,
+    AssetHostnameRuleRead,
+)
+from app.services.asset_hostname_rule import (
+    AssetHostnameRuleImmutableError,
+    AssetHostnameRuleNotFoundError,
+    AssetHostnameRuleValidationError,
+    create_asset_hostname_rule,
+    delete_asset_hostname_rule,
+)
 from app.services.authorization_revision import (
     InvalidRevisionTransitionError,
     RevisionNotFoundError,
@@ -276,3 +288,90 @@ def revoke_authorization_revision(
     db: Session = Depends(get_db),
 ) -> AuthorizationRevision:
     return apply_revision_transition(profile_id, revision_id, "revoked", db)
+
+
+def _asset_rule_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, AssetHostnameRuleNotFoundError):
+        return HTTPException(status_code=404, detail="Asset hostname rule not found.")
+    if isinstance(exc, AssetHostnameRuleImmutableError):
+        return HTTPException(
+            status_code=409,
+            detail="Asset hostname rules are immutable for this revision.",
+        )
+    return HTTPException(status_code=422, detail="Asset hostname rule is invalid.")
+
+
+@router.post(
+    "/{profile_id}/revisions/{revision_id}/asset-hostname-rules",
+    response_model=AssetHostnameRuleRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_revision_asset_hostname_rule(
+    profile_id: int,
+    revision_id: int,
+    payload: AssetHostnameRuleCreate,
+    db: Session = Depends(get_db),
+) -> AssetHostnameRule:
+    try:
+        return create_asset_hostname_rule(
+            db,
+            profile_id=profile_id,
+            revision_id=revision_id,
+            **payload.model_dump(),
+        )
+    except (
+        AssetHostnameRuleNotFoundError,
+        AssetHostnameRuleImmutableError,
+        AssetHostnameRuleValidationError,
+    ) as exc:
+        db.rollback()
+        raise _asset_rule_error(exc) from exc
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Asset hostname rule already exists.",
+        ) from exc
+
+
+@router.get(
+    "/{profile_id}/revisions/{revision_id}/asset-hostname-rules",
+    response_model=list[AssetHostnameRuleRead],
+)
+def list_revision_asset_hostname_rules(
+    profile_id: int,
+    revision_id: int,
+    db: Session = Depends(get_db),
+) -> list[AssetHostnameRule]:
+    revision = db.scalar(select(AuthorizationRevision).where(
+        AuthorizationRevision.id == revision_id,
+        AuthorizationRevision.authorization_profile_id == profile_id,
+    ))
+    if revision is None:
+        raise HTTPException(status_code=404, detail="AuthorizationRevision not found.")
+    return list(db.scalars(select(AssetHostnameRule).where(
+        AssetHostnameRule.authorization_revision_id == revision_id
+    ).order_by(AssetHostnameRule.id)).all())
+
+
+@router.delete(
+    "/{profile_id}/revisions/{revision_id}/asset-hostname-rules/{rule_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_revision_asset_hostname_rule(
+    profile_id: int,
+    revision_id: int,
+    rule_id: int,
+    db: Session = Depends(get_db),
+) -> Response:
+    try:
+        delete_asset_hostname_rule(
+            db,
+            profile_id=profile_id,
+            revision_id=revision_id,
+            rule_id=rule_id,
+        )
+    except (AssetHostnameRuleNotFoundError, AssetHostnameRuleImmutableError) as exc:
+        db.rollback()
+        raise _asset_rule_error(exc) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
