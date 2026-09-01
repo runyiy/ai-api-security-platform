@@ -61,10 +61,16 @@ def test_scanner_hash_input_is_exact_anonymous_gateway_bytes() -> None:
     assert result.source_url == source_url
     assert result.document_sha256 == hashlib.sha256(body).hexdigest()
     assert result.document_size_bytes == len(body)
+    assert result.content_encoding == "identity"
+    assert result.decoded_document_sha256 == result.document_sha256
+    assert result.decoded_document_size_bytes == result.document_size_bytes
     assert [(item.path, item.method) for item in result.endpoints] == [("/items", "POST")]
     assert gateway.requests[0]["method"] == "GET"
     assert gateway.requests[0]["url"] == source_url
-    assert gateway.requests[0]["headers"] == {"Accept": "application/json"}
+    assert gateway.requests[0]["headers"] == {
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip",
+    }
 
 
 def test_alternate_in_scope_localhost_source_uses_real_network_gateway() -> None:
@@ -164,6 +170,9 @@ def test_provenance_failure_rolls_back_endpoint_mutations(
             source_url=kwargs["source_url"],
             document_sha256=hashlib.sha256(body).hexdigest(),
             document_size_bytes=len(body),
+            content_encoding="identity",
+            decoded_document_sha256=hashlib.sha256(body).hexdigest(),
+            decoded_document_size_bytes=len(body),
             endpoints=[
             openapi_routes.ParsedEndpoint(
                 path="/new", method="GET", operation_id=None,
@@ -228,6 +237,6 @@ def test_provenance_is_computed_before_json_and_openapi_parsing(
         policy_decision_observer=lambda decision: None,
     )
 
-    assert events == ["sha256", "json", "openapi"]
+    assert events == ["sha256", "sha256", "json", "openapi"]
     assert result.document_sha256 == real_sha256(body).hexdigest()
     assert result.document_size_bytes == len(body)

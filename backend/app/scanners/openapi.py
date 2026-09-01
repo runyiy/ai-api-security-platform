@@ -1,5 +1,6 @@
 import hashlib
 import json
+import zlib
 from collections.abc import Callable
 
 from app.db.models.authorization_revision import AuthorizationRevision
@@ -29,6 +30,7 @@ SUPPORTED_METHODS = (
 )
 
 MAX_OPENAPI_RESPONSE_BYTES = 1_000_000
+MAX_OPENAPI_DECOMPRESSED_BYTES = 1_000_000
 MAX_OPENAPI_NESTING_DEPTH = 32
 MAX_OPENAPI_STRUCTURE_NODES = 20_000
 MAX_OPENAPI_PATHS = 2_000
@@ -90,6 +92,9 @@ class OpenAPIScanResult:
     source_url: str
     document_sha256: str
     document_size_bytes: int
+    content_encoding: str
+    decoded_document_sha256: str
+    decoded_document_size_bytes: int
     endpoints: list[ParsedEndpoint]
 
 def merge_parameters(
@@ -165,6 +170,57 @@ def validate_openapi_structure(document: Any) -> None:
             pending.extend((item, depth + 1) for item in value.values())
         elif isinstance(value, list):
             pending.extend((item, depth + 1) for item in value)
+
+
+def decode_openapi_document(
+    wire_body: bytes,
+    content_encoding: str | None,
+) -> tuple[str, bytes]:
+    normalized = (
+        "identity"
+        if content_encoding is None
+        else content_encoding.strip().lower()
+    )
+    if normalized not in {"identity", "gzip"}:
+        raise OpenAPIParseError("openapi_content_encoding_not_supported")
+    if normalized == "identity":
+        if len(wire_body) > MAX_OPENAPI_DECOMPRESSED_BYTES:
+            raise OpenAPIParseError("openapi_decompressed_body_too_large")
+        return normalized, wire_body
+
+    decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    decoded = bytearray()
+    pending = wire_body
+    try:
+        while pending:
+            chunk, pending = pending[:64 * 1024], pending[64 * 1024:]
+            while chunk:
+                output = decoder.decompress(
+                    chunk,
+                    MAX_OPENAPI_DECOMPRESSED_BYTES - len(decoded) + 1,
+                )
+                decoded.extend(output)
+                if len(decoded) > MAX_OPENAPI_DECOMPRESSED_BYTES:
+                    raise OpenAPIParseError(
+                        "openapi_decompressed_body_too_large"
+                    )
+                chunk = decoder.unconsumed_tail
+                if decoder.eof:
+                    if decoder.unused_data or chunk or pending:
+                        raise OpenAPIParseError("openapi_compressed_body_invalid")
+                    break
+
+        if not decoder.eof:
+            raise OpenAPIParseError("openapi_compressed_body_invalid")
+        decoded.extend(
+            decoder.flush(MAX_OPENAPI_DECOMPRESSED_BYTES - len(decoded) + 1)
+        )
+    except zlib.error as exc:
+        raise OpenAPIParseError("openapi_compressed_body_invalid") from exc
+
+    if len(decoded) > MAX_OPENAPI_DECOMPRESSED_BYTES:
+        raise OpenAPIParseError("openapi_decompressed_body_too_large")
+    return normalized, bytes(decoded)
 
 
 def parse_openapi_schema(schema: dict[str, Any]) -> list[ParsedEndpoint]:
@@ -344,7 +400,14 @@ class OpenAPIScanner:
                 ),
             )
 
-        document_sha256, document_size_bytes, schema = self._fetch_schema(
+        (
+            document_sha256,
+            document_size_bytes,
+            content_encoding,
+            decoded_document_sha256,
+            decoded_document_size_bytes,
+            schema,
+        ) = self._fetch_schema(
             target=target, url=source_url
         )
 
@@ -364,6 +427,9 @@ class OpenAPIScanner:
             document_sha256=document_sha256,
             document_size_bytes=document_size_bytes,
             endpoints=endpoints,
+            content_encoding=content_encoding,
+            decoded_document_sha256=decoded_document_sha256,
+            decoded_document_size_bytes=decoded_document_size_bytes,
         )
 
     @staticmethod
@@ -387,14 +453,17 @@ class OpenAPIScanner:
         *,
         target: Target,
         url: str,
-    ) -> tuple[str, int, dict[str, Any]]:
+    ) -> tuple[str, int, str, str, int, dict[str, Any]]:
         try:
             response = self.network_gateway.request(
                 target_id=target.id,
                 network_mode=target.network_mode,
                 method="GET",
                 url=url,
-                headers={"Accept": "application/json"},
+                headers={
+                    "Accept": "application/json",
+                    "Accept-Encoding": "gzip",
+                },
                 max_response_bytes=MAX_OPENAPI_RESPONSE_BYTES,
                 timeout_seconds=5.0,
             )
@@ -409,9 +478,14 @@ class OpenAPIScanner:
         # decoding or parsing can transform it.
         document_sha256 = hashlib.sha256(response.body).hexdigest()
         document_size_bytes = len(response.body)
+        content_encoding, decoded_body = decode_openapi_document(
+            response.body, response.content_encoding
+        )
+        decoded_document_sha256 = hashlib.sha256(decoded_body).hexdigest()
+        decoded_document_size_bytes = len(decoded_body)
 
         try:
-            data = json.loads(response.body)
+            data = json.loads(decoded_body)
         except (ValueError, UnicodeDecodeError) as exc:
             raise OpenAPIScanError(
                 "OpenAPI response is not valid JSON"
@@ -426,4 +500,11 @@ class OpenAPIScanner:
                 "OpenAPI root must be a JSON object"
             )
 
-        return document_sha256, document_size_bytes, data
+        return (
+            document_sha256,
+            document_size_bytes,
+            content_encoding,
+            decoded_document_sha256,
+            decoded_document_size_bytes,
+            data,
+        )

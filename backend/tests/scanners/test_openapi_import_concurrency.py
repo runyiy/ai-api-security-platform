@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+import gzip
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -274,6 +275,9 @@ def test_concurrent_import_is_endpoint_conflict_safe(
                 source_url=source_url,
                 document_sha256=hashlib.sha256(body).hexdigest(),
                 document_size_bytes=len(body),
+                content_encoding="identity",
+                decoded_document_sha256=hashlib.sha256(body).hexdigest(),
+                decoded_document_size_bytes=len(body),
                 endpoints=parsed_endpoints(),
             )
 
@@ -373,6 +377,9 @@ def test_sequential_import_preserves_create_unchanged_update_counts(
                 source_url=source_url,
                 document_sha256=hashlib.sha256(body).hexdigest(),
                 document_size_bytes=len(body),
+                content_encoding="identity",
+                decoded_document_sha256=hashlib.sha256(body).hexdigest(),
+                decoded_document_size_bytes=len(body),
                 endpoints=current_endpoints,
             )
 
@@ -422,6 +429,15 @@ def test_sequential_import_preserves_create_unchanged_update_counts(
         for record in records
     )
     assert all(record.document_size_bytes == len(document) for record in records)
+    assert all(record.content_encoding == "identity" for record in records)
+    assert all(
+        record.decoded_document_sha256 == record.document_sha256
+        for record in records
+    )
+    assert all(
+        record.decoded_document_size_bytes == record.document_size_bytes
+        for record in records
+    )
     assert all(record.discovered_endpoint_count == 2 for record in records)
     assert all(record.fetched_at.tzinfo is not None for record in records)
 
@@ -450,6 +466,9 @@ def test_real_provenance_failure_rolls_back_endpoint_insert(
                 source_url=source_url,
                 document_sha256=hashlib.sha256(body).hexdigest(),
                 document_size_bytes=len(body),
+                content_encoding="identity",
+                decoded_document_sha256=hashlib.sha256(body).hexdigest(),
+                decoded_document_size_bytes=len(body),
                 endpoints=parsed_endpoints(),
             )
 
@@ -624,6 +643,9 @@ def test_real_endpoint_persistence_failure_rolls_back_all_mutations(
         source_url="https://example.test/openapi.json",
         document_sha256=hashlib.sha256(body).hexdigest(),
         document_size_bytes=len(body),
+        content_encoding="identity",
+        decoded_document_sha256=hashlib.sha256(body).hexdigest(),
+        decoded_document_size_bytes=len(body),
         endpoints=[
             ParsedEndpoint("/projects", "GET", "changed", True, [], None, None),
             ParsedEndpoint("/new", "GET", "new", False, [], None, None),
@@ -816,6 +838,7 @@ def test_no_import_transaction_spans_json_or_structure_validation(
     body = b'{"paths":{"/safe":{"get":{}}}}'
     TestSession = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     real_loads = scanner_module.json.loads
+    real_decode = scanner_module.decode_openapi_document
     real_validate = scanner_module.validate_openapi_structure
     active_session: Session | None = None
 
@@ -824,12 +847,18 @@ def test_no_import_transaction_spans_json_or_structure_validation(
         assert active_session.in_transaction() is False
         return real_loads(value)
 
+    def checked_decode(value, content_encoding):
+        assert active_session is not None
+        assert active_session.in_transaction() is False
+        return real_decode(value, content_encoding)
+
     def checked_validate(value):
         assert active_session is not None
         assert active_session.in_transaction() is False
         return real_validate(value)
 
     monkeypatch.setattr(scanner_module.json, "loads", checked_loads)
+    monkeypatch.setattr(scanner_module, "decode_openapi_document", checked_decode)
     monkeypatch.setattr(scanner_module, "validate_openapi_structure", checked_validate)
     monkeypatch.setattr(openapi_routes, "scanner", OpenAPIScanner(
         ScopePolicyEngine(platform_allowed_hosts={"example.test"}),
@@ -919,4 +948,213 @@ def test_decoder_failures_are_sanitized_and_atomic_in_postgresql(
     assert [(item.path, item.operation_id) for item in endpoints] == [
         ("/existing", "original")
     ]
+    assert records == []
+
+
+def test_real_localhost_gzip_import_persists_dual_provenance_twice(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    decoded = b'{"paths":{"/gzip":{"post":{"operationId":"create_gzip"}}}}\n'
+    wire = gzip.compress(decoded, mtime=0)
+    observed: list[tuple[str, str | None, str | None, str | None]] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            observed.append((
+                self.path,
+                self.headers.get("Authorization"),
+                self.headers.get("Accept"),
+                self.headers.get("Accept-Encoding"),
+            ))
+            self.send_response(200)
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Content-Length", str(len(wire)))
+            self.end_headers()
+            self.wfile.write(wire)
+
+        def log_message(self, format: str, *args) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    source_url = f"http://127.0.0.1:{server.server_port}/docs/spec.json"
+    target_id, profile_id = create_import_target(
+        base_url=f"http://127.0.0.1:{server.server_port}",
+        hostname="127.0.0.1",
+        path_pattern="/docs/spec.json",
+    )
+    TestSession = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    monkeypatch.setattr(openapi_routes, "scanner", OpenAPIScanner(
+        ScopePolicyEngine(platform_allowed_hosts={"127.0.0.1"}),
+        InMemoryRateLimiter(requests_per_second=1000.0),
+        NetworkGateway(controller=NetworkExecutionController()),
+    ))
+    try:
+        with TestSession() as db:
+            first = openapi_routes.import_openapi(
+                OpenAPIImportRequest(target_id=target_id, source_url=source_url), db
+            )
+        with TestSession() as db:
+            second = openapi_routes.import_openapi(
+                OpenAPIImportRequest(target_id=target_id, source_url=source_url), db
+            )
+        with TestSession() as db:
+            endpoints = list(db.scalars(select(Endpoint).where(Endpoint.target_id == target_id)))
+            records = list(db.scalars(select(OpenAPIImportRecord).where(
+                OpenAPIImportRecord.target_id == target_id
+            ).order_by(OpenAPIImportRecord.id)))
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        delete_import_target(target_id, profile_id)
+
+    assert observed == [
+        ("/docs/spec.json", None, "application/json", "gzip"),
+        ("/docs/spec.json", None, "application/json", "gzip"),
+    ]
+    assert [(item.path, item.method) for item in endpoints] == [("/gzip", "POST")]
+    assert (first.created, second.unchanged) == (1, 1)
+    assert len(records) == 2
+    assert records[0].id != records[1].id
+    assert all(record.document_sha256 == hashlib.sha256(wire).hexdigest() for record in records)
+    assert all(record.document_size_bytes == len(wire) for record in records)
+    assert all(record.content_encoding == "gzip" for record in records)
+    assert all(
+        record.decoded_document_sha256 == hashlib.sha256(decoded).hexdigest()
+        for record in records
+    )
+    assert all(record.decoded_document_size_bytes == len(decoded) for record in records)
+    assert all(record.discovered_endpoint_count == 1 for record in records)
+    assert first.content_encoding == second.content_encoding == "gzip"
+    assert first.decoded_document_sha256 == hashlib.sha256(decoded).hexdigest()
+
+
+def test_explicit_identity_import_preserves_wire_semantics(
+    openapi_target_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = b'{"paths":{"/identity":{"get":{}}}}'
+    gateway = HandlerNetworkGateway(
+        lambda request: Mock(
+            status_code=200,
+            content=body,
+            headers=httpx.Headers({"Content-Encoding": "identity"}),
+        )
+    )
+    monkeypatch.setattr(openapi_routes, "scanner", OpenAPIScanner(
+        ScopePolicyEngine(platform_allowed_hosts={"example.test"}),
+        InMemoryRateLimiter(requests_per_second=1000.0),
+        gateway,
+    ))
+    TestSession = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    with TestSession() as db:
+        response = openapi_routes.import_openapi(
+            OpenAPIImportRequest(
+                target_id=openapi_target_id,
+                source_url="https://example.test/openapi.json",
+            ), db
+        )
+    with TestSession() as db:
+        record = db.scalar(select(OpenAPIImportRecord).where(
+            OpenAPIImportRecord.target_id == openapi_target_id
+        ))
+    assert record is not None
+    assert response.content_encoding == record.content_encoding == "identity"
+    assert record.document_sha256 == hashlib.sha256(body).hexdigest()
+    assert record.decoded_document_sha256 == record.document_sha256
+    assert record.decoded_document_size_bytes == record.document_size_bytes == len(body)
+
+
+def gzip_rejection_cases() -> list[tuple[str, bytes, list[tuple[str, str]]]]:
+    valid = gzip.compress(b'{"paths":{}}', mtime=0)
+    ref = gzip.compress(b'{"paths":{},"nested":{"$ref":"#/secret"}}', mtime=0)
+    deep: object = 0
+    for _ in range(31):
+        deep = [deep]
+    deep_body = gzip.compress(json.dumps({"paths": {}, "deep": deep}).encode(), mtime=0)
+    cases = [
+        (
+            "response_too_large: Network response exceeded the allowed size.",
+            b"x" * 1_000_001,
+            [("Content-Encoding", "gzip")],
+        ),
+        ("openapi_compressed_body_invalid", b"not-gzip", [("Content-Encoding", "gzip")]),
+        ("openapi_compressed_body_invalid", valid[:-1], [("Content-Encoding", "gzip")]),
+        ("openapi_compressed_body_invalid", valid + valid, [("Content-Encoding", "gzip")]),
+        ("openapi_compressed_body_invalid", valid + b"tail", [("Content-Encoding", "gzip")]),
+        (
+            "openapi_decompressed_body_too_large",
+            gzip.compress(b"x" * 1_000_001, mtime=0),
+            [("Content-Encoding", "gzip")],
+        ),
+        ("openapi_content_encoding_not_supported", valid, [("Content-Encoding", "br")]),
+        ("openapi_content_encoding_not_supported", valid, [("Content-Encoding", "deflate")]),
+        ("openapi_content_encoding_not_supported", valid, [("Content-Encoding", "zstd")]),
+        ("openapi_content_encoding_not_supported", valid, [("Content-Encoding", "gzip, br")]),
+        (
+            "openapi_content_encoding_not_supported",
+            valid,
+            [("Content-Encoding", "gzip"), ("Content-Encoding", "identity")],
+        ),
+        ("openapi_references_not_supported", ref, [("Content-Encoding", "gzip")]),
+        ("openapi_document_too_deep", deep_body, [("Content-Encoding", "gzip")]),
+    ]
+    existing_codes = {code for code, _, _ in cases}
+    for code, parser_body, _ in parser_rejection_cases():
+        if code not in existing_codes:
+            cases.append((
+                code,
+                gzip.compress(parser_body, mtime=0),
+                [("Content-Encoding", "gzip")],
+            ))
+    return cases
+
+
+@pytest.mark.parametrize("code,body,headers", gzip_rejection_cases())
+def test_gzip_and_encoding_rejections_are_atomic_in_postgresql(
+    openapi_target_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+    code: str,
+    body: bytes,
+    headers: list[tuple[str, str]],
+) -> None:
+    gateway = HandlerNetworkGateway(
+        lambda request: Mock(
+            status_code=200,
+            content=body,
+            headers=httpx.Headers(headers),
+        )
+    )
+    monkeypatch.setattr(openapi_routes, "scanner", OpenAPIScanner(
+        ScopePolicyEngine(platform_allowed_hosts={"example.test"}),
+        InMemoryRateLimiter(requests_per_second=1000.0),
+        gateway,
+    ))
+    TestSession = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    with TestSession() as db:
+        db.add(Endpoint(
+            target_id=openapi_target_id, path="/existing", method="GET",
+            operation_id="original", requires_auth=False, parameters=[],
+            request_body=None, security=None,
+        ))
+        db.commit()
+    with TestSession() as db:
+        with pytest.raises(HTTPException) as raised:
+            openapi_routes.import_openapi(
+                OpenAPIImportRequest(
+                    target_id=openapi_target_id,
+                    source_url="https://example.test/openapi.json",
+                ), db
+            )
+    assert raised.value.status_code == 502
+    assert raised.value.detail == code
+    assert gateway.calls == 1
+    with TestSession() as db:
+        endpoints = list(db.scalars(select(Endpoint).where(Endpoint.target_id == openapi_target_id)))
+        records = list(db.scalars(select(OpenAPIImportRecord).where(
+            OpenAPIImportRecord.target_id == openapi_target_id
+        )))
+    assert [(item.path, item.operation_id) for item in endpoints] == [("/existing", "original")]
     assert records == []

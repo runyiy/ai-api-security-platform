@@ -11,6 +11,8 @@ class OpenAPIImportResponse(BaseModel):
     source_url: str
     import_record_id: int
     document_sha256: str
+    content_encoding: str
+    decoded_document_sha256: str
 
     discovered: int
 

@@ -37,7 +37,10 @@ def test_import_returns_502_for_malformed_schema(
     monkeypatch.setattr(
         scanner,
         "_fetch_schema",
-        lambda **kwargs: (hashlib.sha256(b'{"paths":[]}').hexdigest(), 12, {"paths": []}),
+        lambda **kwargs: (
+            hashlib.sha256(b'{"paths":[]}').hexdigest(), 12, "identity",
+            hashlib.sha256(b'{"paths":[]}').hexdigest(), 12, {"paths": []},
+        ),
     )
     monkeypatch.setattr(
         openapi_routes,
@@ -150,6 +153,9 @@ def test_import_ends_read_transaction_before_scan(
                 source_url=source_url,
                 document_sha256=hashlib.sha256(body).hexdigest(),
                 document_size_bytes=len(body),
+                content_encoding="identity",
+                decoded_document_sha256=hashlib.sha256(body).hexdigest(),
+                decoded_document_size_bytes=len(body),
                 endpoints=[
                     ParsedEndpoint(
                         path="/projects",

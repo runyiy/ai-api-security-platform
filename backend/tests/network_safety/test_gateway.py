@@ -1,4 +1,5 @@
 import ipaddress
+import gzip
 import ssl
 
 import httpcore
@@ -254,6 +255,30 @@ def test_redirect_is_returned_without_second_connection() -> None:
     assert result.status_code == 302
     assert resolver.calls == ["lab.test"]
     assert len(connector.calls) == 1
+
+
+def test_gateway_returns_exact_raw_gzip_and_content_encoding() -> None:
+    decoded = b'{"paths":{"/raw":{"get":{}}}}'
+    compressed = gzip.compress(decoded, mtime=0)
+    response = (
+        b"HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: "
+        + str(len(compressed)).encode()
+        + b"\r\n\r\n"
+        + compressed
+    )
+    result, _, _, _ = request(response=response)
+    assert result.body == compressed
+    assert result.body != decoded
+    assert result.content_encoding == "gzip"
+
+
+def test_gateway_preserves_repeated_content_encoding_as_ambiguous() -> None:
+    response = (
+        b"HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\n"
+        b"Content-Encoding: identity\r\nContent-Length: 0\r\n\r\n"
+    )
+    result, _, _, _ = request(response=response)
+    assert result.content_encoding == "gzip,identity"
 
 
 def test_environment_proxy_is_ignored(monkeypatch) -> None:

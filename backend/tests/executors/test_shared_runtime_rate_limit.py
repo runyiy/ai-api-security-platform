@@ -102,7 +102,10 @@ def test_cross_path_reservations_share_target_schedule(
     monkeypatch.setattr(
         scanner,
         "_fetch_schema",
-        lambda **kwargs: (hashlib.sha256(b'{"paths":{}}').hexdigest(), 12, {"paths": {}}),
+        lambda **kwargs: (
+            hashlib.sha256(b'{"paths":{}}').hexdigest(), 12, "identity",
+            hashlib.sha256(b'{"paths":{}}').hexdigest(), 12, {"paths": {}},
+        ),
     )
     target, revision, scope = build_policy_objects(1, 101)
 
