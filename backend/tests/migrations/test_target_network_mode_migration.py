@@ -9,7 +9,7 @@ from app.db.session import engine
 
 
 HEAD = "f7b9d1e3a5c8"
-LATEST = "d8f0b2c4e6a9"
+LATEST = "e9a1c3f5b7d9"
 PARENT = "e6a8c0d2f4b7"
 
 

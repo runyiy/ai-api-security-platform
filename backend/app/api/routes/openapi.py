@@ -18,6 +18,7 @@ from app.db.session import get_db
 from app.services.execution_authorization import (
     build_execution_authorization_refresh,
 )
+from app.services.openapi_credentials import build_openapi_credential_refresh
 from app.services.safety_audit import build_policy_decision_observer
 from app.executors.runtime import platform_rate_limiter
 from app.network_safety.runtime import network_gateway
@@ -134,6 +135,17 @@ def import_openapi(
         target_id=target.id,
     )
 
+    scan_kwargs = {}
+    if payload.credential_binding_id is not None:
+        scan_kwargs = {
+            "credential_binding_id": payload.credential_binding_id,
+            "refresh_credential": build_openapi_credential_refresh(
+                db.get_bind(),
+                target_id=target.id,
+                credential_binding_id=payload.credential_binding_id,
+            ),
+        }
+
     try:
         scan_result = scanner.scan(
             target=target,
@@ -142,6 +154,7 @@ def import_openapi(
             source_url=payload.source_url,
             refresh_authorization=refresh_authorization,
             policy_decision_observer=policy_decision_observer,
+            **scan_kwargs,
         )
 
     except OpenAPIPolicyDenied as exc:
@@ -225,6 +238,7 @@ def import_openapi(
             decoded_document_sha256=scan_result.decoded_document_sha256,
             decoded_document_size_bytes=scan_result.decoded_document_size_bytes,
             discovered_endpoint_count=len(parsed_endpoints),
+            credential_binding_id=scan_result.credential_binding_id,
         )
         db.add(record)
         db.flush()

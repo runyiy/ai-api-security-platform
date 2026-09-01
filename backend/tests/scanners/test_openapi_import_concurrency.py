@@ -1062,6 +1062,7 @@ def test_explicit_identity_import_preserves_wire_semantics(
         ))
     assert record is not None
     assert response.content_encoding == record.content_encoding == "identity"
+    assert record.credential_binding_id is None
     assert record.document_sha256 == hashlib.sha256(body).hexdigest()
     assert record.decoded_document_sha256 == record.document_sha256
     assert record.decoded_document_size_bytes == record.document_size_bytes == len(body)
