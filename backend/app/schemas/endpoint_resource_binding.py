@@ -3,9 +3,20 @@ from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic_core import PydanticCustomError
 
 
 PARAMETER_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]{0,127}\Z")
+SENSITIVE_MATERIAL = re.compile(
+    r"(?:"
+    r"authorization\s*[:=]\s*(?:bearer|basic)\s+[^/\s]+"
+    r"|(?:set-cookie|cookie)\s*[:=]\s*[^/\s]+"
+    r"|(?:^|/)(?:set-cookie|cookie)/[^/]*=[^/\s]+"
+    r"|(?:x-api-key|api_key|access_token|refresh_token|password|credential|secret)"
+    r"\s*[:=]\s*[^/\s]+"
+    r")",
+    re.IGNORECASE,
+)
 
 
 def validate_json_pointer(value: str) -> None:
@@ -16,6 +27,8 @@ def validate_json_pointer(value: str) -> None:
             raise ValueError("JSON Pointer tokens must be non-empty")
         if any(character in token for character in "$[]()*?"):
             raise ValueError("body selector cannot contain expression syntax")
+        if re.search(r"[:=]\s*\S", token):
+            raise ValueError("body selector cannot contain resource values")
         index = 0
         while index < len(token):
             if token[index] == "~":
@@ -24,6 +37,19 @@ def validate_json_pointer(value: str) -> None:
                 index += 2
             else:
                 index += 1
+
+
+def validate_resource_binding_selector(location: str, value: str) -> None:
+    if SENSITIVE_MATERIAL.search(value):
+        raise PydanticCustomError(
+            "resource_binding_selector_sensitive_material",
+            "Resource binding selector contains prohibited sensitive material.",
+        )
+    if location in {"path", "query"}:
+        if PARAMETER_NAME.fullmatch(value) is None:
+            raise ValueError("path/query selector is not an exact parameter name")
+    else:
+        validate_json_pointer(value)
 
 
 class EndpointResourceBindingCreate(BaseModel):
@@ -36,11 +62,22 @@ class EndpointResourceBindingCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_selector(self):
-        if self.location in {"path", "query"}:
-            if PARAMETER_NAME.fullmatch(self.selector) is None:
-                raise ValueError("path/query selector is not an exact parameter name")
-        else:
-            validate_json_pointer(self.selector)
+        validate_resource_binding_selector(self.location, self.selector)
+        return self
+
+
+class EndpointResourceBindingReviewUpdate(BaseModel):
+    confidence: int | None = Field(default=None, ge=0, le=100, strict=True)
+    review_state: Literal["candidate", "confirmed", "rejected"] | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def require_non_null_update(self):
+        if not self.model_fields_set:
+            raise ValueError("at least one review field is required")
+        if any(getattr(self, field) is None for field in self.model_fields_set):
+            raise ValueError("review fields cannot be null")
         return self
 
 

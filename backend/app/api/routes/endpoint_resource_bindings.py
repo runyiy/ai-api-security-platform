@@ -11,6 +11,8 @@ from app.db.session import get_db
 from app.schemas.endpoint_resource_binding import (
     EndpointResourceBindingCreate,
     EndpointResourceBindingRead,
+    EndpointResourceBindingReviewUpdate,
+    validate_resource_binding_selector,
 )
 
 
@@ -59,6 +61,7 @@ def create_endpoint_resource_binding(
 ) -> EndpointResourceBinding:
     endpoint = get_endpoint_or_404(db, endpoint_id)
     validate_declared_parameter(endpoint, payload)
+    validate_resource_binding_selector(payload.location, payload.selector)
     binding = EndpointResourceBinding(
         endpoint_id=endpoint.id,
         location=payload.location,
@@ -80,6 +83,39 @@ def create_endpoint_resource_binding(
                 detail="resource_binding_already_exists",
             ) from exc
         raise
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(binding)
+    return binding
+
+
+@router.patch(
+    "/endpoints/{endpoint_id}/resource-bindings/{binding_id}/review",
+    response_model=EndpointResourceBindingRead,
+)
+def update_endpoint_resource_binding_review(
+    endpoint_id: int,
+    binding_id: int,
+    payload: EndpointResourceBindingReviewUpdate,
+    db: Session = Depends(get_db),
+) -> EndpointResourceBinding:
+    binding = db.scalar(
+        select(EndpointResourceBinding)
+        .where(
+            EndpointResourceBinding.id == binding_id,
+            EndpointResourceBinding.endpoint_id == endpoint_id,
+        )
+        .with_for_update()
+    )
+    if binding is None:
+        raise HTTPException(status_code=404, detail="Resource binding not found.")
+    if "confidence" in payload.model_fields_set:
+        binding.confidence = payload.confidence
+    if "review_state" in payload.model_fields_set:
+        binding.review_state = payload.review_state
+    try:
+        db.commit()
     except Exception:
         db.rollback()
         raise

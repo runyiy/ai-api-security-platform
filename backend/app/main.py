@@ -66,6 +66,24 @@ async def sanitized_enrollment_note_validation_error(
     request: Request,
     exc: RequestValidationError,
 ):
+    selector_errors = [
+        error for error in exc.errors()
+        if error.get("type") == "resource_binding_selector_sensitive_material"
+    ]
+    if selector_errors:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": [{
+                    "type": "resource_binding_selector_sensitive_material",
+                    "loc": ["body", "selector"],
+                    "msg": (
+                        "Resource binding selector contains prohibited "
+                        "sensitive material."
+                    ),
+                }],
+            },
+        )
     note_errors = [
         error for error in exc.errors()
         if error.get("type") == "asset_enrollment_note_auth_material"

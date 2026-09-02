@@ -81,6 +81,13 @@ def post(endpoint_id: int, **overrides):
     )
 
 
+def patch_review(endpoint_id: int, binding_id: int, body: dict):
+    return client.patch(
+        f"/api/endpoints/{endpoint_id}/resource-bindings/{binding_id}/review",
+        json=body,
+    )
+
+
 def test_path_query_body_and_multiple_bindings_are_metadata_only(monkeypatch) -> None:
     target_ids = []
     tracked = (
@@ -158,6 +165,8 @@ def test_path_query_body_and_multiple_bindings_are_metadata_only(monkeypatch) ->
     ("body", "/order/~2id"),
     ("body", "/order/id~"),
     ("body", "/order//id"),
+    ("body", "/order/id=actual-resource-value"),
+    ("body", "/order/id:actual-resource-value"),
 ))
 def test_malformed_selectors_fail_without_persistence(location, selector) -> None:
     target_ids = []
@@ -296,6 +305,205 @@ def test_persistence_failure_rolls_back_completely(monkeypatch) -> None:
                     EndpointResourceBinding.endpoint_id == endpoint_id
                 )
             ) == 0
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        if db is not None:
+            db.close()
+        cleanup(target_ids)
+
+
+@pytest.mark.parametrize("selector", (
+    "/auth/Authorization: Bearer actual-secret-token",
+    "/headers/Cookie: session=actual-cookie-secret",
+    "/headers/Set-Cookie/session=actual-cookie-secret",
+    "/auth/x-api-key=actual-api-secret",
+    "/auth/api_key: actual-api-secret",
+    "/auth/access_token=actual-access-secret",
+    "/auth/refresh_token: actual-refresh-secret",
+    "/auth/password=actual-password-secret",
+    "/auth/credential: actual-credential-secret",
+    "/auth/secret=actual-secret-value",
+))
+def test_sensitive_selector_material_is_redacted_and_never_persisted(selector) -> None:
+    target_ids = []
+    try:
+        target_id, endpoint_id = make_endpoint()
+        target_ids = [target_id]
+        response = post(endpoint_id, location="body", selector=selector)
+        assert response.status_code == 422
+        serialized = response.text.lower()
+        assert "actual-" not in serialized
+        assert response.json()["detail"][0]["type"] == (
+            "resource_binding_selector_sensitive_material"
+        )
+        with SessionLocal() as db:
+            assert db.scalar(
+                select(func.count()).select_from(EndpointResourceBinding).where(
+                    EndpointResourceBinding.endpoint_id == endpoint_id
+                )
+            ) == 0
+    finally:
+        cleanup(target_ids)
+
+
+def test_review_transitions_are_narrow_independent_and_side_effect_free(
+    monkeypatch,
+) -> None:
+    target_ids = []
+    tracked = (StoredTestCase, ExecutionPlan, PlanAction, StoredTestRun)
+    try:
+        target_id, endpoint_id = make_endpoint()
+        target_ids = [target_id]
+        confirmed = post(
+            endpoint_id, location="body", selector="/account/id",
+            confidence=25, review_state="candidate",
+        ).json()
+        rejected = post(
+            endpoint_id, location="body", selector="/order/customer/id",
+            confidence=75, review_state="candidate",
+        ).json()
+        with SessionLocal() as db:
+            before = {
+                model: db.scalar(select(func.count()).select_from(model))
+                for model in tracked
+            }
+
+        def prohibited(*args, **kwargs):
+            raise AssertionError("network or execution boundary invoked")
+
+        monkeypatch.setattr("socket.getaddrinfo", prohibited)
+        monkeypatch.setattr("socket.create_connection", prohibited)
+        monkeypatch.setattr(
+            "app.network_safety.gateway.NetworkGateway.request", prohibited
+        )
+        monkeypatch.setattr("httpcore.ConnectionPool.stream", prohibited)
+
+        response = patch_review(
+            endpoint_id, confirmed["id"], {"review_state": "confirmed"}
+        )
+        assert response.status_code == 200
+        assert response.json()["review_state"] == "confirmed"
+        assert response.json()["confidence"] == 25
+        response = patch_review(
+            endpoint_id, rejected["id"], {"review_state": "rejected"}
+        )
+        assert response.status_code == 200
+        assert response.json()["review_state"] == "rejected"
+        assert response.json()["confidence"] == 75
+
+        reset_candidate = patch_review(
+            endpoint_id, confirmed["id"], {"review_state": "candidate"}
+        )
+        assert reset_candidate.json()["review_state"] == "candidate"
+        high_candidate = patch_review(
+            endpoint_id, confirmed["id"], {"confidence": 100}
+        )
+        assert high_candidate.json()["confidence"] == 100
+        assert high_candidate.json()["review_state"] == "candidate"
+        low_confirmed = patch_review(
+            endpoint_id, confirmed["id"], {"confidence": 10}
+        )
+        assert low_confirmed.json()["confidence"] == 10
+        assert low_confirmed.json()["review_state"] == "candidate"
+
+        immutable = {
+            field: low_confirmed.json()[field]
+            for field in (
+                "endpoint_id", "location", "selector", "provenance"
+            )
+        }
+        assert immutable == {
+            "endpoint_id": endpoint_id,
+            "location": "body",
+            "selector": "/account/id",
+            "provenance": "operator_supplied",
+        }
+        with SessionLocal() as db:
+            after = {
+                model: db.scalar(select(func.count()).select_from(model))
+                for model in tracked
+            }
+        assert after == before
+    finally:
+        cleanup(target_ids)
+
+
+def test_review_update_ownership_and_input_boundary() -> None:
+    target_ids = []
+    try:
+        first_target, first_endpoint = make_endpoint()
+        second_target, second_endpoint = make_endpoint(path="/other/{order_id}")
+        target_ids = [first_target, second_target]
+        binding = post(
+            first_endpoint, location="body", selector="/account/id"
+        ).json()
+        assert patch_review(
+            second_endpoint, binding["id"], {"review_state": "confirmed"}
+        ).status_code == 404
+        for payload in ({}, {"confidence": None}, {"review_state": None}):
+            assert patch_review(
+                first_endpoint, binding["id"], payload
+            ).status_code == 422
+        for confidence in (-1, 101, 1.5, True):
+            assert patch_review(
+                first_endpoint, binding["id"], {"confidence": confidence}
+            ).status_code == 422
+        for field in (
+            "selector", "location", "provenance", "endpoint_id", "target_id",
+            "scope_id", "test_case_id", "execution_plan_id", "plan_action_id",
+            "test_run_id",
+        ):
+            assert patch_review(
+                first_endpoint, binding["id"], {field: "forbidden"}
+            ).status_code == 422
+    finally:
+        cleanup(target_ids)
+
+
+def test_failed_review_persistence_rolls_back_state_and_confidence(
+    monkeypatch,
+) -> None:
+    target_ids = []
+    db = None
+    try:
+        target_id, endpoint_id = make_endpoint()
+        target_ids = [target_id]
+        binding = post(
+            endpoint_id, location="body", selector="/account/id",
+            confidence=40, review_state="candidate",
+        ).json()
+        db = SessionLocal()
+        rolled_back = False
+        real_rollback = db.rollback
+
+        def fail_commit():
+            raise RuntimeError("synthetic review persistence failure")
+
+        def track_rollback():
+            nonlocal rolled_back
+            rolled_back = True
+            real_rollback()
+
+        def override_db():
+            yield db
+
+        monkeypatch.setattr(db, "commit", fail_commit)
+        monkeypatch.setattr(db, "rollback", track_rollback)
+        app.dependency_overrides[get_db] = override_db
+        with pytest.raises(
+            RuntimeError, match="synthetic review persistence failure"
+        ):
+            patch_review(
+                endpoint_id, binding["id"],
+                {"confidence": 90, "review_state": "confirmed"},
+            )
+        assert rolled_back is True
+        with SessionLocal() as verification_db:
+            unchanged = verification_db.get(
+                EndpointResourceBinding, binding["id"]
+            )
+            assert unchanged.confidence == 40
+            assert unchanged.review_state == "candidate"
     finally:
         app.dependency_overrides.pop(get_db, None)
         if db is not None:
