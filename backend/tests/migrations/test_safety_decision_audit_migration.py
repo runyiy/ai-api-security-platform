@@ -7,7 +7,7 @@ from app.db.session import engine
 
 
 HEAD = "e6a8c0d2f4b7"
-LATEST = "f0b2d4e6a8c1"
+LATEST = "a2c4e6f8b0d3"
 PARENT = "d5f7a9c1e3b5"
 
 
@@ -32,6 +32,7 @@ def test_m5_03_migration_round_trip_preserves_preexisting_schema() -> None:
             "network_disabled_targets",
                 "openapi_import_records",
                 "asset_hostname_rules",
+                "asset_candidate_evaluations",
             }
         preexisting = tables_before - {"safety_decision_records", *later_tables}
         assert "safety_decision_records" in tables_before

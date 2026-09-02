@@ -2,6 +2,7 @@ from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
+    Query,
     Response,
     status,
 )
@@ -13,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models.authorization_profile import AuthorizationProfile
 from app.db.models.authorization_revision import AuthorizationRevision
+from app.db.models.asset_candidate_evaluation import AssetCandidateEvaluation
 from app.db.models.asset_hostname_rule import AssetHostnameRule
 from app.db.session import get_db
 from app.schemas.authorization_profile import (
@@ -24,6 +26,16 @@ from app.schemas.authorization_revision import AuthorizationRevisionRead
 from app.schemas.asset_hostname_rule import (
     AssetHostnameRuleCreate,
     AssetHostnameRuleRead,
+)
+from app.schemas.asset_candidate_evaluation import (
+    AssetCandidateEvaluationCreate,
+    AssetCandidateEvaluationRead,
+)
+from app.services.asset_candidate_evaluation import (
+    AssetCandidateEvaluationInactiveError,
+    AssetCandidateEvaluationInvalidError,
+    AssetCandidateEvaluationNotFoundError,
+    create_asset_candidate_evaluation,
 )
 from app.services.asset_hostname_rule import (
     AssetHostnameRuleImmutableError,
@@ -44,6 +56,8 @@ router = APIRouter(
     prefix="/authorization-profiles",
     tags=["authorization-profiles"],
 )
+
+MAX_ASSET_CANDIDATE_EVALUATION_PAGE_SIZE = 100
 
 
 WRITABLE_PROFILE_FIELDS = tuple(
@@ -375,3 +389,104 @@ def delete_revision_asset_hostname_rule(
         db.rollback()
         raise _asset_rule_error(exc) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _evaluation_revision_or_404(
+    db: Session, profile_id: int, revision_id: int
+) -> AuthorizationRevision:
+    revision = db.scalar(select(AuthorizationRevision).where(
+        AuthorizationRevision.id == revision_id,
+        AuthorizationRevision.authorization_profile_id == profile_id,
+    ))
+    if revision is None:
+        raise HTTPException(status_code=404, detail="AuthorizationRevision not found.")
+    return revision
+
+
+@router.post(
+    "/{profile_id}/revisions/{revision_id}/asset-candidate-evaluations",
+    response_model=AssetCandidateEvaluationRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_revision_asset_candidate_evaluation(
+    profile_id: int,
+    revision_id: int,
+    payload: AssetCandidateEvaluationCreate,
+    db: Session = Depends(get_db),
+) -> AssetCandidateEvaluation:
+    try:
+        return create_asset_candidate_evaluation(
+            db,
+            profile_id=profile_id,
+            revision_id=revision_id,
+            hostname=payload.hostname,
+        )
+    except AssetCandidateEvaluationNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=404, detail="AuthorizationRevision not found."
+        ) from exc
+    except AssetCandidateEvaluationInactiveError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Asset candidates require an active authorization revision.",
+        ) from exc
+    except AssetCandidateEvaluationInvalidError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=422, detail="Asset candidate hostname is invalid."
+        ) from exc
+    except IntegrityError:
+        db.rollback()
+        raise
+
+
+@router.get(
+    "/{profile_id}/revisions/{revision_id}/asset-candidate-evaluations",
+    response_model=list[AssetCandidateEvaluationRead],
+)
+def list_revision_asset_candidate_evaluations(
+    profile_id: int,
+    revision_id: int,
+    after_id: int = Query(default=0, ge=0),
+    limit: int = Query(
+        default=50,
+        ge=1,
+        le=MAX_ASSET_CANDIDATE_EVALUATION_PAGE_SIZE,
+    ),
+    db: Session = Depends(get_db),
+) -> list[AssetCandidateEvaluation]:
+    _evaluation_revision_or_404(db, profile_id, revision_id)
+    return list(db.scalars(
+        select(AssetCandidateEvaluation)
+        .where(
+            AssetCandidateEvaluation.authorization_revision_id == revision_id,
+            AssetCandidateEvaluation.id > after_id,
+        )
+        .order_by(AssetCandidateEvaluation.id)
+        .limit(limit)
+    ).all())
+
+
+@router.get(
+    "/{profile_id}/revisions/{revision_id}/asset-candidate-evaluations/"
+    "{evaluation_id}",
+    response_model=AssetCandidateEvaluationRead,
+)
+def get_revision_asset_candidate_evaluation(
+    profile_id: int,
+    revision_id: int,
+    evaluation_id: int,
+    db: Session = Depends(get_db),
+) -> AssetCandidateEvaluation:
+    _evaluation_revision_or_404(db, profile_id, revision_id)
+    evaluation = db.scalar(select(AssetCandidateEvaluation).where(
+        AssetCandidateEvaluation.id == evaluation_id,
+        AssetCandidateEvaluation.authorization_revision_id == revision_id,
+    ))
+    if evaluation is None:
+        raise HTTPException(
+            status_code=404, detail="Asset candidate evaluation not found."
+        )
+    return evaluation
