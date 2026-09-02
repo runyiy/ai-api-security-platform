@@ -18,6 +18,7 @@ from app.db.models import (
     TestRun as StoredTestRun,
 )
 from app.db.session import SessionLocal
+from app.core.config import settings
 from app.main import app
 
 
@@ -230,10 +231,50 @@ def test_active_only_historical_reads_and_revision_isolation() -> None:
         cleanup(profile_ids)
 
 
+def test_evaluation_list_is_deterministically_paginated_and_strictly_capped() -> None:
+    profile_ids: list[int] = []
+    try:
+        profile_id, revision_id = create_revision(activate=True)
+        profile_ids = [profile_id]
+        with SessionLocal() as db:
+            events = [
+                AssetCandidateEvaluation(
+                    authorization_revision_id=revision_id,
+                    normalized_hostname=f"host-{number}.example.test",
+                    decision_code="asset_candidate_not_included",
+                    source_type="operator_supplied",
+                )
+                for number in range(105)
+            ]
+            db.add_all(events)
+            db.commit()
+            event_ids = [event.id for event in events]
+        url = (
+            f"/api/authorization-profiles/{profile_id}/revisions/{revision_id}/"
+            "asset-candidate-evaluations"
+        )
+
+        default_page = client.get(url)
+        assert default_page.status_code == 200
+        assert [item["id"] for item in default_page.json()] == event_ids[:50]
+        maximum_page = client.get(url, params={"limit": 100})
+        assert [item["id"] for item in maximum_page.json()] == event_ids[:100]
+        second_page = client.get(url, params={
+            "after_id": maximum_page.json()[-1]["id"], "limit": 100,
+        })
+        assert [item["id"] for item in second_page.json()] == event_ids[100:]
+        assert client.get(url, params={"limit": 101}).status_code == 422
+        assert client.get(url, params={"limit": 0}).status_code == 422
+        assert client.get(url, params={"after_id": -1}).status_code == 422
+    finally:
+        cleanup(profile_ids)
+
+
 def test_api_evaluation_has_zero_authority_execution_or_discovery_side_effects(
     monkeypatch,
 ) -> None:
     profile_ids: list[int] = []
+    target_id: int | None = None
     tracked = (
         Target, Scope, Endpoint, OpenAPIImportRecord, ExecutionPlan, PlanAction,
         StoredTestCase, StoredTestRun,
@@ -242,13 +283,35 @@ def test_api_evaluation_has_zero_authority_execution_or_discovery_side_effects(
         profile_id, revision_id = create_revision(activate=True)
         profile_ids = [profile_id]
         with SessionLocal() as db:
+            target = Target(
+                name=f"retained-external-target-{uuid4()}",
+                base_url="https://retained.example.test",
+                environment="test",
+                network_mode="external_public_authorized",
+            )
+            db.add(target)
+            db.commit()
+            target_id = target.id
             before = {
                 model: db.scalar(select(func.count()).select_from(model))
                 for model in tracked
             }
+            before_network_mode = db.get(Target, target_id).network_mode
+        before_allowed_hosts = settings.allowed_target_hosts
+        before_allowed_host_set = settings.allowed_target_host_set
+
         def prohibited(*args, **kwargs):
             raise AssertionError("candidate evaluation attempted network or DNS")
+
         monkeypatch.setattr("socket.getaddrinfo", prohibited)
+        monkeypatch.setattr("socket.create_connection", prohibited)
+        monkeypatch.setattr(
+            "app.network_safety.gateway.NetworkGateway.request", prohibited
+        )
+        monkeypatch.setattr(
+            "app.network_safety.gateway.DirectTCPConnector.connect", prohibited
+        )
+        monkeypatch.setattr("httpcore.ConnectionPool.stream", prohibited)
         url = (
             f"/api/authorization-profiles/{profile_id}/revisions/{revision_id}/"
             "asset-candidate-evaluations"
@@ -260,6 +323,14 @@ def test_api_evaluation_has_zero_authority_execution_or_discovery_side_effects(
                 model: db.scalar(select(func.count()).select_from(model))
                 for model in tracked
             }
+            after_network_mode = db.get(Target, target_id).network_mode
         assert after == before
+        assert before_network_mode == after_network_mode == "external_public_authorized"
+        assert settings.allowed_target_hosts == before_allowed_hosts
+        assert settings.allowed_target_host_set == before_allowed_host_set
     finally:
+        if target_id is not None:
+            with SessionLocal() as db:
+                db.execute(delete(Target).where(Target.id == target_id))
+                db.commit()
         cleanup(profile_ids)

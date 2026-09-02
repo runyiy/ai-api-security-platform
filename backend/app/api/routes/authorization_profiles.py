@@ -2,6 +2,7 @@ from fastapi import (
     APIRouter,
     Depends,
     HTTPException,
+    Query,
     Response,
     status,
 )
@@ -55,6 +56,8 @@ router = APIRouter(
     prefix="/authorization-profiles",
     tags=["authorization-profiles"],
 )
+
+MAX_ASSET_CANDIDATE_EVALUATION_PAGE_SIZE = 100
 
 
 WRITABLE_PROFILE_FIELDS = tuple(
@@ -446,13 +449,23 @@ def create_revision_asset_candidate_evaluation(
 def list_revision_asset_candidate_evaluations(
     profile_id: int,
     revision_id: int,
+    after_id: int = Query(default=0, ge=0),
+    limit: int = Query(
+        default=50,
+        ge=1,
+        le=MAX_ASSET_CANDIDATE_EVALUATION_PAGE_SIZE,
+    ),
     db: Session = Depends(get_db),
 ) -> list[AssetCandidateEvaluation]:
     _evaluation_revision_or_404(db, profile_id, revision_id)
     return list(db.scalars(
         select(AssetCandidateEvaluation)
-        .where(AssetCandidateEvaluation.authorization_revision_id == revision_id)
+        .where(
+            AssetCandidateEvaluation.authorization_revision_id == revision_id,
+            AssetCandidateEvaluation.id > after_id,
+        )
         .order_by(AssetCandidateEvaluation.id)
+        .limit(limit)
     ).all())
 
 
