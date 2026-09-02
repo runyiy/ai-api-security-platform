@@ -1,5 +1,6 @@
 from fastapi import (
     APIRouter,
+    Body,
     Depends,
     HTTPException,
     Query,
@@ -15,6 +16,11 @@ from sqlalchemy.orm import Session
 from app.db.models.authorization_profile import AuthorizationProfile
 from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.asset_candidate_evaluation import AssetCandidateEvaluation
+from app.db.models.asset_candidate_dns_validation import (
+    AssetCandidateDNSAddress,
+    AssetCandidateDNSCNAMEHop,
+    AssetCandidateDNSValidation,
+)
 from app.db.models.asset_hostname_rule import AssetHostnameRule
 from app.db.session import get_db
 from app.schemas.authorization_profile import (
@@ -30,6 +36,24 @@ from app.schemas.asset_hostname_rule import (
 from app.schemas.asset_candidate_evaluation import (
     AssetCandidateEvaluationCreate,
     AssetCandidateEvaluationRead,
+)
+from app.schemas.asset_candidate_dns_validation import (
+    AssetCandidateDNSAddressRead,
+    AssetCandidateDNSCNAMEHopRead,
+    AssetCandidateDNSValidationCreate,
+    AssetCandidateDNSValidationRead,
+    AssetCandidateDNSValidationSummary,
+)
+from app.services.asset_candidate_dns import (
+    AssetCandidateDNSResolver,
+    DnspythonAssetCandidateDNSResolver,
+)
+from app.services.asset_candidate_dns_validation import (
+    AssetCandidateDNSValidationInactiveError,
+    AssetCandidateDNSValidationIneligibleError,
+    AssetCandidateDNSValidationNotFoundError,
+    PersistedAssetCandidateDNSValidation,
+    create_asset_candidate_dns_validation,
 )
 from app.services.asset_candidate_evaluation import (
     AssetCandidateEvaluationInactiveError,
@@ -58,6 +82,11 @@ router = APIRouter(
 )
 
 MAX_ASSET_CANDIDATE_EVALUATION_PAGE_SIZE = 100
+MAX_ASSET_CANDIDATE_DNS_VALIDATION_PAGE_SIZE = 100
+
+
+def get_asset_candidate_dns_resolver() -> AssetCandidateDNSResolver:
+    return DnspythonAssetCandidateDNSResolver()
 
 
 WRITABLE_PROFILE_FIELDS = tuple(
@@ -490,3 +519,151 @@ def get_revision_asset_candidate_evaluation(
             status_code=404, detail="Asset candidate evaluation not found."
         )
     return evaluation
+
+
+def _dns_evaluation_or_404(
+    db: Session, profile_id: int, revision_id: int, evaluation_id: int
+) -> AssetCandidateEvaluation:
+    revision = db.scalar(select(AuthorizationRevision.id).where(
+        AuthorizationRevision.id == revision_id,
+        AuthorizationRevision.authorization_profile_id == profile_id,
+    ))
+    evaluation = db.scalar(select(AssetCandidateEvaluation).where(
+        AssetCandidateEvaluation.id == evaluation_id,
+        AssetCandidateEvaluation.authorization_revision_id == revision_id,
+    ))
+    if revision is None or evaluation is None:
+        raise HTTPException(
+            status_code=404, detail="Asset candidate evaluation not found."
+        )
+    return evaluation
+
+
+def _dns_validation_response(
+    persisted: PersistedAssetCandidateDNSValidation,
+) -> AssetCandidateDNSValidationRead:
+    validation = persisted.validation
+    return AssetCandidateDNSValidationRead(
+        id=validation.id,
+        asset_candidate_evaluation_id=validation.asset_candidate_evaluation_id,
+        authorization_revision_id=validation.authorization_revision_id,
+        decision_code=validation.decision_code,
+        normalized_hostname=validation.normalized_hostname,
+        terminal_hostname=validation.terminal_hostname,
+        created_at=validation.created_at,
+        cname_chain=[
+            AssetCandidateDNSCNAMEHopRead(
+                ordinal=hop.ordinal, hostname=hop.hostname
+            )
+            for hop in persisted.cname_hops
+        ],
+        addresses=[
+            AssetCandidateDNSAddressRead(
+                ordinal=address.ordinal,
+                address=address.address,
+                category=address.category,
+            )
+            for address in persisted.addresses
+        ],
+    )
+
+
+@router.post(
+    "/{profile_id}/revisions/{revision_id}/asset-candidate-evaluations/"
+    "{evaluation_id}/dns-validations",
+    response_model=AssetCandidateDNSValidationRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_revision_asset_candidate_dns_validation(
+    profile_id: int,
+    revision_id: int,
+    evaluation_id: int,
+    payload: AssetCandidateDNSValidationCreate | None = Body(default=None),
+    resolver: AssetCandidateDNSResolver = Depends(
+        get_asset_candidate_dns_resolver
+    ),
+) -> AssetCandidateDNSValidationRead:
+    del payload
+    try:
+        persisted = create_asset_candidate_dns_validation(
+            profile_id=profile_id,
+            revision_id=revision_id,
+            evaluation_id=evaluation_id,
+            resolver=resolver,
+        )
+    except AssetCandidateDNSValidationNotFoundError as exc:
+        raise HTTPException(
+            status_code=404, detail="Asset candidate evaluation not found."
+        ) from exc
+    except AssetCandidateDNSValidationInactiveError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="DNS validation requires an active authorization revision.",
+        ) from exc
+    except AssetCandidateDNSValidationIneligibleError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="DNS validation requires an included asset candidate.",
+        ) from exc
+    return _dns_validation_response(persisted)
+
+
+@router.get(
+    "/{profile_id}/revisions/{revision_id}/asset-candidate-evaluations/"
+    "{evaluation_id}/dns-validations",
+    response_model=list[AssetCandidateDNSValidationSummary],
+)
+def list_revision_asset_candidate_dns_validations(
+    profile_id: int,
+    revision_id: int,
+    evaluation_id: int,
+    after_id: int = Query(default=0, ge=0),
+    limit: int = Query(
+        default=50,
+        ge=1,
+        le=MAX_ASSET_CANDIDATE_DNS_VALIDATION_PAGE_SIZE,
+    ),
+    db: Session = Depends(get_db),
+) -> list[AssetCandidateDNSValidation]:
+    _dns_evaluation_or_404(db, profile_id, revision_id, evaluation_id)
+    return list(db.scalars(
+        select(AssetCandidateDNSValidation).where(
+            AssetCandidateDNSValidation.asset_candidate_evaluation_id
+            == evaluation_id,
+            AssetCandidateDNSValidation.authorization_revision_id == revision_id,
+            AssetCandidateDNSValidation.id > after_id,
+        ).order_by(AssetCandidateDNSValidation.id).limit(limit)
+    ).all())
+
+
+@router.get(
+    "/{profile_id}/revisions/{revision_id}/asset-candidate-evaluations/"
+    "{evaluation_id}/dns-validations/{validation_id}",
+    response_model=AssetCandidateDNSValidationRead,
+)
+def get_revision_asset_candidate_dns_validation(
+    profile_id: int,
+    revision_id: int,
+    evaluation_id: int,
+    validation_id: int,
+    db: Session = Depends(get_db),
+) -> AssetCandidateDNSValidationRead:
+    _dns_evaluation_or_404(db, profile_id, revision_id, evaluation_id)
+    validation = db.scalar(select(AssetCandidateDNSValidation).where(
+        AssetCandidateDNSValidation.id == validation_id,
+        AssetCandidateDNSValidation.asset_candidate_evaluation_id == evaluation_id,
+        AssetCandidateDNSValidation.authorization_revision_id == revision_id,
+    ))
+    if validation is None:
+        raise HTTPException(
+            status_code=404, detail="DNS validation not found."
+        )
+    hops = tuple(db.scalars(select(AssetCandidateDNSCNAMEHop).where(
+        AssetCandidateDNSCNAMEHop.dns_validation_id == validation_id
+    ).order_by(AssetCandidateDNSCNAMEHop.ordinal)).all())
+    addresses = tuple(db.scalars(select(AssetCandidateDNSAddress).where(
+        AssetCandidateDNSAddress.dns_validation_id == validation_id
+    ).order_by(AssetCandidateDNSAddress.ordinal)).all())
+    return _dns_validation_response(PersistedAssetCandidateDNSValidation(
+        validation=validation, cname_hops=hops, addresses=addresses
+    ))

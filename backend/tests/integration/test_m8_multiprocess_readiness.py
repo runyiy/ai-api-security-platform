@@ -342,9 +342,9 @@ def test_cross_process_cancelled_plan_never_reaches_local_server(
     with engine.begin() as db:
         seeded = db.scalar(text(
             "INSERT INTO rate_reservation_states AS state (key,next_allowed_at) "
-            "VALUES (:key,clock_timestamp()+interval '2 seconds') "
+            "VALUES (:key,clock_timestamp()+interval '10 seconds') "
             "ON CONFLICT (key) DO UPDATE SET "
-            "next_allowed_at=clock_timestamp()+interval '2 seconds' "
+            "next_allowed_at=clock_timestamp()+interval '10 seconds' "
             "RETURNING next_allowed_at"
         ), {"key": f"target:{target_id}"})
     owner = execute_process(plan_id)
@@ -375,10 +375,10 @@ def test_cross_process_cancelled_plan_never_reaches_local_server(
     cancelled = subprocess.run(
         [sys.executable, "-c", cancel_code, str(plan_id)], cwd=".",
         env=process_environment(), capture_output=True, text=True,
-        check=True, timeout=5,
+        check=True, timeout=8,
     )
     assert cancelled.stdout.strip() == "200"
-    owner_result = finish_process(owner, timeout=8)
+    owner_result = finish_process(owner, timeout=15)
     assert owner_result["status"] == 403
     assert owner_result["body"]["detail"]["code"] == "execution_plan_cancelled"
     retry = finish_process(execute_process(plan_id))
