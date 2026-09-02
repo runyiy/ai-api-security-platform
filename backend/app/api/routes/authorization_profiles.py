@@ -22,6 +22,7 @@ from app.db.models.asset_candidate_dns_validation import (
     AssetCandidateDNSValidation,
 )
 from app.db.models.asset_hostname_rule import AssetHostnameRule
+from app.db.models.asset_enrollment_decision import AssetEnrollmentDecision
 from app.db.session import get_db
 from app.schemas.authorization_profile import (
     AuthorizationProfileCreate,
@@ -44,6 +45,10 @@ from app.schemas.asset_candidate_dns_validation import (
     AssetCandidateDNSValidationRead,
     AssetCandidateDNSValidationSummary,
 )
+from app.schemas.asset_enrollment_decision import (
+    AssetEnrollmentDecisionCreate,
+    AssetEnrollmentDecisionRead,
+)
 from app.services.asset_candidate_dns import (
     AssetCandidateDNSResolver,
     DnspythonAssetCandidateDNSResolver,
@@ -54,6 +59,12 @@ from app.services.asset_candidate_dns_validation import (
     AssetCandidateDNSValidationNotFoundError,
     PersistedAssetCandidateDNSValidation,
     create_asset_candidate_dns_validation,
+)
+from app.services.asset_enrollment_decision import (
+    AssetEnrollmentDecisionNotFoundError,
+    AssetEnrollmentDecisionProvenanceError,
+    create_asset_enrollment_decision,
+    load_exact_dns_validation,
 )
 from app.services.asset_candidate_evaluation import (
     AssetCandidateEvaluationInactiveError,
@@ -83,6 +94,7 @@ router = APIRouter(
 
 MAX_ASSET_CANDIDATE_EVALUATION_PAGE_SIZE = 100
 MAX_ASSET_CANDIDATE_DNS_VALIDATION_PAGE_SIZE = 100
+MAX_ASSET_ENROLLMENT_DECISION_PAGE_SIZE = 100
 
 
 def get_asset_candidate_dns_resolver() -> AssetCandidateDNSResolver:
@@ -667,3 +679,121 @@ def get_revision_asset_candidate_dns_validation(
     return _dns_validation_response(PersistedAssetCandidateDNSValidation(
         validation=validation, cname_hops=hops, addresses=addresses
     ))
+
+
+def _enrollment_validation_or_404(
+    db: Session,
+    profile_id: int,
+    revision_id: int,
+    evaluation_id: int,
+    validation_id: int,
+) -> AssetCandidateDNSValidation:
+    try:
+        _, validation = load_exact_dns_validation(
+            db,
+            profile_id=profile_id,
+            revision_id=revision_id,
+            evaluation_id=evaluation_id,
+            validation_id=validation_id,
+        )
+    except (
+        AssetEnrollmentDecisionNotFoundError,
+        AssetEnrollmentDecisionProvenanceError,
+    ) as exc:
+        raise HTTPException(
+            status_code=404, detail="DNS validation not found."
+        ) from exc
+    return validation
+
+
+@router.post(
+    "/{profile_id}/revisions/{revision_id}/asset-candidate-evaluations/"
+    "{evaluation_id}/dns-validations/{validation_id}/enrollment-decisions",
+    response_model=AssetEnrollmentDecisionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_revision_asset_enrollment_decision(
+    profile_id: int,
+    revision_id: int,
+    evaluation_id: int,
+    validation_id: int,
+    payload: AssetEnrollmentDecisionCreate,
+    db: Session = Depends(get_db),
+) -> AssetEnrollmentDecision:
+    try:
+        return create_asset_enrollment_decision(
+            db,
+            profile_id=profile_id,
+            revision_id=revision_id,
+            evaluation_id=evaluation_id,
+            validation_id=validation_id,
+            **payload.model_dump(),
+        )
+    except AssetEnrollmentDecisionNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=404, detail="DNS validation not found."
+        ) from exc
+    except AssetEnrollmentDecisionProvenanceError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409, detail="DNS validation provenance is inconsistent."
+        ) from exc
+    except IntegrityError:
+        db.rollback()
+        raise
+
+
+@router.get(
+    "/{profile_id}/revisions/{revision_id}/asset-candidate-evaluations/"
+    "{evaluation_id}/dns-validations/{validation_id}/enrollment-decisions",
+    response_model=list[AssetEnrollmentDecisionRead],
+)
+def list_revision_asset_enrollment_decisions(
+    profile_id: int,
+    revision_id: int,
+    evaluation_id: int,
+    validation_id: int,
+    after_id: int = Query(default=0, ge=0),
+    limit: int = Query(
+        default=50, ge=1, le=MAX_ASSET_ENROLLMENT_DECISION_PAGE_SIZE
+    ),
+    db: Session = Depends(get_db),
+) -> list[AssetEnrollmentDecision]:
+    _enrollment_validation_or_404(
+        db, profile_id, revision_id, evaluation_id, validation_id
+    )
+    return list(db.scalars(select(AssetEnrollmentDecision).where(
+        AssetEnrollmentDecision.asset_candidate_dns_validation_id == validation_id,
+        AssetEnrollmentDecision.authorization_revision_id == revision_id,
+        AssetEnrollmentDecision.id > after_id,
+    ).order_by(AssetEnrollmentDecision.id).limit(limit)).all())
+
+
+@router.get(
+    "/{profile_id}/revisions/{revision_id}/asset-candidate-evaluations/"
+    "{evaluation_id}/dns-validations/{validation_id}/enrollment-decisions/"
+    "{decision_id}",
+    response_model=AssetEnrollmentDecisionRead,
+)
+def get_revision_asset_enrollment_decision(
+    profile_id: int,
+    revision_id: int,
+    evaluation_id: int,
+    validation_id: int,
+    decision_id: int,
+    db: Session = Depends(get_db),
+) -> AssetEnrollmentDecision:
+    _enrollment_validation_or_404(
+        db, profile_id, revision_id, evaluation_id, validation_id
+    )
+    enrollment = db.scalar(select(AssetEnrollmentDecision).where(
+        AssetEnrollmentDecision.id == decision_id,
+        AssetEnrollmentDecision.asset_candidate_dns_validation_id == validation_id,
+        AssetEnrollmentDecision.authorization_revision_id == revision_id,
+    ))
+    if enrollment is None:
+        raise HTTPException(
+            status_code=404, detail="Enrollment decision not found."
+        )
+    return enrollment
