@@ -11,6 +11,7 @@ from app.db.models.asset_enrollment_decision import AssetEnrollmentDecision
 from app.db.models.credential_binding import CredentialBinding
 from app.db.models.credential_secret_version import CredentialSecretVersion
 from app.db.models.endpoint import Endpoint
+from app.db.models.endpoint_resource_binding import EndpointResourceBinding
 from app.db.models.execution_plan import ExecutionPlan
 from app.db.models.execution_plan_approval_record import ExecutionPlanApprovalRecord
 from app.db.models.execution_plan_claim import ExecutionPlanClaim
@@ -54,6 +55,7 @@ __all__ = [
     "Target",
     "Scope",
     "Endpoint",
+    "EndpointResourceBinding",
     "TestIdentity",
     "Resource",
     "TestCase",

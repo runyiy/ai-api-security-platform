@@ -9,6 +9,9 @@ from app.api.routes.authorization_profiles import (
 from app.api.routes.openapi import (
     router as openapi_router,
 )
+from app.api.routes.endpoint_resource_bindings import (
+    router as endpoint_resource_bindings_router,
+)
 from app.api.routes.policy import (
     router as policy_router,
 )
@@ -63,6 +66,24 @@ async def sanitized_enrollment_note_validation_error(
     request: Request,
     exc: RequestValidationError,
 ):
+    selector_errors = [
+        error for error in exc.errors()
+        if error.get("type") == "resource_binding_selector_sensitive_material"
+    ]
+    if selector_errors:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": [{
+                    "type": "resource_binding_selector_sensitive_material",
+                    "loc": ["body", "selector"],
+                    "msg": (
+                        "Resource binding selector contains prohibited "
+                        "sensitive material."
+                    ),
+                }],
+            },
+        )
     note_errors = [
         error for error in exc.errors()
         if error.get("type") == "asset_enrollment_note_auth_material"
@@ -100,6 +121,11 @@ app.include_router(
 
 app.include_router(
     openapi_router,
+    prefix="/api",
+)
+
+app.include_router(
+    endpoint_resource_bindings_router,
     prefix="/api",
 )
 
