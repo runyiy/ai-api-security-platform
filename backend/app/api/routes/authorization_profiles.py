@@ -49,6 +49,7 @@ from app.schemas.asset_enrollment_decision import (
     AssetEnrollmentDecisionCreate,
     AssetEnrollmentDecisionRead,
 )
+from app.schemas.target import ApprovedEnrollmentTargetCreate, TargetRead
 from app.services.asset_candidate_dns import (
     AssetCandidateDNSResolver,
     DnspythonAssetCandidateDNSResolver,
@@ -84,6 +85,17 @@ from app.services.authorization_revision import (
     RevisionNotFoundError,
     create_revision,
     transition_revision,
+)
+from app.services.approved_enrollment_target import (
+    ApprovedEnrollmentTargetConflictError,
+    ApprovedEnrollmentTargetConfigurationError,
+    ApprovedEnrollmentTargetDNSOutcomeError,
+    ApprovedEnrollmentTargetInactiveRevisionError,
+    ApprovedEnrollmentTargetNetworkModeError,
+    ApprovedEnrollmentTargetNotFoundError,
+    ApprovedEnrollmentTargetProvenanceError,
+    ApprovedEnrollmentTargetRejectedError,
+    create_target_from_approved_enrollment,
 )
 
 
@@ -797,3 +809,71 @@ def get_revision_asset_enrollment_decision(
             status_code=404, detail="Enrollment decision not found."
         )
     return enrollment
+
+
+@router.post(
+    "/{profile_id}/revisions/{revision_id}/asset-candidate-evaluations/"
+    "{evaluation_id}/dns-validations/{validation_id}/enrollment-decisions/"
+    "{decision_id}/target",
+    response_model=TargetRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_target_from_revision_asset_enrollment_decision(
+    profile_id: int,
+    revision_id: int,
+    evaluation_id: int,
+    validation_id: int,
+    decision_id: int,
+    payload: ApprovedEnrollmentTargetCreate,
+    db: Session = Depends(get_db),
+):
+    try:
+        return create_target_from_approved_enrollment(
+            db,
+            profile_id=profile_id,
+            revision_id=revision_id,
+            evaluation_id=evaluation_id,
+            validation_id=validation_id,
+            decision_id=decision_id,
+            **payload.model_dump(),
+        )
+    except ApprovedEnrollmentTargetNotFoundError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=404, detail="asset_enrollment_provenance_not_found"
+        ) from exc
+    except ApprovedEnrollmentTargetInactiveRevisionError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409, detail="asset_enrollment_revision_inactive"
+        ) from exc
+    except ApprovedEnrollmentTargetRejectedError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409, detail="asset_enrollment_decision_not_approved"
+        ) from exc
+    except ApprovedEnrollmentTargetProvenanceError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409, detail="asset_enrollment_provenance_inconsistent"
+        ) from exc
+    except ApprovedEnrollmentTargetDNSOutcomeError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409, detail="asset_enrollment_dns_outcome_ineligible"
+        ) from exc
+    except ApprovedEnrollmentTargetNetworkModeError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409, detail="asset_enrollment_network_mode_mismatch"
+        ) from exc
+    except ApprovedEnrollmentTargetConfigurationError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409, detail="asset_enrollment_target_configuration_invalid"
+        ) from exc
+    except (ApprovedEnrollmentTargetConflictError, IntegrityError) as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=409, detail="asset_enrollment_target_conflict"
+        ) from exc

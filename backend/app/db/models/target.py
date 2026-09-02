@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     String,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -25,10 +26,24 @@ class Target(Base):
             "network_mode IN ('private_local', 'external_public_authorized')",
             name="ck_targets_network_mode",
         ),
+        UniqueConstraint(
+            "asset_enrollment_decision_id",
+            name="uq_targets_asset_enrollment_decision_id",
+        ),
     )
 
     id: Mapped[int] = mapped_column(
         primary_key=True,
+    )
+
+    asset_enrollment_decision_id: Mapped[int | None] = mapped_column(
+        ForeignKey(
+            "asset_enrollment_decisions.id",
+            name="fk_targets_asset_enrollment_decision_id",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
+        index=True,
     )
 
     authorization_profile_id: Mapped[int | None] = mapped_column(
