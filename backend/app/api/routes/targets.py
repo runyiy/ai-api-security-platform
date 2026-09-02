@@ -61,6 +61,11 @@ def update_target_network_mode(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Target not found.",
         )
+    if target.asset_enrollment_decision_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Enrollment-bound Target network mode is immutable.",
+        )
     target.network_mode = payload.network_mode
     db.commit()
     db.refresh(target)
@@ -84,6 +89,11 @@ def update_target_authorization_profile(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Target not found.",
+        )
+    if target.asset_enrollment_decision_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Enrollment-bound Target profile is immutable.",
         )
 
     if (
@@ -131,6 +141,11 @@ def update_target_authorization_revision(
     )
     if target is None:
         raise HTTPException(status_code=404, detail="Target not found.")
+    if target.asset_enrollment_decision_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Enrollment-bound Target revision is immutable.",
+        )
 
     revision_id = payload.authorization_revision_id
     if revision_id is not None:
