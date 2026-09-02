@@ -7,6 +7,7 @@ from app.db.models.asset_candidate_dns_validation import (
     AssetCandidateDNSValidation,
 )
 from app.db.models.asset_hostname_rule import AssetHostnameRule
+from app.db.models.asset_enrollment_decision import AssetEnrollmentDecision
 from app.db.models.credential_binding import CredentialBinding
 from app.db.models.credential_secret_version import CredentialSecretVersion
 from app.db.models.endpoint import Endpoint
@@ -39,6 +40,7 @@ __all__ = [
     "AssetCandidateDNSCNAMEHop",
     "AssetCandidateDNSAddress",
     "AssetHostnameRule",
+    "AssetEnrollmentDecision",
     "CredentialBinding",
     "CredentialSecretVersion",
     "ExecutionPlan",
