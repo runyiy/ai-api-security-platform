@@ -81,6 +81,18 @@ class EndpointResourceBindingReviewUpdate(BaseModel):
         return self
 
 
+class EndpointResourceBindingInferenceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class EndpointResourceBindingInferenceRead(BaseModel):
+    endpoint_id: int
+    eligible_count: int
+    created_count: int
+    existing_inferred_count: int
+    skipped_operator_count: int
+
+
 class EndpointResourceBindingRead(BaseModel):
     id: int
     endpoint_id: int
