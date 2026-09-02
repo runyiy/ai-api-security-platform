@@ -7,6 +7,7 @@ from app.db.models.asset_candidate_dns_validation import (
 from app.db.models.asset_candidate_evaluation import AssetCandidateEvaluation
 from app.db.models.asset_enrollment_decision import AssetEnrollmentDecision
 from app.db.models.authorization_revision import AuthorizationRevision
+from app.services.asset_enrollment_note import validate_non_secret_enrollment_note
 
 
 class AssetEnrollmentDecisionNotFoundError(Exception):
@@ -56,6 +57,8 @@ def create_asset_enrollment_decision(
     reason_code: str | None,
     note: str | None,
 ) -> AssetEnrollmentDecision:
+    if note is not None:
+        note = validate_non_secret_enrollment_note(note)
     _, validation = load_exact_dns_validation(
         db,
         profile_id=profile_id,

@@ -13,6 +13,7 @@ from app.db.models import (
 )
 from app.db.session import SessionLocal
 from app.services.asset_enrollment_decision import create_asset_enrollment_decision
+from app.services.asset_enrollment_note import AssetEnrollmentNoteAuthMaterialError
 
 
 def make_hierarchy() -> tuple[int, int, int, int]:
@@ -103,4 +104,45 @@ def test_persistence_failure_rolls_back_decision_atomically(monkeypatch) -> None
             )) == 0
     finally:
         monkeypatch.setattr(SessionLocal.class_, "commit", original_commit)
+        cleanup(ids)
+
+
+def test_direct_service_rejects_secret_note_and_accepts_normal_note() -> None:
+    ids = make_hierarchy()
+    secret_note = "Authorization: Bearer service-layer-secret"
+    ordinary_note = "Operator confirmed ownership from internal inventory."
+    try:
+        with SessionLocal() as db:
+            with pytest.raises(AssetEnrollmentNoteAuthMaterialError) as captured:
+                create_asset_enrollment_decision(
+                    db,
+                    profile_id=ids[0], revision_id=ids[1],
+                    evaluation_id=ids[2], validation_id=ids[3],
+                    decision="approved", reason_code=None, note=secret_note,
+                )
+            assert secret_note not in str(captured.value)
+            assert secret_note not in repr(captured.value)
+            assert db.scalar(select(func.count()).select_from(
+                AssetEnrollmentDecision
+            ).where(
+                AssetEnrollmentDecision.asset_candidate_dns_validation_id
+                == ids[3]
+            )) == 0
+
+            accepted = create_asset_enrollment_decision(
+                db,
+                profile_id=ids[0], revision_id=ids[1],
+                evaluation_id=ids[2], validation_id=ids[3],
+                decision="approved", reason_code=None, note=ordinary_note,
+            )
+            assert accepted.note == ordinary_note
+
+        with SessionLocal() as db:
+            rows = list(db.scalars(select(AssetEnrollmentDecision).where(
+                AssetEnrollmentDecision.asset_candidate_dns_validation_id
+                == ids[3]
+            )).all())
+            assert len(rows) == 1
+            assert rows[0].note == ordinary_note
+    finally:
         cleanup(ids)
