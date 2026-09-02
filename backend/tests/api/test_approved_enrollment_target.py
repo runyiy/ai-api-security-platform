@@ -330,8 +330,32 @@ def test_target_enrollment_has_zero_network_and_authority_side_effects(monkeypat
     )
     try:
         ids = make_provenance()
-        groups = [ids]
+        unrelated_ids = make_provenance(
+            dns_code="asset_candidate_dns_public_only",
+            hostname="unrelated.example.test",
+        )
+        groups = [ids, unrelated_ids]
         with SessionLocal() as db:
+            unrelated = Target(
+                name="Unrelated existing target",
+                base_url="https://unrelated.example.test",
+                environment="test",
+                network_mode="external_public_authorized",
+                authorization_profile_id=unrelated_ids[0],
+                authorization_revision_id=unrelated_ids[1],
+                asset_enrollment_decision_id=unrelated_ids[4],
+            )
+            db.add(unrelated)
+            db.commit()
+            unrelated_snapshot = {
+                "id": unrelated.id,
+                "network_mode": unrelated.network_mode,
+                "authorization_profile_id": unrelated.authorization_profile_id,
+                "authorization_revision_id": unrelated.authorization_revision_id,
+                "asset_enrollment_decision_id": (
+                    unrelated.asset_enrollment_decision_id
+                ),
+            }
             before = {model: db.scalar(select(func.count()).select_from(model))
                       for model in tracked}
         allowed_hosts = settings.allowed_target_hosts
@@ -351,6 +375,17 @@ def test_target_enrollment_has_zero_network_and_authority_side_effects(monkeypat
         with SessionLocal() as db:
             after = {model: db.scalar(select(func.count()).select_from(model))
                      for model in tracked}
+            unrelated = db.get(Target, unrelated_snapshot["id"])
+            assert unrelated is not None
+            assert {
+                "id": unrelated.id,
+                "network_mode": unrelated.network_mode,
+                "authorization_profile_id": unrelated.authorization_profile_id,
+                "authorization_revision_id": unrelated.authorization_revision_id,
+                "asset_enrollment_decision_id": (
+                    unrelated.asset_enrollment_decision_id
+                ),
+            } == unrelated_snapshot
         assert after == before
         assert settings.allowed_target_hosts == allowed_hosts
         assert settings.allowed_target_host_set == allowed_host_set
