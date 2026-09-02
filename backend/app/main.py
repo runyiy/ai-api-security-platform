@@ -9,6 +9,9 @@ from app.api.routes.authorization_profiles import (
 from app.api.routes.openapi import (
     router as openapi_router,
 )
+from app.api.routes.endpoint_resource_bindings import (
+    router as endpoint_resource_bindings_router,
+)
 from app.api.routes.policy import (
     router as policy_router,
 )
@@ -100,6 +103,11 @@ app.include_router(
 
 app.include_router(
     openapi_router,
+    prefix="/api",
+)
+
+app.include_router(
+    endpoint_resource_bindings_router,
     prefix="/api",
 )
 
