@@ -10,9 +10,15 @@ from app.db.models.endpoint_resource_binding import EndpointResourceBinding
 from app.db.session import get_db
 from app.schemas.endpoint_resource_binding import (
     EndpointResourceBindingCreate,
+    EndpointResourceBindingInferenceRead,
+    EndpointResourceBindingInferenceRequest,
     EndpointResourceBindingRead,
     EndpointResourceBindingReviewUpdate,
     validate_resource_binding_selector,
+)
+from app.services.openapi_binding_candidates import (
+    OpenAPIBindingInferenceError,
+    infer_openapi_binding_candidates,
 )
 
 
@@ -23,6 +29,15 @@ MAX_PAGE_OFFSET = 10_000
 
 def get_endpoint_or_404(db: Session, endpoint_id: int) -> Endpoint:
     endpoint = db.get(Endpoint, endpoint_id)
+    if endpoint is None:
+        raise HTTPException(status_code=404, detail="Endpoint not found.")
+    return endpoint
+
+
+def get_endpoint_for_update_or_404(db: Session, endpoint_id: int) -> Endpoint:
+    endpoint = db.scalar(
+        select(Endpoint).where(Endpoint.id == endpoint_id).with_for_update()
+    )
     if endpoint is None:
         raise HTTPException(status_code=404, detail="Endpoint not found.")
     return endpoint
@@ -59,7 +74,7 @@ def create_endpoint_resource_binding(
     payload: EndpointResourceBindingCreate,
     db: Session = Depends(get_db),
 ) -> EndpointResourceBinding:
-    endpoint = get_endpoint_or_404(db, endpoint_id)
+    endpoint = get_endpoint_for_update_or_404(db, endpoint_id)
     validate_declared_parameter(endpoint, payload)
     validate_resource_binding_selector(payload.location, payload.selector)
     binding = EndpointResourceBinding(
@@ -88,6 +103,32 @@ def create_endpoint_resource_binding(
         raise
     db.refresh(binding)
     return binding
+
+
+@router.post(
+    "/endpoints/{endpoint_id}/resource-bindings/infer-openapi-candidates",
+    response_model=EndpointResourceBindingInferenceRead,
+)
+def infer_endpoint_openapi_binding_candidates(
+    endpoint_id: int,
+    payload: EndpointResourceBindingInferenceRequest,
+    db: Session = Depends(get_db),
+) -> EndpointResourceBindingInferenceRead:
+    del payload
+    endpoint = get_endpoint_for_update_or_404(db, endpoint_id)
+    try:
+        result = infer_openapi_binding_candidates(db, endpoint)
+        db.commit()
+    except OpenAPIBindingInferenceError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except Exception:
+        db.rollback()
+        raise
+    return EndpointResourceBindingInferenceRead(**result.__dict__)
 
 
 @router.patch(
