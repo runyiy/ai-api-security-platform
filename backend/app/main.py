@@ -1,4 +1,7 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 from app.api.routes.authorization_profiles import (
     router as authorization_profiles_router,
@@ -53,6 +56,32 @@ app.include_router(
     authorization_profiles_router,
     prefix="/api",
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def sanitized_enrollment_note_validation_error(
+    request: Request,
+    exc: RequestValidationError,
+):
+    note_errors = [
+        error for error in exc.errors()
+        if error.get("type") == "asset_enrollment_note_auth_material"
+    ]
+    if note_errors:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": [{
+                    "type": "asset_enrollment_note_auth_material",
+                    "loc": ["body", "note"],
+                    "msg": (
+                        "Enrollment decision note contains prohibited "
+                        "authentication material."
+                    ),
+                }],
+            },
+        )
+    return await request_validation_exception_handler(request, exc)
 
 app.include_router(
     targets_router,

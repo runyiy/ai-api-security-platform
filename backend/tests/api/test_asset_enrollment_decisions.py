@@ -227,6 +227,64 @@ def test_extra_authority_secret_and_unbounded_fields_are_rejected() -> None:
         cleanup(hierarchies)
 
 
+def test_authentication_material_in_note_is_rejected_without_echo_or_row() -> None:
+    hierarchies = []
+    try:
+        ids = make_hierarchy()
+        hierarchies = [ids]
+        endpoint = url(ids)
+        secret_notes = (
+            "Authorization: Bearer actual-auth-token-4815",
+            "Bearer standalone-token-9821",
+            "Cookie: session=actual-cookie-value-1732",
+            "Set-Cookie: session=actual-set-cookie-value-6149",
+            "x-api-key: actual-api-key-value-7253",
+            "api_key=actual-api-key-value-8364",
+            "access_token=actual-access-token-9475",
+            "refresh_token: actual-refresh-token-1586",
+            "credentials=actual-credential-value-2697",
+            "password: actual-password-value-3708",
+            "secret=actual-secret-value-4819",
+            "client_secret=actual-client-secret-value-5920",
+            "db_password=actual-db-password-value-6031",
+        )
+        for note in secret_notes:
+            response = client.post(endpoint, json={
+                "decision": "approved", "note": note,
+            })
+            assert response.status_code == 422
+            assert response.json() == {
+                "detail": [{
+                    "type": "asset_enrollment_note_auth_material",
+                    "loc": ["body", "note"],
+                    "msg": (
+                        "Enrollment decision note contains prohibited "
+                        "authentication material."
+                    ),
+                }]
+            }
+            assert note not in response.text
+            with SessionLocal() as db:
+                assert db.scalar(select(func.count()).select_from(
+                    AssetEnrollmentDecision
+                ).where(
+                    AssetEnrollmentDecision.asset_candidate_dns_validation_id
+                    == ids[3]
+                )) == 0
+
+        ordinary_note = "Operator confirmed ownership from internal inventory."
+        accepted = client.post(endpoint, json={
+            "decision": "approved", "note": ordinary_note,
+        })
+        assert accepted.status_code == 201
+        assert accepted.json()["note"] == ordinary_note
+        assert client.get(
+            f"{endpoint}/{accepted.json()['id']}"
+        ).json()["note"] == ordinary_note
+    finally:
+        cleanup(hierarchies)
+
+
 def test_decision_history_is_deterministically_paginated_and_capped() -> None:
     hierarchies = []
     try:
