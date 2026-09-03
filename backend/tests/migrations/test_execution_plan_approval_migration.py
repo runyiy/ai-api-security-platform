@@ -7,7 +7,7 @@ from app.db.session import engine
 
 
 REVISION = "a1c3e5f7b9d2"
-LATEST = "e2a4c6e8b0d3"
+LATEST = "f3b5d7e9a1c2"
 PARENT = "f7b9d1e3a5c8"
 TABLE = "execution_plan_approval_records"
 

@@ -22,6 +22,7 @@ from app.db.models.finding_ai_analysis import FindingAIAnalysis
 from app.db.models.network_control import NetworkDisabledTarget, NetworkGlobalControl
 from app.db.models.openapi_import_record import OpenAPIImportRecord
 from app.db.models.resource import Resource
+from app.db.models.resource_access_assertion import ResourceAccessAssertion
 from app.db.models.plan_action import PlanAction
 from app.db.models.rate_reservation_state import RateReservationState
 from app.db.models.safety_decision_record import SafetyDecisionRecord
@@ -58,6 +59,7 @@ __all__ = [
     "EndpointResourceBinding",
     "TestIdentity",
     "Resource",
+    "ResourceAccessAssertion",
     "TestCase",
     "TestRun",
     "Finding",

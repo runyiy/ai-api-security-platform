@@ -27,6 +27,9 @@ from app.api.routes.test_identities import (
 from app.api.routes.resources import (
     router as resources_router,
 )
+from app.api.routes.resource_access_assertions import (
+    router as resource_access_assertions_router,
+)
 from app.api.routes.test_cases import (
     router as test_cases_router,
 )
@@ -66,6 +69,23 @@ async def sanitized_enrollment_note_validation_error(
     request: Request,
     exc: RequestValidationError,
 ):
+    assertion_errors = [
+        error for error in exc.errors()
+        if error.get("type") == "resource_access_assertion_prohibited_field"
+    ]
+    if assertion_errors:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": [{
+                    "type": "resource_access_assertion_prohibited_field",
+                    "loc": ["body"],
+                    "msg": (
+                        "Resource access assertion contains a prohibited field."
+                    ),
+                }],
+            },
+        )
     selector_errors = [
         error for error in exc.errors()
         if error.get("type") == "resource_binding_selector_sensitive_material"
@@ -136,6 +156,11 @@ app.include_router(
 
 app.include_router(
     resources_router,
+    prefix="/api",
+)
+
+app.include_router(
+    resource_access_assertions_router,
     prefix="/api",
 )
 
