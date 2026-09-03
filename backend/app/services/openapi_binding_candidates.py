@@ -30,16 +30,19 @@ class OpenAPIBindingInferenceResult:
     skipped_operator_count: int
 
 
-def is_identifier_parameter(parameter: dict, name: str) -> bool:
+def is_identifier_name_or_uuid(name: str, schema: object) -> bool:
     lowered = name.lower()
     name_signal = (
         lowered == "id"
         or lowered.endswith(("_id", "-id", ".id"))
         or (len(name) > 2 and name.endswith("Id"))
     )
-    schema = parameter.get("schema")
     uuid_signal = isinstance(schema, dict) and schema.get("format") == "uuid"
     return name_signal or uuid_signal
+
+
+def is_identifier_parameter(parameter: dict, name: str) -> bool:
+    return is_identifier_name_or_uuid(name, parameter.get("schema"))
 
 
 def derive_candidates(endpoint: Endpoint) -> list[tuple[str, str]]:

@@ -20,6 +20,10 @@ from app.services.openapi_binding_candidates import (
     OpenAPIBindingInferenceError,
     infer_openapi_binding_candidates,
 )
+from app.services.openapi_body_binding_candidates import (
+    OpenAPIBodyBindingInferenceError,
+    infer_openapi_body_binding_candidates,
+)
 
 
 router = APIRouter(tags=["endpoint-resource-bindings"])
@@ -120,6 +124,33 @@ def infer_endpoint_openapi_binding_candidates(
         result = infer_openapi_binding_candidates(db, endpoint)
         db.commit()
     except OpenAPIBindingInferenceError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except Exception:
+        db.rollback()
+        raise
+    return EndpointResourceBindingInferenceRead(**result.__dict__)
+
+
+@router.post(
+    "/endpoints/{endpoint_id}/resource-bindings/"
+    "infer-openapi-body-candidates",
+    response_model=EndpointResourceBindingInferenceRead,
+)
+def infer_endpoint_openapi_body_binding_candidates(
+    endpoint_id: int,
+    payload: EndpointResourceBindingInferenceRequest,
+    db: Session = Depends(get_db),
+) -> EndpointResourceBindingInferenceRead:
+    del payload
+    endpoint = get_endpoint_for_update_or_404(db, endpoint_id)
+    try:
+        result = infer_openapi_body_binding_candidates(db, endpoint)
+        db.commit()
+    except OpenAPIBodyBindingInferenceError as exc:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
