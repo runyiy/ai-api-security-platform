@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import AwareDatetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,9 +16,35 @@ from app.services.observed_access_assertion import (
     ObservedAccessAssertionError,
     derive_observed_access_assertion,
 )
+from app.schemas.resource_access_resolution import ResourceAccessResolutionRead
+from app.services.resource_access_resolution import (
+    ResourceAccessResolutionError,
+    resolve_resource_access,
+)
 
 
 router = APIRouter(tags=["resource-access-assertions"])
+
+
+@router.get(
+    "/resources/{resource_id}/access-resolution",
+    response_model=ResourceAccessResolutionRead,
+)
+def get_resource_access_resolution(
+    resource_id: int,
+    test_identity_id: int,
+    evaluation_time: AwareDatetime,
+    db: Session = Depends(get_db),
+) -> ResourceAccessResolutionRead:
+    try:
+        resolution = resolve_resource_access(
+            db, resource_id, test_identity_id, evaluation_time
+        )
+    except ResourceAccessResolutionError as exc:
+        raise HTTPException(
+            status_code=exc.status_code, detail=exc.code
+        ) from exc
+    return ResourceAccessResolutionRead.model_validate(resolution.__dict__)
 
 
 @router.post(
