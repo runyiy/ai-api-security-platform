@@ -1,6 +1,8 @@
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import (
+    CheckConstraint, DateTime, ForeignKey, Index, Integer, String, func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -39,6 +41,15 @@ class ResourceAccessAssertion(Base):
             "(valid_from IS NOT NULL AND valid_until > valid_from)",
             name="ck_resource_access_assertions_validity_window",
         ),
+        CheckConstraint(
+            "provenance <> 'observed_baseline' OR source_test_run_id IS NOT NULL",
+            name="ck_resource_access_assertions_observed_source",
+        ),
+        Index(
+            "ux_resource_access_assertions_source_test_run_id",
+            "source_test_run_id",
+            unique=True,
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -68,4 +79,8 @@ class ResourceAccessAssertion(Base):
     )
     valid_until: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    source_test_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("test_runs.id", ondelete="RESTRICT"),
+        nullable=True,
     )

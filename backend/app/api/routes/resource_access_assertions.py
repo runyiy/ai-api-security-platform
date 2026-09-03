@@ -10,9 +10,43 @@ from app.schemas.resource_access_assertion import (
     ResourceAccessAssertionCreate,
     ResourceAccessAssertionRead,
 )
+from app.schemas.observed_access_assertion import ObservedAccessAssertionCreate
+from app.services.observed_access_assertion import (
+    ObservedAccessAssertionError,
+    derive_observed_access_assertion,
+)
 
 
 router = APIRouter(tags=["resource-access-assertions"])
+
+
+@router.post(
+    "/test-runs/{test_run_id}/observed-access-assertion",
+    response_model=ResourceAccessAssertionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_observed_access_assertion(
+    test_run_id: int,
+    payload: ObservedAccessAssertionCreate,
+    db: Session = Depends(get_db),
+) -> ResourceAccessAssertion:
+    del payload
+    try:
+        assertion = derive_observed_access_assertion(db, test_run_id)
+        db.commit()
+    except ObservedAccessAssertionError as exc:
+        db.rollback()
+        status_code = (
+            status.HTTP_404_NOT_FOUND
+            if str(exc) == "source_test_run_not_found"
+            else status.HTTP_409_CONFLICT
+        )
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(assertion)
+    return assertion
 
 
 def get_resource_or_404(db: Session, resource_id: int) -> Resource:
