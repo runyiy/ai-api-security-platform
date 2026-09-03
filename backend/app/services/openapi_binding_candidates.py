@@ -15,6 +15,30 @@ MAX_PARAMETERS_INSPECTED = 128
 MAX_NEW_INFERRED_BINDINGS = 64
 PATH_CONFIDENCE = 60
 QUERY_CONFIDENCE = 40
+SENSITIVE_IDENTIFIER_TOKENS = {
+    "accesstoken",
+    "apikey",
+    "auth",
+    "authentication",
+    "authorization",
+    "cookie",
+    "cookies",
+    "credential",
+    "credentials",
+    "password",
+    "passwords",
+    "refreshtoken",
+    "secret",
+    "secrets",
+    "setcookie",
+    "xapikey",
+}
+SENSITIVE_IDENTIFIER_TOKEN_PAIRS = {
+    ("access", "token"),
+    ("api", "key"),
+    ("refresh", "token"),
+    ("set", "cookie"),
+}
 
 
 class OpenAPIBindingInferenceError(RuntimeError):
@@ -30,7 +54,25 @@ class OpenAPIBindingInferenceResult:
     skipped_operator_count: int
 
 
+def is_sensitive_identifier_name(name: str) -> bool:
+    tokens = [
+        token.lower()
+        for token in re.findall(
+            r"[A-Z]+(?=[A-Z][a-z]|[^A-Za-z]|$)|[A-Z]?[a-z]+|[A-Z]+|[0-9]+",
+            name,
+        )
+    ]
+    if SENSITIVE_IDENTIFIER_TOKENS.intersection(tokens):
+        return True
+    return any(
+        pair in SENSITIVE_IDENTIFIER_TOKEN_PAIRS
+        for pair in zip(tokens, tokens[1:])
+    )
+
+
 def is_identifier_name_or_uuid(name: str, schema: object) -> bool:
+    if is_sensitive_identifier_name(name):
+        return False
     lowered = name.lower()
     name_signal = (
         lowered == "id"

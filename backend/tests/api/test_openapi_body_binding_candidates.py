@@ -275,6 +275,39 @@ def test_arrays_malformed_and_sensitive_properties_never_become_candidates() -> 
         cleanup(target_ids)
 
 
+def test_bare_sensitive_identifier_names_are_not_inferred() -> None:
+    target_ids = []
+    schema = {
+        "properties": {
+            "credential_id": {"type": "string"},
+            "api_key_id": {"type": "string"},
+            "secret_id": {"type": "string"},
+            "password": {"type": "string", "format": "uuid"},
+            "access_token": {"type": "string", "format": "uuid"},
+            "refresh_token": {"type": "string", "format": "uuid"},
+            "account_id": {"type": "string"},
+            "userId": {"type": "string"},
+            "order_id": {"type": "string"},
+            "opaque": {"type": "string", "format": "uuid"},
+        }
+    }
+    try:
+        target_id, endpoint_id = make_endpoint(schema)
+        target_ids = [target_id]
+        response = infer_body(endpoint_id)
+        assert response.status_code == 200
+        assert response.json()["eligible_count"] == 4
+        with SessionLocal() as db:
+            selectors = list(db.scalars(
+                select(EndpointResourceBinding.selector).where(
+                    EndpointResourceBinding.endpoint_id == endpoint_id
+                ).order_by(EndpointResourceBinding.selector)
+            ))
+        assert selectors == ["/account_id", "/opaque", "/order_id", "/userId"]
+    finally:
+        cleanup(target_ids)
+
+
 def test_contradictory_object_metadata_fails_closed() -> None:
     target_ids = []
     try:

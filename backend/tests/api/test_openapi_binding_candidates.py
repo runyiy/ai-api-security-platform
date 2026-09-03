@@ -217,6 +217,41 @@ def test_deterministic_signals_and_untrusted_metadata_filtering() -> None:
         cleanup(target_ids)
 
 
+def test_sensitive_identifier_names_are_not_inferred_for_path_or_query() -> None:
+    target_ids = []
+    parameters = [
+        {"name": "credential_id", "in": "path"},
+        {"name": "secret_id", "in": "query"},
+        {"name": "apiKeyId", "in": "query"},
+        {"name": "authorizationId", "in": "query"},
+        {"name": "set_cookie_id", "in": "query"},
+        {"name": "xapikey_id", "in": "query"},
+        {"name": "accessTokenId", "in": "query"},
+        {"name": "refresh-token-id", "in": "query"},
+        {"name": "password_id", "in": "query"},
+        {"name": "account_id", "in": "query"},
+        {"name": "opaque", "in": "query", "schema": {"format": "uuid"}},
+    ]
+    try:
+        target_id, endpoint_id = make_endpoint(
+            parameters,
+            path="/credentials/{credential_id}",
+        )
+        target_ids = [target_id]
+        response = infer(endpoint_id)
+        assert response.status_code == 200
+        assert response.json()["eligible_count"] == 2
+        with SessionLocal() as db:
+            selectors = list(db.scalars(
+                select(EndpointResourceBinding.selector).where(
+                    EndpointResourceBinding.endpoint_id == endpoint_id
+                ).order_by(EndpointResourceBinding.selector)
+            ))
+        assert selectors == ["account_id", "opaque"]
+    finally:
+        cleanup(target_ids)
+
+
 def test_idempotency_review_preservation_and_operator_suppression() -> None:
     target_ids = []
     parameters = [
