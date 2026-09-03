@@ -11,7 +11,7 @@ from app.db.session import engine
 
 REVISION = "e9a1c3f5b7d9"
 PARENT = "d8f0b2c4e6a9"
-HEAD = "f3b5d7e9a1c2"
+HEAD = "a4c6e8b0d2f3"
 
 
 def current_revision() -> str | None:

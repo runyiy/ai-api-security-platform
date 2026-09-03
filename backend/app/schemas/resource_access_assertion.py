@@ -65,5 +65,6 @@ class ResourceAccessAssertionRead(BaseModel):
     observed_at: datetime | None
     valid_from: datetime | None
     valid_until: datetime | None
+    source_test_run_id: int | None
 
     model_config = ConfigDict(from_attributes=True)
