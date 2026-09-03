@@ -102,7 +102,7 @@ def infer_parameters(endpoint_id: int):
 
 def test_no_migration_exact_endpoint_empty_body_and_m11_02_unchanged() -> None:
     assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == [
-        "e2a4c6e8b0d3"
+        "f3b5d7e9a1c2"
     ]
     assert infer_body(999_999_999).status_code == 404
     for field in (

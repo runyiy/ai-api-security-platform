@@ -6,7 +6,7 @@ from sqlalchemy import inspect
 from app.db.session import engine
 
 
-LATEST_REVISION = "e2a4c6e8b0d3"
+LATEST_REVISION = "f3b5d7e9a1c2"
 HEAD_REVISION = "c3e5a7b9d1f2"
 PARENT_REVISION = "e7a5b4c3d2f1"
 

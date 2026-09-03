@@ -16,7 +16,7 @@ def test_target_enrollment_provenance_migration_round_trip() -> None:
     config = Config("alembic.ini")
     scripts = ScriptDirectory.from_config(config)
     assert scripts.get_revision(REVISION).down_revision == PARENT
-    assert scripts.get_heads() == ["e2a4c6e8b0d3"]
+    assert scripts.get_heads() == ["f3b5d7e9a1c2"]
     profile_id = revision_id = evaluation_id = validation_id = decision_id = None
     legacy_target_id = second_target_id = None
     try:
