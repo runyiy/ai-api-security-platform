@@ -45,9 +45,31 @@ class ResourceAccessAssertion(Base):
             "provenance <> 'observed_baseline' OR source_test_run_id IS NOT NULL",
             name="ck_resource_access_assertions_observed_source",
         ),
+        CheckConstraint(
+            "reviewed_assertion_id IS NULL OR reviewed_assertion_id <> id",
+            name="ck_resource_access_assertions_review_not_self",
+        ),
+        CheckConstraint(
+            "reviewed_assertion_id IS NULL OR provenance = 'human_verified'",
+            name="ck_resource_access_assertions_review_provenance",
+        ),
+        CheckConstraint(
+            "reviewed_assertion_id IS NULL OR "
+            "verification_state IN ('verified', 'rejected')",
+            name="ck_resource_access_assertions_review_state",
+        ),
+        CheckConstraint(
+            "reviewed_assertion_id IS NULL OR source_test_run_id IS NULL",
+            name="ck_resource_access_assertions_review_source_run",
+        ),
         Index(
             "ux_resource_access_assertions_source_test_run_id",
             "source_test_run_id",
+            unique=True,
+        ),
+        Index(
+            "ux_resource_access_assertions_reviewed_assertion_id",
+            "reviewed_assertion_id",
             unique=True,
         ),
     )
@@ -82,5 +104,9 @@ class ResourceAccessAssertion(Base):
     )
     source_test_run_id: Mapped[int | None] = mapped_column(
         ForeignKey("test_runs.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    reviewed_assertion_id: Mapped[int | None] = mapped_column(
+        ForeignKey("resource_access_assertions.id", ondelete="RESTRICT"),
         nullable=True,
     )

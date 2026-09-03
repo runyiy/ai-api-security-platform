@@ -66,5 +66,23 @@ class ResourceAccessAssertionRead(BaseModel):
     valid_from: datetime | None
     valid_until: datetime | None
     source_test_run_id: int | None
+    reviewed_assertion_id: int | None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class ResourceAccessAssertionReview(BaseModel):
+    decision: Literal["verify", "reject"]
+    confidence: StrictConfidence
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_prohibited_fields(cls, value):
+        if isinstance(value, dict) and set(value) - {"decision", "confidence"}:
+            raise PydanticCustomError(
+                "resource_access_assertion_prohibited_field",
+                "Resource access assertion contains a prohibited field.",
+            )
+        return value
