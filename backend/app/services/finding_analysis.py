@@ -50,6 +50,7 @@ class FindingAnalysisService:
         self,
         *,
         test_run_id: int,
+        baseline_test_run_id: int,
     ) -> FindingAnalysisOutcome:
         test_run = self.db.get(
             TestRun,
@@ -119,33 +120,28 @@ class FindingAnalysisService:
                 "to different targets."
             )
 
-        baseline_case = self.db.scalar(
-            select(TestCase).where(
-                TestCase.endpoint_id
-                == test_case.endpoint_id,
-                TestCase.resource_id
-                == test_case.resource_id,
-                TestCase.test_type
-                == OWNER_BASELINE,
-                TestCase.actor_identity_id
-                == resource.owner_identity_id,
+        baseline_run = self.db.get(TestRun, baseline_test_run_id)
+        if baseline_run is None:
+            raise FindingAnalysisNotFoundError(
+                "finding_baseline_test_run_not_found"
             )
-        )
+        baseline_case = self.db.get(TestCase, baseline_run.test_case_id)
+        if (
+            baseline_run.id == test_run.id
+            or baseline_case is None
+            or baseline_case.test_type != OWNER_BASELINE
+            or baseline_case.endpoint_id != test_case.endpoint_id
+            or baseline_case.resource_id != test_case.resource_id
+            or baseline_case.actor_identity_id == test_case.actor_identity_id
+        ):
+            raise FindingAnalysisError("finding_evidence_pair_invalid")
 
-        baseline_run = None
-
-        if baseline_case is not None:
-            baseline_run = self.db.scalar(
-                select(TestRun)
-                .where(
-                    TestRun.test_case_id
-                    == baseline_case.id
-                )
-                .order_by(
-                    TestRun.id.desc()
-                )
-                .limit(1)
-            )
+        existing = self.db.scalar(select(Finding).where(
+            Finding.test_run_id == test_run.id,
+            Finding.category == "BOLA",
+        ))
+        if existing is not None:
+            self._validate_baseline_binding(existing, baseline_run.id)
 
         result = analyze_bola_run(
             test_case=test_case,
@@ -171,8 +167,7 @@ class FindingAnalysisService:
 
         description = (
             f"Cross-owner access to "
-            f"{resource.resource_type} "
-            f"{resource.external_id!r} "
+            "the target resource "
             "returned a successful response "
             "containing evidence of the target "
             "resource. Human review is required."
@@ -184,6 +179,7 @@ class FindingAnalysisService:
                 target_id=endpoint.target_id,
                 endpoint_id=endpoint.id,
                 test_run_id=test_run.id,
+                baseline_test_run_id=baseline_run.id,
                 category="BOLA",
                 severity=(
                     result.severity
@@ -225,6 +221,8 @@ class FindingAnalysisService:
                 "Finding conflict row not found."
             )
 
+        self._validate_baseline_binding(finding, baseline_run.id)
+
         if finding_id is None:
             finding.severity = (
                 result.severity
@@ -246,3 +244,9 @@ class FindingAnalysisService:
             analysis=result,
             finding=finding,
         )
+
+    @staticmethod
+    def _validate_baseline_binding(finding: Finding, baseline_test_run_id: int) -> None:
+        # Null legacy provenance is deliberately not guessed or backfilled.
+        if finding.baseline_test_run_id != baseline_test_run_id:
+            raise FindingAnalysisError("finding_evidence_pair_conflict")

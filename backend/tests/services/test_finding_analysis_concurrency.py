@@ -20,7 +20,7 @@ from app.services.finding_analysis import FindingAnalysisService
 
 
 @pytest.fixture
-def analyzable_test_run_id() -> Iterator[int]:
+def analyzable_pair() -> Iterator[tuple[int, int]]:
     TestSession = sessionmaker(
         bind=engine,
         autoflush=False,
@@ -117,10 +117,11 @@ def analyzable_test_run_id() -> Iterator[int]:
         db.add_all([baseline_run, cross_owner_run])
         db.commit()
         test_run_id = cross_owner_run.id
+        baseline_test_run_id = baseline_run.id
         target_id = target.id
 
     try:
-        yield test_run_id
+        yield test_run_id, baseline_test_run_id
     finally:
         with TestSession() as db:
             run_ids = select(StoredRun.id).join(
@@ -151,7 +152,7 @@ def analyzable_test_run_id() -> Iterator[int]:
 
 
 def test_concurrent_analysis_returns_one_finding(
-    analyzable_test_run_id: int,
+    analyzable_pair: tuple[int, int],
 ) -> None:
     insert_ready = threading.Barrier(2)
 
@@ -174,7 +175,8 @@ def test_concurrent_analysis_returns_one_finding(
         try:
             with ConcurrentSession() as db:
                 outcome = FindingAnalysisService(db=db).analyze_test_run(
-                    test_run_id=analyzable_test_run_id
+                    test_run_id=analyzable_pair[0],
+                    baseline_test_run_id=analyzable_pair[1],
                 )
                 assert outcome.finding is not None
                 finding_ids.append(outcome.finding.id)
@@ -191,7 +193,7 @@ def test_concurrent_analysis_returns_one_finding(
     with ConcurrentSession() as db:
         finding_count = db.scalar(
             select(func.count(Finding.id)).where(
-                Finding.test_run_id == analyzable_test_run_id,
+                Finding.test_run_id == analyzable_pair[0],
                 Finding.category == "BOLA",
             )
         )
@@ -203,7 +205,7 @@ def test_concurrent_analysis_returns_one_finding(
 
 
 def test_reanalysis_updates_existing_finding_without_duplicate(
-    analyzable_test_run_id: int,
+    analyzable_pair: tuple[int, int],
 ) -> None:
     TestSession = sessionmaker(
         bind=engine,
@@ -213,7 +215,8 @@ def test_reanalysis_updates_existing_finding_without_duplicate(
 
     with TestSession() as db:
         first = FindingAnalysisService(db=db).analyze_test_run(
-            test_run_id=analyzable_test_run_id
+            test_run_id=analyzable_pair[0],
+            baseline_test_run_id=analyzable_pair[1],
         )
         assert first.finding is not None
         finding_id = first.finding.id
@@ -228,7 +231,8 @@ def test_reanalysis_updates_existing_finding_without_duplicate(
 
     with TestSession() as db:
         second = FindingAnalysisService(db=db).analyze_test_run(
-            test_run_id=analyzable_test_run_id
+            test_run_id=analyzable_pair[0],
+            baseline_test_run_id=analyzable_pair[1],
         )
         assert second.finding is not None
 
@@ -236,7 +240,7 @@ def test_reanalysis_updates_existing_finding_without_duplicate(
         stored = db.get(Finding, finding_id)
         finding_count = db.scalar(
             select(func.count(Finding.id)).where(
-                Finding.test_run_id == analyzable_test_run_id,
+                Finding.test_run_id == analyzable_pair[0],
                 Finding.category == "BOLA",
             )
         )

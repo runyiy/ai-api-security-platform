@@ -11,6 +11,7 @@ from app.db.models.finding import Finding
 from app.db.models.target import Target
 from app.db.session import get_db
 from app.schemas.finding import (
+    AnalyzeTestRunRequest,
     AnalyzeTestRunResponse,
     FindingRead,
     FindingReviewRequest,
@@ -33,6 +34,7 @@ router = APIRouter(
 )
 def analyze_test_run(
     test_run_id: int,
+    payload: AnalyzeTestRunRequest,
     db: Session = Depends(get_db),
 ) -> AnalyzeTestRunResponse:
     service = FindingAnalysisService(
@@ -41,7 +43,8 @@ def analyze_test_run(
 
     try:
         outcome = service.analyze_test_run(
-            test_run_id=test_run_id
+            test_run_id=test_run_id,
+            baseline_test_run_id=payload.baseline_test_run_id,
         )
 
     except FindingAnalysisNotFoundError as exc:

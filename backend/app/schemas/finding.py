@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 FindingReviewStatus = Literal[
@@ -17,6 +17,7 @@ class FindingRead(BaseModel):
     target_id: int
     endpoint_id: int
     test_run_id: int
+    baseline_test_run_id: int | None
 
     category: str
     severity: str
@@ -35,6 +36,12 @@ class FindingRead(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,
     )
+
+
+class AnalyzeTestRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    baseline_test_run_id: int = Field(strict=True, gt=0)
 
 
 class AnalyzeTestRunResponse(BaseModel):
