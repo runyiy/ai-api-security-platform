@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
@@ -7,10 +7,12 @@ from sqlalchemy.orm import Session
 from app.analyzers.bola import (
     AnalysisOutcome,
     BOLAAnalysisResult,
+    BOLAStructuredEvidence,
     analyze_bola_run,
 )
 from app.db.models.endpoint import Endpoint
 from app.db.models.finding import Finding
+from app.db.models.finding_evidence_record import FindingEvidenceRecord
 from app.db.models.resource import Resource
 from app.db.models.test_case import TestCase
 from app.db.models.test_run import TestRun
@@ -159,6 +161,14 @@ class FindingAnalysisService:
                 finding=None,
             )
 
+        evidence = result.evidence
+        if (
+            evidence is None
+            or evidence.probe_test_run_id != test_run.id
+            or evidence.baseline_test_run_id != baseline_run.id
+        ):
+            raise FindingAnalysisError("finding_structured_evidence_conflict")
+
         title = (
             f"Potential BOLA in "
             f"{endpoint.method} "
@@ -222,6 +232,7 @@ class FindingAnalysisService:
             )
 
         self._validate_baseline_binding(finding, baseline_run.id)
+        self._persist_structured_evidence(finding, evidence)
 
         if finding_id is None:
             finding.severity = (
@@ -244,6 +255,24 @@ class FindingAnalysisService:
             analysis=result,
             finding=finding,
         )
+
+    def _persist_structured_evidence(
+        self, finding: Finding, evidence: BOLAStructuredEvidence,
+    ) -> None:
+        values = {"finding_id": finding.id, **asdict(evidence)}
+        self.db.scalar(
+            insert(FindingEvidenceRecord)
+            .values(**values)
+            .on_conflict_do_nothing(constraint="uq_finding_evidence_records_finding_id")
+            .returning(FindingEvidenceRecord.id)
+        )
+        stored = self.db.scalar(
+            select(FindingEvidenceRecord)
+            .where(FindingEvidenceRecord.finding_id == finding.id)
+            .execution_options(populate_existing=True)
+        )
+        if stored is None or any(getattr(stored, key) != value for key, value in values.items()):
+            raise FindingAnalysisError("finding_structured_evidence_conflict")
 
     @staticmethod
     def _validate_baseline_binding(finding: Finding, baseline_test_run_id: int) -> None:

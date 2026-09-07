@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from enum import StrEnum
 import json
-from typing import Any
+from typing import Any, Literal
 
 from app.db.models.resource import Resource
 from app.db.models.test_case import TestCase
@@ -17,6 +17,22 @@ class AnalysisOutcome(StrEnum):
     INCONCLUSIVE = "inconclusive"
 
 
+@dataclass(frozen=True, slots=True)
+class BOLAStructuredEvidence:
+    probe_test_run_id: int
+    baseline_test_run_id: int
+    baseline_status_code: int
+    probe_status_code: int
+    baseline_resource_identifier_present: bool
+    probe_resource_identifier_present: bool
+    evidence_type: Literal["bola_resource_identifier_pair"] = "bola_resource_identifier_pair"
+    rule_id: Literal["bola_resource_identifier_presence"] = "bola_resource_identifier_presence"
+    rule_version: Literal["1"] = "1"
+    reason_code: Literal["baseline_and_probe_contain_target_resource_identifier"] = (
+        "baseline_and_probe_contain_target_resource_identifier"
+    )
+
+
 @dataclass(frozen=True)
 class BOLAAnalysisResult:
     outcome: AnalysisOutcome
@@ -25,6 +41,7 @@ class BOLAAnalysisResult:
 
     confidence: float | None = None
     severity: str | None = None
+    evidence: BOLAStructuredEvidence | None = None
 
 def parse_json_body(
     body: str | None,
@@ -262,6 +279,14 @@ def analyze_bola_run(
             ),
             confidence=confidence,
             severity="high",
+            evidence=BOLAStructuredEvidence(
+                probe_test_run_id=cross_owner_run.id,
+                baseline_test_run_id=owner_baseline_run.id,
+                baseline_status_code=owner_baseline_run.response_status,
+                probe_status_code=cross_status,
+                baseline_resource_identifier_present=baseline_contains_resource,
+                probe_resource_identifier_present=cross_contains_resource,
+            ),
         )
 
     return BOLAAnalysisResult(

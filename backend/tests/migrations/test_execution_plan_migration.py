@@ -7,7 +7,7 @@ from app.db.session import engine
 
 
 HEAD = "d5f7a9c1e3b5"
-LATEST = "c7e9a1b3d5f6"
+LATEST = "d9f1b3c5e7a8"
 PARENT = "c3e5a7b9d1f2"
 
 
@@ -41,6 +41,7 @@ def test_m5_01_migration_round_trip() -> None:
                 "asset_enrollment_decisions",
                 "endpoint_resource_bindings",
                 "resource_access_assertions",
+                "finding_evidence_records",
             }
         assert {"execution_plans", "plan_actions"}.issubset(
             inspector.get_table_names()

@@ -57,3 +57,21 @@ class AnalyzeTestRunResponse(BaseModel):
 class FindingReviewRequest(BaseModel):
     status: FindingReviewStatus
     review_notes: str | None = None
+
+
+class FindingEvidenceRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    finding_id: int
+    probe_test_run_id: int
+    baseline_test_run_id: int
+    evidence_type: str
+    rule_id: str
+    rule_version: str
+    reason_code: str
+    baseline_status_code: int
+    probe_status_code: int
+    baseline_resource_identifier_present: bool
+    probe_resource_identifier_present: bool
+    created_at: datetime
