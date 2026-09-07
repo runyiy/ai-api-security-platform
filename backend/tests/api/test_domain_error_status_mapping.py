@@ -15,6 +15,7 @@ from app.services.ai_analysis import (
     AIAnalysisService,
     AIAnalysisServiceError,
 )
+from app.schemas.finding import AnalyzeTestRunRequest
 from app.services.finding_analysis import (
     FindingAnalysisError,
     FindingAnalysisNotFoundError,
@@ -83,7 +84,7 @@ def test_finding_analysis_route_maps_not_found_conflict_and_success(
         raise_error(FindingAnalysisNotFoundError("TestRun not found.")),
     )
     with pytest.raises(HTTPException) as missing:
-        analyze_test_run(test_run_id=999, db=db)
+        analyze_test_run(test_run_id=999, payload=AnalyzeTestRunRequest(baseline_test_run_id=1), db=db)
     assert missing.value.status_code == 404
 
     monkeypatch.setattr(
@@ -96,7 +97,7 @@ def test_finding_analysis_route_maps_not_found_conflict_and_success(
         ),
     )
     with pytest.raises(HTTPException) as conflict:
-        analyze_test_run(test_run_id=1, db=db)
+        analyze_test_run(test_run_id=1, payload=AnalyzeTestRunRequest(baseline_test_run_id=2), db=db)
     assert conflict.value.status_code == 409
 
     outcome = FindingAnalysisOutcome(
@@ -111,7 +112,7 @@ def test_finding_analysis_route_maps_not_found_conflict_and_success(
         "analyze_test_run",
         lambda self, **kwargs: outcome,
     )
-    response = analyze_test_run(test_run_id=1, db=db)
+    response = analyze_test_run(test_run_id=1, payload=AnalyzeTestRunRequest(baseline_test_run_id=2), db=db)
     assert response.outcome == AnalysisOutcome.INCONCLUSIVE
 
 
@@ -194,7 +195,7 @@ def test_services_raise_not_found_subclasses_for_missing_primary_ids() -> None:
         ExecutionService(db=db, executor=Mock()).execute(test_case_id=999)
 
     with pytest.raises(FindingAnalysisNotFoundError):
-        FindingAnalysisService(db=db).analyze_test_run(test_run_id=999)
+        FindingAnalysisService(db=db).analyze_test_run(test_run_id=999, baseline_test_run_id=1)
 
     with pytest.raises(SecurityReportNotFoundError):
         SecurityReportService(db=db).generate(finding_id=999)

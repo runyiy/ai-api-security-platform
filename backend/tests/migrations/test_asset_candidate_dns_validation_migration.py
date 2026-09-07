@@ -21,7 +21,7 @@ def test_dns_validation_migration_schema_constraints_and_round_trip() -> None:
     config = Config("alembic.ini")
     scripts = ScriptDirectory.from_config(config)
     assert scripts.get_revision(REVISION).down_revision == PARENT
-    assert scripts.get_heads() == ["b6d8f0a2c4e5"]
+    assert scripts.get_heads() == ["c7e9a1b3d5f6"]
     profile_id = revision_id = rule_id = evaluation_id = None
     try:
         command.downgrade(config, PARENT)

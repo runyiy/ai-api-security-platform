@@ -287,7 +287,8 @@ def test_local_bola_workflow_end_to_end(bola_lab: RunningBOLALab) -> None:
             assert "bob-token" not in json.dumps(cross_owner_run.request_data)
 
             analysis = FindingAnalysisService(db=db).analyze_test_run(
-                test_run_id=cross_owner_run.id
+                test_run_id=cross_owner_run.id,
+                baseline_test_run_id=owner_run.id,
             )
 
             if bola_lab.mode == BOLALabMode.SECURE:

@@ -56,6 +56,16 @@ class Finding(Base):
         index=True,
     )
 
+    baseline_test_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey(
+            "test_runs.id",
+            name="fk_findings_baseline_test_run_id",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
+        index=True,
+    )
+
     category: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
