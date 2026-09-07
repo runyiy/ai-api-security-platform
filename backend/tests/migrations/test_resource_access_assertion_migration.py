@@ -16,7 +16,7 @@ def test_resource_access_assertion_migration_contract_and_round_trip() -> None:
     config = Config("alembic.ini")
     scripts = ScriptDirectory.from_config(config)
     assert scripts.get_revision(REVISION).down_revision == PARENT
-    assert scripts.get_heads() == ["c7e9a1b3d5f6"]
+    assert scripts.get_heads() == ["d9f1b3c5e7a8"]
     target_id = identity_id = resource_id = None
     try:
         command.downgrade(config, PARENT)

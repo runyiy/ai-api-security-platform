@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.models.endpoint import Endpoint
 from app.db.models.finding import Finding
+from app.db.models.finding_evidence_record import FindingEvidenceRecord
 from app.db.models.resource import Resource
 from app.db.models.target import Target
 from app.db.models.test_case import TestCase as StoredCase
@@ -131,6 +132,9 @@ def analyzable_pair() -> Iterator[tuple[int, int]]:
                 Endpoint,
                 StoredCase.endpoint_id == Endpoint.id,
             ).where(Endpoint.target_id == target_id)
+            db.execute(delete(FindingEvidenceRecord).where(
+                FindingEvidenceRecord.finding_id.in_(select(Finding.id).where(
+                    Finding.test_run_id.in_(run_ids)))))
             db.execute(
                 delete(Finding).where(Finding.test_run_id.in_(run_ids))
             )
@@ -158,7 +162,7 @@ def test_concurrent_analysis_returns_one_finding(
 
     class RacingSession(Session):
         def scalar(self, statement, *args, **kwargs):
-            if isinstance(statement, Insert):
+            if isinstance(statement, Insert) and statement.table.name == "findings":
                 insert_ready.wait(timeout=10)
             return super().scalar(statement, *args, **kwargs)
 

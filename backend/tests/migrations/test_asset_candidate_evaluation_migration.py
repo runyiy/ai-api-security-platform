@@ -16,7 +16,7 @@ def test_asset_candidate_evaluation_migration_round_trip_and_constraints() -> No
     config = Config("alembic.ini")
     scripts = ScriptDirectory.from_config(config)
     assert scripts.get_revision(REVISION).down_revision == PARENT
-    assert scripts.get_heads() == ["c7e9a1b3d5f6"]
+    assert scripts.get_heads() == ["d9f1b3c5e7a8"]
     profile_id = revision_id = rule_id = None
     try:
         command.downgrade(config, PARENT)

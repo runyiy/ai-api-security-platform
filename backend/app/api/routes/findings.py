@@ -8,12 +8,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models.finding import Finding
+from app.db.models.finding_evidence_record import FindingEvidenceRecord
 from app.db.models.target import Target
 from app.db.session import get_db
 from app.schemas.finding import (
     AnalyzeTestRunRequest,
     AnalyzeTestRunResponse,
     FindingRead,
+    FindingEvidenceRead,
     FindingReviewRequest,
 )
 from app.services.finding_analysis import (
@@ -161,3 +163,18 @@ def review_finding(
     db.refresh(finding)
 
     return finding
+
+
+@router.get("/findings/{finding_id}/evidence", response_model=FindingEvidenceRead)
+def read_finding_evidence(
+    finding_id: int,
+    db: Session = Depends(get_db),
+) -> FindingEvidenceRecord:
+    if db.get(Finding, finding_id) is None:
+        raise HTTPException(status_code=404, detail="Finding not found.")
+    evidence = db.scalar(select(FindingEvidenceRecord).where(
+        FindingEvidenceRecord.finding_id == finding_id,
+    ))
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="finding_structured_evidence_not_found")
+    return evidence

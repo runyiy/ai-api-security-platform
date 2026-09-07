@@ -272,7 +272,7 @@ def test_analysis_has_zero_execution_network_ai_or_authority_side_effects(eviden
     def snapshot():
         with engine.connect() as db:
             return {table.name: list(db.execute(select(table).order_by(*table.primary_key.columns)).mappings())
-                    for table in Base.metadata.sorted_tables if table.name != "findings"}
+                    for table in Base.metadata.sorted_tables if table.name not in {"findings", "finding_evidence_records"}}
 
     before = snapshot()
     config_before = settings.model_dump()
@@ -295,5 +295,9 @@ def test_analysis_has_zero_execution_network_ai_or_authority_side_effects(eviden
     response = analyze(ids)
     assert response.status_code == 200
     assert response.json()["outcome"] == "potential_bola"
+    evidence = client.get(f"/api/findings/{response.json()['finding']['id']}/evidence")
+    assert evidence.status_code == 200
+    assert evidence.json()["probe_test_run_id"] == ids["probe"]
+    assert evidence.json()["baseline_test_run_id"] == ids["baseline"]
     assert snapshot() == before
     assert settings.model_dump() == config_before

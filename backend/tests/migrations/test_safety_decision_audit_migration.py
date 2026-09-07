@@ -7,7 +7,7 @@ from app.db.session import engine
 
 
 HEAD = "e6a8c0d2f4b7"
-LATEST = "c7e9a1b3d5f6"
+LATEST = "d9f1b3c5e7a8"
 PARENT = "d5f7a9c1e3b5"
 
 
@@ -39,6 +39,7 @@ def test_m5_03_migration_round_trip_preserves_preexisting_schema() -> None:
                 "asset_enrollment_decisions",
                 "endpoint_resource_bindings",
                 "resource_access_assertions",
+                "finding_evidence_records",
             }
         preexisting = tables_before - {"safety_decision_records", *later_tables}
         assert "safety_decision_records" in tables_before

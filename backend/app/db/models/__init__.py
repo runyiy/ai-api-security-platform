@@ -18,6 +18,7 @@ from app.db.models.execution_plan_claim import ExecutionPlanClaim
 from app.db.models.execution_plan_cancellation import ExecutionPlanCancellation
 from app.db.models.execution_plan_progress import ExecutionPlanProgress
 from app.db.models.finding import Finding
+from app.db.models.finding_evidence_record import FindingEvidenceRecord
 from app.db.models.finding_ai_analysis import FindingAIAnalysis
 from app.db.models.network_control import NetworkDisabledTarget, NetworkGlobalControl
 from app.db.models.openapi_import_record import OpenAPIImportRecord
@@ -63,6 +64,7 @@ __all__ = [
     "TestCase",
     "TestRun",
     "Finding",
+    "FindingEvidenceRecord",
     "FindingAIAnalysis",
     "NetworkDisabledTarget",
     "NetworkGlobalControl",

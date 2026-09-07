@@ -17,6 +17,7 @@ from app.db.models.credential_binding import CredentialBinding
 from app.db.models.credential_secret_version import CredentialSecretVersion
 from app.db.models.endpoint import Endpoint
 from app.db.models.finding import Finding
+from app.db.models.finding_evidence_record import FindingEvidenceRecord
 from app.db.models.resource import Resource
 from app.db.models.scope import Scope
 from app.db.models.safety_decision_record import SafetyDecisionRecord
@@ -224,6 +225,9 @@ def _delete_workflow(target_id: int, profile_id: int) -> None:
         test_case_ids = select(StoredCase.id).join(Endpoint).where(
             Endpoint.target_id == target_id
         )
+        db.execute(delete(FindingEvidenceRecord).where(
+            FindingEvidenceRecord.finding_id.in_(select(Finding.id).where(
+                Finding.target_id == target_id))))
         db.execute(delete(Finding).where(Finding.target_id == target_id))
         db.execute(delete(StoredRun).where(StoredRun.test_case_id.in_(test_case_ids)))
         db.execute(delete(StoredCase).where(StoredCase.id.in_(test_case_ids)))

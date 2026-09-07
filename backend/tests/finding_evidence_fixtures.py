@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import delete, select
 
 from app.db.models import (
-    Endpoint, Finding, Resource, Target, TestCase as StoredCase,
+    Endpoint, Finding, FindingEvidenceRecord, Resource, Target, TestCase as StoredCase,
     TestIdentity as StoredIdentity, TestRun as StoredRun,
 )
 from app.db.session import SessionLocal
@@ -64,6 +64,9 @@ def evidence_pair():
         yield ids
     finally:
         with SessionLocal() as db:
+            db.execute(delete(FindingEvidenceRecord).where(
+                FindingEvidenceRecord.finding_id.in_(select(Finding.id).where(
+                    Finding.target_id == ids["target"]))))
             db.execute(delete(Finding).where(Finding.target_id == ids["target"]))
             case_ids = select(StoredCase.id).where(StoredCase.endpoint_id.in_(
                 [ids["endpoint"], ids["other_endpoint"]]))
