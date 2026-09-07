@@ -272,7 +272,7 @@ def test_analysis_has_zero_execution_network_ai_or_authority_side_effects(eviden
     def snapshot():
         with engine.connect() as db:
             return {table.name: list(db.execute(select(table).order_by(*table.primary_key.columns)).mappings())
-                    for table in Base.metadata.sorted_tables if table.name not in {"findings", "finding_evidence_records"}}
+                    for table in Base.metadata.sorted_tables if table.name not in {"findings", "finding_evidence_records", "finding_evidence_excerpts"}}
 
     before = snapshot()
     config_before = settings.model_dump()
@@ -299,5 +299,11 @@ def test_analysis_has_zero_execution_network_ai_or_authority_side_effects(eviden
     assert evidence.status_code == 200
     assert evidence.json()["probe_test_run_id"] == ids["probe"]
     assert evidence.json()["baseline_test_run_id"] == ids["baseline"]
+    excerpt = client.get(f"/api/findings/{response.json()['finding']['id']}/evidence/excerpts")
+    assert excerpt.status_code == 200
+    assert excerpt.json()["finding_evidence_record_id"] == evidence.json()["id"]
+    assert excerpt.json()["baseline_excerpt"] == excerpt.json()["probe_excerpt"] == (
+        '{"id":"[MATCHED_RESOURCE_IDENTIFIER]"}'
+    )
     assert snapshot() == before
     assert settings.model_dump() == config_before

@@ -8,10 +8,12 @@ from app.analyzers.bola import (
     AnalysisOutcome,
     BOLAAnalysisResult,
     BOLAStructuredEvidence,
+    BOLARedactedExcerptEvidence,
     analyze_bola_run,
 )
 from app.db.models.endpoint import Endpoint
 from app.db.models.finding import Finding
+from app.db.models.finding_evidence_excerpt import FindingEvidenceExcerpt
 from app.db.models.finding_evidence_record import FindingEvidenceRecord
 from app.db.models.resource import Resource
 from app.db.models.test_case import TestCase
@@ -169,6 +171,10 @@ class FindingAnalysisService:
         ):
             raise FindingAnalysisError("finding_structured_evidence_conflict")
 
+        excerpt = result.excerpt_evidence
+        if not isinstance(excerpt, BOLARedactedExcerptEvidence):
+            raise FindingAnalysisError("finding_evidence_excerpt_conflict")
+
         title = (
             f"Potential BOLA in "
             f"{endpoint.method} "
@@ -183,70 +189,74 @@ class FindingAnalysisService:
             "resource. Human review is required."
         )
 
-        finding_id = self.db.scalar(
-            insert(Finding)
-            .values(
-                target_id=endpoint.target_id,
-                endpoint_id=endpoint.id,
-                test_run_id=test_run.id,
-                baseline_test_run_id=baseline_run.id,
-                category="BOLA",
-                severity=(
+        # Roll back all newly appended rows on failure even if a caller catches
+        # the exception and later commits its surrounding transaction.
+        with self.db.begin_nested():
+            finding_id = self.db.scalar(
+                insert(Finding)
+                .values(
+                    target_id=endpoint.target_id,
+                    endpoint_id=endpoint.id,
+                    test_run_id=test_run.id,
+                    baseline_test_run_id=baseline_run.id,
+                    category="BOLA",
+                    severity=(
+                        result.severity
+                        or "unknown"
+                    ),
+                    confidence=(
+                        result.confidence
+                        or 0.0
+                    ),
+                    status="potential",
+                    title=title,
+                    description=description,
+                )
+                .on_conflict_do_nothing(
+                    constraint=(
+                        "uq_finding_test_run_category"
+                    )
+                )
+                .returning(Finding.id)
+            )
+
+            if finding_id is not None:
+                finding = self.db.get(
+                    Finding,
+                    finding_id,
+                )
+            else:
+                finding = self.db.scalar(
+                    select(Finding).where(
+                        Finding.test_run_id
+                        == test_run.id,
+                        Finding.category
+                        == "BOLA",
+                    )
+                )
+
+            if finding is None:
+                raise RuntimeError(
+                    "Finding conflict row not found."
+                )
+
+            self._validate_baseline_binding(finding, baseline_run.id)
+            stored_evidence = self._persist_structured_evidence(finding, evidence)
+            self._persist_excerpt(stored_evidence.id, excerpt)
+
+            if finding_id is None:
+                finding.severity = (
                     result.severity
                     or "unknown"
-                ),
-                confidence=(
+                )
+
+                finding.confidence = (
                     result.confidence
                     or 0.0
-                ),
-                status="potential",
-                title=title,
-                description=description,
-            )
-            .on_conflict_do_nothing(
-                constraint=(
-                    "uq_finding_test_run_category"
                 )
-            )
-            .returning(Finding.id)
-        )
 
-        if finding_id is not None:
-            finding = self.db.get(
-                Finding,
-                finding_id,
-            )
-        else:
-            finding = self.db.scalar(
-                select(Finding).where(
-                    Finding.test_run_id
-                    == test_run.id,
-                    Finding.category
-                    == "BOLA",
-                )
-            )
-
-        if finding is None:
-            raise RuntimeError(
-                "Finding conflict row not found."
-            )
-
-        self._validate_baseline_binding(finding, baseline_run.id)
-        self._persist_structured_evidence(finding, evidence)
-
-        if finding_id is None:
-            finding.severity = (
-                result.severity
-                or "unknown"
-            )
-
-            finding.confidence = (
-                result.confidence
-                or 0.0
-            )
-
-            finding.title = title
-            finding.description = description
+                finding.title = title
+                finding.description = description
 
         self.db.commit()
         self.db.refresh(finding)
@@ -258,7 +268,7 @@ class FindingAnalysisService:
 
     def _persist_structured_evidence(
         self, finding: Finding, evidence: BOLAStructuredEvidence,
-    ) -> None:
+    ) -> FindingEvidenceRecord:
         values = {"finding_id": finding.id, **asdict(evidence)}
         self.db.scalar(
             insert(FindingEvidenceRecord)
@@ -273,6 +283,25 @@ class FindingAnalysisService:
         )
         if stored is None or any(getattr(stored, key) != value for key, value in values.items()):
             raise FindingAnalysisError("finding_structured_evidence_conflict")
+        return stored
+
+    def _persist_excerpt(
+        self, finding_evidence_record_id: int, excerpt: BOLARedactedExcerptEvidence,
+    ) -> None:
+        values = {"finding_evidence_record_id": finding_evidence_record_id, **asdict(excerpt)}
+        self.db.scalar(
+            insert(FindingEvidenceExcerpt)
+            .values(**values)
+            .on_conflict_do_nothing(constraint="uq_finding_evidence_excerpts_evidence_record_id")
+            .returning(FindingEvidenceExcerpt.id)
+        )
+        stored = self.db.scalar(
+            select(FindingEvidenceExcerpt)
+            .where(FindingEvidenceExcerpt.finding_evidence_record_id == finding_evidence_record_id)
+            .execution_options(populate_existing=True)
+        )
+        if stored is None or any(getattr(stored, key) != value for key, value in values.items()):
+            raise FindingAnalysisError("finding_evidence_excerpt_conflict")
 
     @staticmethod
     def _validate_baseline_binding(finding: Finding, baseline_test_run_id: int) -> None:

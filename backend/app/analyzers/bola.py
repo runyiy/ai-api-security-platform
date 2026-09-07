@@ -33,6 +33,19 @@ class BOLAStructuredEvidence:
     )
 
 
+MATCHED_RESOURCE_IDENTIFIER = "[MATCHED_RESOURCE_IDENTIFIER]"
+MAX_EXCERPT_LENGTH = 192
+MATCHED_IDENTIFIER_FIELD = "[MATCHED_RESOURCE_IDENTIFIER_FIELD]"
+
+
+@dataclass(frozen=True, slots=True)
+class BOLARedactedExcerptEvidence:
+    baseline_excerpt: str
+    probe_excerpt: str
+    extractor_id: Literal["bola_matched_identifier_field"] = "bola_matched_identifier_field"
+    extractor_version: Literal["1"] = "1"
+
+
 @dataclass(frozen=True)
 class BOLAAnalysisResult:
     outcome: AnalysisOutcome
@@ -42,6 +55,7 @@ class BOLAAnalysisResult:
     confidence: float | None = None
     severity: str | None = None
     evidence: BOLAStructuredEvidence | None = None
+    excerpt_evidence: BOLARedactedExcerptEvidence | None = None
 
 def parse_json_body(
     body: str | None,
@@ -69,51 +83,43 @@ def normalize_scalar(
     return None
 
 
-def json_contains_resource_id(
-    *,
-    value: Any,
-    resource: Resource,
-) -> bool:
-    allowed_keys = {
-        "id",
-        f"{resource.resource_type}_id",
-    }
-
+def json_matching_resource_id_key(
+    *, value: Any, resource: Resource,
+) -> str | None:
+    """Return only the first matching key in the existing depth-first order."""
+    allowed_keys = {"id", f"{resource.resource_type}_id"}
     if isinstance(value, dict):
         for key, child in value.items():
-            normalized_key = str(
-                key
-            ).lower()
+            if str(key).lower() in allowed_keys:
+                if normalize_scalar(child) == resource.external_id:
+                    return str(key)
+            matched_key = json_matching_resource_id_key(value=child, resource=resource)
+            if matched_key is not None:
+                return matched_key
+    elif isinstance(value, list):
+        for child in value:
+            matched_key = json_matching_resource_id_key(value=child, resource=resource)
+            if matched_key is not None:
+                return matched_key
+    return None
 
-            if normalized_key in allowed_keys:
-                scalar = normalize_scalar(
-                    child
-                )
 
-                if (
-                    scalar
-                    == resource.external_id
-                ):
-                    return True
+def json_contains_resource_id(*, value: Any, resource: Resource) -> bool:
+    return json_matching_resource_id_key(value=value, resource=resource) is not None
 
-            if json_contains_resource_id(
-                value=child,
-                resource=resource,
-            ):
-                return True
 
-        return False
-
-    if isinstance(value, list):
-        return any(
-            json_contains_resource_id(
-                value=item,
-                resource=resource,
-            )
-            for item in value
+def redacted_identifier_excerpt(key: str) -> str:
+    excerpt = json.dumps(
+        {key: MATCHED_RESOURCE_IDENTIFIER}, ensure_ascii=False, separators=(",", ":"),
+    )
+    # Escaping can expand a valid resource type beyond the storage bound.
+    # Label the matched field without retaining its literal key in that case;
+    # evidence representation must never change the analyzer classification.
+    if len(excerpt) > MAX_EXCERPT_LENGTH:
+        return json.dumps(
+            {MATCHED_IDENTIFIER_FIELD: MATCHED_RESOURCE_IDENTIFIER}, separators=(",", ":"),
         )
-
-    return False
+    return excerpt
 
 
 def is_success_status(
@@ -242,25 +248,12 @@ def analyze_bola_run(
             ),
         )
 
-    baseline_contains_resource = (
-        baseline_json is not None
-        and json_contains_resource_id(
-            value=baseline_json,
-            resource=resource,
-        )
-    )
+    baseline_key = json_matching_resource_id_key(value=baseline_json, resource=resource)
+    cross_key = json_matching_resource_id_key(value=cross_json, resource=resource)
+    baseline_contains_resource = baseline_key is not None
+    cross_contains_resource = cross_key is not None
 
-    cross_contains_resource = (
-        json_contains_resource_id(
-            value=cross_json,
-            resource=resource,
-        )
-    )
-
-    if (
-        baseline_contains_resource
-        and cross_contains_resource
-    ):
+    if baseline_key is not None and cross_key is not None:
         confidence = 0.95
 
         if baseline_json == cross_json:
@@ -279,6 +272,10 @@ def analyze_bola_run(
             ),
             confidence=confidence,
             severity="high",
+            excerpt_evidence=BOLARedactedExcerptEvidence(
+                baseline_excerpt=redacted_identifier_excerpt(baseline_key),
+                probe_excerpt=redacted_identifier_excerpt(cross_key),
+            ),
             evidence=BOLAStructuredEvidence(
                 probe_test_run_id=cross_owner_run.id,
                 baseline_test_run_id=owner_baseline_run.id,

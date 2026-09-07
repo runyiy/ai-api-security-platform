@@ -77,6 +77,14 @@ Assertions require confidence, verification state, and relevant observed/asserte
 
 Evidence retention defaults to data minimization. Full third-party response bodies are not the intended permanent evidence model. Persisted evidence should be structured, bounded, redacted, provenance-bearing, and limited to what is materially necessary to explain a finding. Secrets must never be persisted as evidence.
 
+M13-03 bounded excerpt clarification (Issue #110): the analyzer selects the first matching identifier field using its existing traversal order. When its compact JSON representation fits within 192 characters, the excerpt preserves that literal key exactly, including ordinary `id` and `{resource_type}_id` keys, and replaces the value with `[MATCHED_RESOURCE_IDENTIFIER]`. Existing Resource types can contain characters whose JSON escaping exceeds this bound. Only for that case, the excerpt uses this fixed field label:
+
+```json
+{"[MATCHED_RESOURCE_IDENTIFIER_FIELD]":"[MATCHED_RESOURCE_IDENTIFIER]"}
+```
+
+The fallback label denotes a matched identifier field whose literal key is omitted; it is not a response key or a truncated key. It contains no original key content, identifier value, siblings, or body data. Baseline and probe independently use the literal form or this fallback. Both forms remain canonical compact one-field JSON in the same immutable typed excerpt with extractor `bola_matched_identifier_field`, version `1`. This representation preserves the existing analysis outcome, confidence, structured evidence, 192-character storage bound, and append-once conflict behavior without changing Resource validation or existing rows.
+
 ## Wildcard asset enrollment
 
 Wildcard program domains are discovery and enrollment rules, not execution authorization:

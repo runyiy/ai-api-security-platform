@@ -75,3 +75,15 @@ class FindingEvidenceRead(BaseModel):
     baseline_resource_identifier_present: bool
     probe_resource_identifier_present: bool
     created_at: datetime
+
+
+class FindingEvidenceExcerptRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    finding_evidence_record_id: int
+    extractor_id: str
+    extractor_version: str
+    baseline_excerpt: str
+    probe_excerpt: str
+    created_at: datetime
