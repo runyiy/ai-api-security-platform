@@ -10,6 +10,7 @@ from app.db.session import get_db
 from app.schemas.resource_access_assertion import (
     ResourceAccessAssertionCreate,
     ResourceAccessAssertionRead,
+    ResourceAccessAssertionReview,
 )
 from app.schemas.observed_access_assertion import ObservedAccessAssertionCreate
 from app.services.observed_access_assertion import (
@@ -17,6 +18,10 @@ from app.services.observed_access_assertion import (
     derive_observed_access_assertion,
 )
 from app.schemas.resource_access_resolution import ResourceAccessResolutionRead
+from app.services.resource_access_assertion_review import (
+    ResourceAccessAssertionReviewError,
+    review_resource_access_assertion,
+)
 from app.services.resource_access_resolution import (
     ResourceAccessResolutionError,
     resolve_resource_access,
@@ -24,6 +29,38 @@ from app.services.resource_access_resolution import (
 
 
 router = APIRouter(tags=["resource-access-assertions"])
+
+
+@router.post(
+    "/resources/{resource_id}/access-assertions/{assertion_id}/review",
+    response_model=ResourceAccessAssertionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def review_access_assertion(
+    resource_id: int,
+    assertion_id: int,
+    payload: ResourceAccessAssertionReview,
+    db: Session = Depends(get_db),
+) -> ResourceAccessAssertion:
+    try:
+        review = review_resource_access_assertion(
+            db,
+            resource_id,
+            assertion_id,
+            payload.decision,
+            payload.confidence,
+        )
+        db.commit()
+    except ResourceAccessAssertionReviewError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=exc.status_code, detail=exc.code
+        ) from exc
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(review)
+    return review
 
 
 @router.get(
