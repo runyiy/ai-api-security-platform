@@ -84,6 +84,40 @@ def test_resource_access_assertion_review_migration_round_trip() -> None:
                 "non_owner", "allowed", "inferred_candidate", 21,
                 "candidate", None,
             )
+            # Valid foreign keys and unused lineage isolate the source-run check.
+            with db.begin_nested() as fixture:
+                endpoint_id = db.scalar(text("""
+                    INSERT INTO endpoints
+                        (target_id, path, method, requires_auth, parameters)
+                    VALUES (:target, '/orders/{id}', 'GET', true, '[]'::jsonb)
+                    RETURNING id
+                """), ids)
+                case_id = db.scalar(text("""
+                    INSERT INTO test_cases
+                        (endpoint_id, actor_identity_id, resource_id, test_type,
+                         ownership_relation, expected_statuses, status)
+                    VALUES (:endpoint, :identity, :resource, 'owner_baseline',
+                            'owner', ARRAY[200], 'completed') RETURNING id
+                """), {**ids, "endpoint": endpoint_id})
+                run_id = db.scalar(text("""
+                    INSERT INTO test_runs (test_case_id, request_data)
+                    VALUES (:case, '{}'::jsonb) RETURNING id
+                """), {"case": case_id})
+                with pytest.raises(IntegrityError) as rejected:
+                    with db.begin_nested():
+                        db.execute(text("""
+                            INSERT INTO resource_access_assertions
+                                (resource_id, test_identity_id, relationship,
+                                 expected_access, provenance, confidence,
+                                 verification_state, reviewed_assertion_id,
+                                 source_test_run_id)
+                            VALUES (:resource, :identity, 'non_owner', 'allowed',
+                                    'human_verified', 90, 'rejected', :legacy, :run)
+                        """), {**ids, "run": run_id})
+                assert rejected.value.orig.diag.constraint_name == (
+                    "ck_resource_access_assertions_review_source_run"
+                )
+                fixture.rollback()
             ids["review"] = db.scalar(text("""
                 INSERT INTO resource_access_assertions
                     (resource_id, test_identity_id, relationship,

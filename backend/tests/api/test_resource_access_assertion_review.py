@@ -7,8 +7,9 @@ import pytest
 from sqlalchemy import delete, func, select
 
 from app.db.models import (
-    Endpoint, Resource, ResourceAccessAssertion, Target, TestCase, TestIdentity,
-    TestRun,
+    CredentialBinding, Endpoint, EndpointResourceBinding, ExecutionPlan,
+    PlanAction, Resource, ResourceAccessAssertion, Scope, Target, TestCase,
+    TestIdentity, TestRun,
 )
 from app.db.session import SessionLocal
 from app.main import app
@@ -140,8 +141,11 @@ def review(ids: dict[str, int], decision="verify", confidence=77):
 @pytest.mark.parametrize(
     ("decision", "expected_state"), (("verify", "verified"), ("reject", "rejected"))
 )
-def test_review_appends_exact_immutable_outcome(decision, expected_state) -> None:
-    ids = make_candidate()
+@pytest.mark.parametrize("provenance", ("inferred_candidate", "observed_baseline"))
+def test_review_appends_exact_immutable_outcome(
+    decision, expected_state, provenance
+) -> None:
+    ids = make_candidate(provenance=provenance)
     try:
         with SessionLocal() as db:
             source = db.get(ResourceAccessAssertion, ids["candidate"])
@@ -165,7 +169,17 @@ def test_review_appends_exact_immutable_outcome(decision, expected_state) -> Non
         assert body["confidence"] == 83
         assert body["source_test_run_id"] is None
         assert body["reviewed_assertion_id"] == ids["candidate"]
+        for field, index in (("observed_at", 8), ("valid_from", 9), ("valid_until", 10)):
+            assert datetime.fromisoformat(body[field]) == snapshot[index]
         assert "must-not-leak" not in response.text
+        outcome_path = (
+            f"/api/resources/{ids['resource']}/access-assertions/{body['id']}"
+        )
+        assert client.patch(outcome_path, json={"confidence": 1}).status_code == 405
+        assert client.delete(outcome_path).status_code == 405
+        assert review(ids, decision, 83).json() == body
+        assert review(ids, decision, 84).status_code == 409
+        assert client.get(outcome_path).json() == body
         with SessionLocal() as db:
             source = db.get(ResourceAccessAssertion, ids["candidate"])
             assert tuple(getattr(source, field) for field in (
@@ -292,13 +306,35 @@ def test_concurrent_conflicting_reviews_leave_one_outcome() -> None:
 def test_historical_resolution_uses_only_verified_review_after_asserted_at() -> None:
     ids = make_candidate()
     try:
+        source_time = NOW - timedelta(hours=12)
+        with SessionLocal() as db:
+            db.get(ResourceAccessAssertion, ids["candidate"]).asserted_at = source_time
+            db.commit()
+        response = client.post(
+            f"/api/resources/{ids['resource']}/access-assertions/"
+            f"{ids['candidate']}/review",
+            json={"decision": "verify", "confidence": 1,
+                  "asserted_at": source_time.isoformat()},
+        )
+        assert response.status_code == 422
+        with SessionLocal() as db:
+            assert db.scalar(select(func.count()).select_from(
+                ResourceAccessAssertion
+            ).where(ResourceAccessAssertion.reviewed_assertion_id == ids["candidate"])) == 0
         before = datetime.now(timezone.utc)
-        verified = review(ids, "verify", 1).json()
+        response = review(ids, "verify", 1)
+        after = datetime.now(timezone.utc)
+        assert response.status_code == 201
+        verified = response.json()
         asserted_at = datetime.fromisoformat(verified["asserted_at"])
+        assert source_time < before <= asserted_at <= after
+        with SessionLocal() as db:
+            assert db.get(ResourceAccessAssertion, ids["candidate"]).asserted_at == source_time
+            assert db.get(ResourceAccessAssertion, verified["id"]).asserted_at == asserted_at
         historical = client.get(
             f"/api/resources/{ids['resource']}/access-resolution",
             params={"test_identity_id": ids["identity"],
-                    "evaluation_time": before.isoformat()},
+                    "evaluation_time": (asserted_at - timedelta(microseconds=1)).isoformat()},
         ).json()
         current = client.get(
             f"/api/resources/{ids['resource']}/access-resolution",
@@ -329,5 +365,44 @@ def test_rejected_review_and_candidate_never_resolve() -> None:
         assert result["state"] == "insufficient"
         assert outcome["id"] not in result["supporting_assertion_ids"]
         assert ids["candidate"] not in result["supporting_assertion_ids"]
+    finally:
+        cleanup(ids)
+
+
+@pytest.mark.parametrize("provenance", ("inferred_candidate", "observed_baseline"))
+@pytest.mark.parametrize("decision", ("verify", "reject"))
+def test_review_post_preserves_safety_state(provenance, decision, monkeypatch) -> None:
+    ids = make_candidate(provenance=provenance)
+    tracked = (
+        Resource, EndpointResourceBinding, TestCase, ExecutionPlan, PlanAction,
+        TestRun, Target, Endpoint, Scope, TestIdentity, CredentialBinding,
+    )
+
+    def snapshot():
+        with SessionLocal() as db:
+            return {
+                model.__tablename__: list(db.execute(
+                    select(model.__table__).order_by(model.id)
+                ).mappings())
+                for model in tracked
+            }
+
+    def prohibited(*args, **kwargs):
+        raise AssertionError("review invoked network or execution")
+
+    try:
+        # Include fixture-created observed baseline cases/runs in the snapshot.
+        before = snapshot()
+        monkeypatch.setattr("socket.getaddrinfo", prohibited)
+        monkeypatch.setattr("socket.create_connection", prohibited)
+        monkeypatch.setattr("httpcore.ConnectionPool.stream", prohibited)
+        monkeypatch.setattr(
+            "app.network_safety.gateway.NetworkGateway.request", prohibited
+        )
+        response = review(ids, decision)
+        assert response.status_code == 201
+        assert snapshot() == before
+        with SessionLocal() as db:
+            assert db.get(Resource, ids["resource"]).owner_identity_id == ids["identity"]
     finally:
         cleanup(ids)

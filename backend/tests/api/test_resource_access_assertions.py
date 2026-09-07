@@ -119,6 +119,17 @@ def test_human_assertion_dimensions_are_independent(
         assert body["verification_state"] == "verified"
         assert body["confidence"] == 10
         assert body["observed_at"] is None
+        assert body["reviewed_assertion_id"] is None
+        detail = client.get(
+            f"/api/resources/{resource_id}/access-assertions/{body['id']}"
+        )
+        assert detail.status_code == 200
+        assert detail.json() == body
+        history = client.get(f"/api/resources/{resource_id}/access-assertions")
+        assert history.status_code == 200
+        assert history.json() == [body]
+        assert detail.json()["reviewed_assertion_id"] is None
+        assert history.json()[0]["reviewed_assertion_id"] is None
         assert before <= datetime.fromisoformat(body["asserted_at"]) <= after
         assert "external_id" not in body
     finally:
