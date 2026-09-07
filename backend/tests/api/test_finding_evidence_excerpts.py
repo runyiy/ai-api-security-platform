@@ -27,6 +27,19 @@ EXCERPTS = dict(extractor_id="bola_matched_identifier_field", extractor_version=
                 baseline_excerpt='{"id":"[MATCHED_RESOURCE_IDENTIFIER]"}',
                 probe_excerpt='{"project_id":"[MATCHED_RESOURCE_IDENTIFIER]"}')
 
+FALLBACK = '{"[MATCHED_RESOURCE_IDENTIFIER_FIELD]":"[MATCHED_RESOURCE_IDENTIFIER]"}'
+
+
+def set_fallback_key(ids, resource_type='"' * 100):
+    with SessionLocal() as db:
+        db.get(Resource, ids["resource"]).resource_type = resource_type
+        db.get(StoredRun, ids["baseline"]).response_body = json.dumps({"data": [{
+            f"{resource_type}_id": "private-resource-marker", "id": "private-resource-marker",
+            "secret": "response-secret", "email": "private@example.test", "business": "private-business",
+        }]})
+        db.get(StoredRun, ids["probe"]).response_body = '{"id":"private-resource-marker"}'
+        db.commit()
+
 
 def excerpt_rows(ids):
     with engine.connect() as db:
@@ -159,14 +172,20 @@ def test_pass_inconclusive_do_not_append_even_to_old_evidence(evidence_pair, sta
     assert excerpt_rows(ids) == []
 
 
+@pytest.mark.parametrize("fallback", [False, True])
 @pytest.mark.parametrize("field", list(EXCERPTS))
-def test_material_conflict_fails_closed_without_any_mutation(evidence_pair, field):
+def test_material_conflict_fails_closed_without_any_mutation(evidence_pair, field, fallback):
     ids = evidence_pair
     set_probe_key(ids)
+    if fallback:
+        set_fallback_key(ids)
     finding_id, evidence_id = structured_only(ids)
+    expected = {**EXCERPTS}
+    if fallback:
+        expected.update(baseline_excerpt=FALLBACK, probe_excerpt=EXCERPTS["baseline_excerpt"])
     with SessionLocal() as db:
         db.add(FindingEvidenceExcerpt(finding_evidence_record_id=evidence_id,
-                                     **{**EXCERPTS, field: "different"}))
+                                     **{**expected, field: "different"}))
         db.commit()
     before = snapshot(ids)
     response = analyze(ids)
@@ -182,11 +201,14 @@ def test_material_conflict_fails_closed_without_any_mutation(evidence_pair, fiel
     assert snapshot(ids) == before
 
 
+@pytest.mark.parametrize("fallback", [False, True])
 @pytest.mark.parametrize("after_insert", [False, True])
 @pytest.mark.parametrize("failing_table", ["finding_evidence_records", "finding_evidence_excerpts"])
 @pytest.mark.parametrize("existing", [False, True])
-def test_persistence_failure_rolls_back_partial_state_even_if_caller_commits(evidence_pair, failing_table, existing, after_insert):
+def test_persistence_failure_rolls_back_partial_state_even_if_caller_commits(evidence_pair, failing_table, existing, after_insert, fallback):
     ids = evidence_pair
+    if fallback:
+        set_fallback_key(ids)
     if existing:
         old_finding(ids)
     before = snapshot(ids)
@@ -207,9 +229,12 @@ def test_persistence_failure_rolls_back_partial_state_even_if_caller_commits(evi
     assert snapshot(ids) == before
 
 
+@pytest.mark.parametrize("fallback", [False, True])
 @pytest.mark.parametrize("existing", [False, True])
-def test_real_concurrent_identical_excerpt_inserts_converge(evidence_pair, existing):
+def test_real_concurrent_identical_excerpt_inserts_converge(evidence_pair, existing, fallback):
     ids = evidence_pair
+    if fallback:
+        set_fallback_key(ids)
     if existing:
         structured_only(ids)
     ready = Barrier(2)
@@ -234,6 +259,7 @@ def test_real_concurrent_identical_excerpt_inserts_converge(evidence_pair, exist
     assert len(evidence_rows(ids)) == 1
     original = excerpt_rows(ids)
     assert len(original) == 1
+    assert original[0]["baseline_excerpt"] == (FALLBACK if fallback else EXCERPTS["baseline_excerpt"])
     assert analyze(ids).status_code == 200
     assert excerpt_rows(ids) == original
 
@@ -318,23 +344,46 @@ def test_huge_body_keeps_same_tiny_database_size(evidence_pair):
             assert db.scalar(text("SELECT pg_column_size(e) FROM finding_evidence_excerpts e WHERE id = :id"), row) == size
 
 
+@pytest.mark.parametrize("resource_type", ['"' * 100, '\\' * 100, '\x01' * 100])
 @pytest.mark.parametrize("existing", [False, True])
-def test_unrepresentable_key_fails_closed_before_persistence(evidence_pair, existing):
+def test_fallback_persists_normally_and_retry_preserves_evidence_and_review(evidence_pair, existing, resource_type):
     ids = evidence_pair
+    set_fallback_key(ids, resource_type)
     if existing:
         structured_only(ids)
-    with SessionLocal() as db:
-        resource_type = '"' * 100
-        db.get(Resource, ids["resource"]).resource_type = resource_type
-        db.get(StoredRun, ids["baseline"]).response_body = json.dumps({
-            f"{resource_type}_id": "private-resource-marker",
-        })
-        db.commit()
     before = snapshot(ids)
     response = analyze(ids)
-    assert response.status_code == 409
-    assert response.json()["detail"] == "finding_evidence_excerpt_unrepresentable"
-    assert snapshot(ids) == before
+    assert response.status_code == 200
+    assert response.json()["outcome"] == "potential_bola"
+    row, = excerpt_rows(ids)
+    evidence, = evidence_rows(ids)
+    assert row["finding_evidence_record_id"] == evidence["id"]
+    assert row["baseline_excerpt"] == FALLBACK
+    assert row["probe_excerpt"] == EXCERPTS["baseline_excerpt"]
+    finding_id = response.json()["finding"]["id"]
+    assert evidence["finding_id"] == finding_id
+    read = client.get(f"/api/findings/{finding_id}/evidence/excerpts")
+    assert read.status_code == 200
+    assert read.json()["baseline_excerpt"] == FALLBACK
+    for marker in ("private-resource-marker", "response-secret", "request-secret", "private@example.test", "private-business"):
+        assert marker not in read.text
+        assert marker not in str(row)
+    for excerpt in (row["baseline_excerpt"], row["probe_excerpt"]):
+        assert len(excerpt) <= 192
+        assert excerpt == json.dumps(json.loads(excerpt), separators=(",", ":"))
+    after = snapshot(ids)
+    assert after["test_runs"] == before["test_runs"]
+    if existing:
+        assert after["finding_evidence_records"] == before["finding_evidence_records"]
+    for _ in range(2):
+        retry = analyze(ids)
+        assert retry.status_code == 200
+        assert retry.json()["finding"]["id"] == finding_id
+        assert excerpt_rows(ids) == [row]
+        assert evidence_rows(ids) == [evidence]
+        if existing:
+            assert retry.json()["finding"]["status"] == "confirmed"
+            assert retry.json()["finding"]["review_notes"] == "keep human review"
 
 
 @pytest.mark.parametrize("missing", [None, EXCERPTS])

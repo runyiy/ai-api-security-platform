@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 from app.analyzers.bola import (
     AnalysisOutcome,
     BOLAAnalysisResult,
-    BOLAExcerptError,
     BOLAStructuredEvidence,
     BOLARedactedExcerptEvidence,
     analyze_bola_run,
@@ -148,15 +147,12 @@ class FindingAnalysisService:
         if existing is not None:
             self._validate_baseline_binding(existing, baseline_run.id)
 
-        try:
-            result = analyze_bola_run(
-                test_case=test_case,
-                cross_owner_run=test_run,
-                owner_baseline_run=baseline_run,
-                resource=resource,
-            )
-        except BOLAExcerptError as exc:
-            raise FindingAnalysisError(str(exc)) from exc
+        result = analyze_bola_run(
+            test_case=test_case,
+            cross_owner_run=test_run,
+            owner_baseline_run=baseline_run,
+            resource=resource,
+        )
 
         if (
             result.outcome

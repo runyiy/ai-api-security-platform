@@ -10,6 +10,7 @@ from tests.analyzers.test_bola import (
 
 
 MARKER = "[MATCHED_RESOURCE_IDENTIFIER]"
+FALLBACK = '{"[MATCHED_RESOURCE_IDENTIFIER_FIELD]":"[MATCHED_RESOURCE_IDENTIFIER]"}'
 
 
 def analyze(baseline, probe, resource_type="project"):
@@ -93,12 +94,74 @@ def test_non_finding_results_have_no_excerpt(baseline, probe, status, outcome):
 
 
 @pytest.mark.parametrize("resource_type", ['"' * 100, '\\' * 100, '\x01' * 100])
-def test_unrepresentable_key_fails_closed_without_truncation(resource_type):
-    # Resource.resource_type is String(100), but JSON escaping can expand it.
-    # Reject extraction rather than emitting oversized or invalid evidence.
-    from app.analyzers.bola import BOLAExcerptError
-    with pytest.raises(BOLAExcerptError, match="^finding_evidence_excerpt_unrepresentable$"):
-        analyze({f"{resource_type}_id": 2001}, {"id": 2001}, resource_type)
+@pytest.mark.parametrize("fallback_side", ["baseline", "probe", "both"])
+def test_escaped_key_preserves_potential_bola_with_immutable_bounded_fallback(resource_type, fallback_side):
+    from app.analyzers.bola import BOLARedactedExcerptEvidence
+    key = f"{resource_type}_id"
+    body = {"data": [{key: "2001", "id": 2001, "Authorization": "Bearer private-token",
+                     "cookie": "session=private-session", "password": "private-password",
+                     "api_key": "private-key", "credentials": {"token": "private-token"},
+                     "email": "private@example.test", "business": "private-business" * 100000}]}
+    baseline = body if fallback_side in ("baseline", "both") else {"id": 2001}
+    probe = body if fallback_side in ("probe", "both") else {"id": 2001}
+    result = analyze(baseline, probe, resource_type)
+    assert result.outcome == AnalysisOutcome.POTENTIAL_BOLA
+    assert result.confidence == (0.99 if fallback_side == "both" else 0.95)
+    assert result.severity == "high"
+    assert result.evidence.baseline_resource_identifier_present is True
+    assert result.evidence.probe_resource_identifier_present is True
+    evidence = result.excerpt_evidence
+    assert isinstance(evidence, BOLARedactedExcerptEvidence)
+    assert asdict(evidence) == {
+        "extractor_id": "bola_matched_identifier_field", "extractor_version": "1",
+        "baseline_excerpt": FALLBACK if fallback_side in ("baseline", "both") else '{"id":"[MATCHED_RESOURCE_IDENTIFIER]"}',
+        "probe_excerpt": FALLBACK if fallback_side in ("probe", "both") else '{"id":"[MATCHED_RESOURCE_IDENTIFIER]"}',
+    }
+    for excerpt in (evidence.baseline_excerpt, evidence.probe_excerpt):
+        assert len(excerpt) <= 192
+        assert excerpt == json.dumps(json.loads(excerpt), separators=(",", ":"))
+        assert len(json.loads(excerpt)) == 1
+        assert list(json.loads(excerpt).values()) == [MARKER]
+        assert "2001" not in excerpt
+        assert "private" not in excerpt
+        assert key not in excerpt
+    with pytest.raises(FrozenInstanceError):
+        evidence.baseline_excerpt = "changed"
+    assert analyze(baseline, probe, resource_type) == result
+
+
+@pytest.mark.parametrize(("quotes", "length"), [(53, 192), (54, 193)])
+def test_fallback_applies_only_above_literal_serialized_bound(quotes, length):
+    resource_type = "x" * (100 - quotes) + '"' * quotes
+    key = f"{resource_type}_id"
+    literal = json.dumps({key: MARKER}, separators=(",", ":"))
+    assert len(literal) == length
+    result = analyze({key: 2001}, {key: 2001}, resource_type)
+    assert result.outcome == AnalysisOutcome.POTENTIAL_BOLA
+    expected = literal if length == 192 else FALLBACK
+    assert result.excerpt_evidence.baseline_excerpt == expected
+    assert result.excerpt_evidence.probe_excerpt == expected
+
+
+@pytest.mark.parametrize("resource_type", ['"' * 100, '\\' * 100, '\x01' * 100])
+@pytest.mark.parametrize(("status", "matched", "outcome"), [
+    (403, True, AnalysisOutcome.PASS),
+    (500, True, AnalysisOutcome.INCONCLUSIVE),
+    (200, False, AnalysisOutcome.INCONCLUSIVE),
+])
+def test_escaped_keys_do_not_change_non_finding_semantics(resource_type, status, matched, outcome):
+    resource = build_resource()
+    resource.resource_type = resource_type
+    baseline = json.dumps({f"{resource_type}_id": 2001})
+    probe = baseline if matched else '{"other_id":2001}'
+    result = analyze_bola_run(
+        test_case=build_test_case(), resource=resource,
+        owner_baseline_run=build_baseline_run(body=baseline),
+        cross_owner_run=build_cross_run(body=probe, status=status),
+    )
+    assert result.outcome == outcome
+    assert result.evidence is None
+    assert result.excerpt_evidence is None
 
 
 def test_each_exact_body_is_parsed_only_once(monkeypatch):

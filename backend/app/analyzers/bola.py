@@ -35,10 +35,7 @@ class BOLAStructuredEvidence:
 
 MATCHED_RESOURCE_IDENTIFIER = "[MATCHED_RESOURCE_IDENTIFIER]"
 MAX_EXCERPT_LENGTH = 192
-
-
-class BOLAExcerptError(ValueError):
-    """The exact matching field cannot be represented within the evidence bound."""
+MATCHED_IDENTIFIER_FIELD = "[MATCHED_RESOURCE_IDENTIFIER_FIELD]"
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,10 +112,13 @@ def redacted_identifier_excerpt(key: str) -> str:
     excerpt = json.dumps(
         {key: MATCHED_RESOURCE_IDENTIFIER}, ensure_ascii=False, separators=(",", ":"),
     )
-    # JSON escaping can expand even a schema-bounded resource type. Never
-    # truncate the actual field or send oversized evidence to persistence.
+    # Escaping can expand a valid resource type beyond the storage bound.
+    # Label the matched field without retaining its literal key in that case;
+    # evidence representation must never change the analyzer classification.
     if len(excerpt) > MAX_EXCERPT_LENGTH:
-        raise BOLAExcerptError("finding_evidence_excerpt_unrepresentable")
+        return json.dumps(
+            {MATCHED_IDENTIFIER_FIELD: MATCHED_RESOURCE_IDENTIFIER}, separators=(",", ":"),
+        )
     return excerpt
 
 
