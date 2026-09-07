@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models.finding import Finding
+from app.db.models.finding_evidence_excerpt import FindingEvidenceExcerpt
 from app.db.models.finding_evidence_record import FindingEvidenceRecord
 from app.db.models.target import Target
 from app.db.session import get_db
@@ -16,6 +17,7 @@ from app.schemas.finding import (
     AnalyzeTestRunResponse,
     FindingRead,
     FindingEvidenceRead,
+    FindingEvidenceExcerptRead,
     FindingReviewRequest,
 )
 from app.services.finding_analysis import (
@@ -178,3 +180,17 @@ def read_finding_evidence(
     if evidence is None:
         raise HTTPException(status_code=404, detail="finding_structured_evidence_not_found")
     return evidence
+
+
+@router.get("/findings/{finding_id}/evidence/excerpts", response_model=FindingEvidenceExcerptRead)
+def read_finding_evidence_excerpt(
+    finding_id: int,
+    db: Session = Depends(get_db),
+) -> FindingEvidenceExcerpt:
+    evidence = read_finding_evidence(finding_id=finding_id, db=db)
+    excerpt = db.scalar(select(FindingEvidenceExcerpt).where(
+        FindingEvidenceExcerpt.finding_evidence_record_id == evidence.id,
+    ))
+    if excerpt is None:
+        raise HTTPException(status_code=404, detail="finding_evidence_excerpt_not_found")
+    return excerpt

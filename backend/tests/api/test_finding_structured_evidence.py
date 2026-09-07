@@ -104,7 +104,8 @@ def test_missing_exact_read_and_no_listing(evidence_pair):
     assert response.status_code == 404
     assert response.json()["detail"] == "finding_structured_evidence_not_found"
     paths = {path for path in app.openapi()["paths"] if "evidence" in path}
-    assert paths == {"/api/findings/{finding_id}/evidence"}
+    assert paths == {"/api/findings/{finding_id}/evidence",
+                     "/api/findings/{finding_id}/evidence/excerpts"}
     for path in ("/api/evidence", "/api/findings/evidence", "/api/finding-evidence-records"):
         assert client.get(path).status_code == 404
 
