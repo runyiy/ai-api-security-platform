@@ -1,6 +1,5 @@
 import subprocess
 import sys
-import time
 
 import pytest
 from sqlalchemy import func, select, text
@@ -32,6 +31,96 @@ def services():
         ExecutionPlanClaimService(bind=engine, attempt_timeout_seconds=0.1),
         ExecutionPlanProgressService(bind=engine, attempt_timeout_seconds=0.1),
     )
+
+
+def run_progress_subprocess(
+    code: str, plan_id: int, *, expected_stdout: str,
+) -> None:
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", code, str(plan_id)],
+            cwd=".", capture_output=True, text=True, check=False, timeout=10,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.fail("Progress child timed out after 10 seconds.", pytrace=False)
+    # Only fixed synthetic markers/class names may reach assertion diagnostics.
+    # Never echo raw stderr, exception messages, SQL, connection details or argv.
+    markers = tuple(
+        marker for marker in ("acquired", "prepared", "1 pre_network", "marked")
+        if marker in result.stdout.splitlines()
+    )
+    errors = tuple(
+        name for name in (
+            "ExecutionClaimCoordinationError", "ExecutionClaimUnavailableError",
+            "ExecutionClaimLostError", "ExecutionProgressCoordinationError",
+            "ExecutionProgressLostError", "ExecutionProgressCancelledError",
+            "ExecutionInDoubtError", "OperationalError", "ImportError",
+            "ModuleNotFoundError",
+        )
+        if any(
+            line.partition(":")[0].rpartition(".")[2] == name
+            for line in result.stderr.splitlines()
+        )
+    )
+    stdout_matches = result.stdout.strip() == expected_stdout
+    if result.returncode != 0 or not stdout_matches:
+        pytest.fail(
+            f"Progress child exit={result.returncode}; markers={markers}; "
+            f"exception_types={errors}; stderr_present={bool(result.stderr)}; "
+            f"stdout_matches={stdout_matches}",
+            pytrace=False,
+        )
+
+
+def expire_subprocess_claim(
+    plan_id: int, *, owner_id: str, phase: str,
+) -> ClaimHandle:
+    # Called only after the real child has exited successfully. Verify its
+    # committed state before changing only this fixture's exact claim expiry.
+    with SessionLocal() as db:
+        claim = db.get(ExecutionPlanClaim, plan_id)
+        progress_row = db.get(ExecutionPlanProgress, plan_id)
+        assert claim is not None
+        assert progress_row is not None
+        assert claim.owner_id == owner_id
+        assert claim.fencing_generation == progress_row.fencing_generation == 1
+        assert progress_row.phase == phase
+        assert db.scalar(
+            select(TestRun).where(TestRun.execution_plan_id == plan_id)
+        ) is None
+        stale = ClaimHandle(
+            execution_plan_id=plan_id,
+            owner_id=owner_id,
+            fencing_generation=claim.fencing_generation,
+            lease_expires_at=claim.lease_expires_at,
+            database_now=db.scalar(select(func.clock_timestamp())),
+        )
+        ExecutionPlanClaimService(bind=engine).assert_current(stale, db=db)
+        updated = db.execute(
+            text(
+                "UPDATE execution_plan_claims "
+                "SET lease_expires_at=clock_timestamp() - INTERVAL '1 second' "
+                "WHERE execution_plan_id=:plan_id AND owner_id=:owner_id "
+                "AND fencing_generation=:generation"
+            ),
+            {
+                "plan_id": plan_id,
+                "owner_id": owner_id,
+                "generation": stale.fencing_generation,
+            },
+        )
+        assert updated.rowcount == 1
+        db.commit()
+
+    # A fresh session must observe committed expiry against the database clock;
+    # the production takeover path still performs all lease/fencing checks.
+    with SessionLocal() as db:
+        claim = db.get(ExecutionPlanClaim, plan_id)
+        assert claim is not None
+        assert claim.owner_id == stale.owner_id
+        assert claim.fencing_generation == stale.fencing_generation
+        assert claim.lease_expires_at <= db.scalar(select(func.clock_timestamp()))
+    return stale
 
 
 def test_prepare_is_idempotent_and_higher_generation_takes_over_pre_network(
@@ -117,26 +206,14 @@ def test_real_subprocess_crash_pre_network_recovers_complete_execution(
         "from app.services.execution_plan_progress import ExecutionPlanProgressService; "
         "import sys; c=ExecutionPlanClaimService(bind=engine); "
         "p=ExecutionPlanProgressService(bind=engine); "
-        "h=c.acquire(int(sys.argv[1]),'crashed-subprocess',lease_seconds=.1); "
+        "h=c.acquire(int(sys.argv[1]),'crashed-subprocess',lease_seconds=30); "
+        "print('acquired',flush=True); "
         "s=p.prepare_attempt(h); print(h.fencing_generation,s.phase)"
     )
-    result = subprocess.run(
-        [sys.executable, "-c", code, str(plan_id)],
-        cwd=".", capture_output=True, text=True, check=True, timeout=10,
+    run_progress_subprocess(code, plan_id, expected_stdout="acquired\n1 pre_network")
+    stale = expire_subprocess_claim(
+        plan_id, owner_id="crashed-subprocess", phase="pre_network",
     )
-    assert result.stdout.strip() == "1 pre_network"
-    with SessionLocal() as db:
-        claim = db.get(ExecutionPlanClaim, plan_id)
-        assert claim is not None
-        stale = ClaimHandle(
-            execution_plan_id=plan_id,
-            owner_id=claim.owner_id,
-            fencing_generation=claim.fencing_generation,
-            lease_expires_at=claim.lease_expires_at,
-            database_now=db.scalar(select(func.clock_timestamp())),
-        )
-
-    time.sleep(0.13)
     limiter = MutatingRateLimiter()
     gateway = RecordingGateway()
     canonical = execute(plan_id, limiter=limiter, gateway=gateway)
@@ -144,6 +221,10 @@ def test_real_subprocess_crash_pre_network_recovers_complete_execution(
     assert limiter.calls == 1
     assert gateway.target_ids == [target_id]
     with SessionLocal() as db:
+        claim = db.get(ExecutionPlanClaim, plan_id)
+        assert claim is not None
+        assert claim.fencing_generation == 2
+        assert claim.owner_id is None
         progress_row = db.get(ExecutionPlanProgress, plan_id)
         assert progress_row is not None
         assert progress_row.fencing_generation == 2
@@ -169,15 +250,14 @@ def test_real_subprocess_network_started_then_retry_is_in_doubt(
         "from app.services.execution_plan_progress import ExecutionPlanProgressService; "
         "import sys; c=ExecutionPlanClaimService(bind=engine); "
         "p=ExecutionPlanProgressService(bind=engine); "
-        "h=c.acquire(int(sys.argv[1]),'subprocess',lease_seconds=.05); "
-        "p.prepare_attempt(h); p.mark_network_started(h); print('marked')"
+        "h=c.acquire(int(sys.argv[1]),'subprocess',lease_seconds=30); "
+        "print('acquired',flush=True); p.prepare_attempt(h); "
+        "print('prepared',flush=True); p.mark_network_started(h); print('marked')"
     )
-    result = subprocess.run(
-        [sys.executable, "-c", code, str(plan_id)],
-        cwd=".", capture_output=True, text=True, check=True, timeout=10,
+    run_progress_subprocess(code, plan_id, expected_stdout="acquired\nprepared\nmarked")
+    stale = expire_subprocess_claim(
+        plan_id, owner_id="subprocess", phase="network_started",
     )
-    assert result.stdout.strip() == "marked"
-    time.sleep(0.08)
     limiter = MutatingRateLimiter()
     gateway = RecordingGateway()
     with pytest.raises(ExecutionBlockedError) as raised:
@@ -190,6 +270,15 @@ def test_real_subprocess_network_started_then_retry_is_in_doubt(
         assert claim is not None
         assert claim.fencing_generation == 2
         assert claim.owner_id is None
+        progress_row = db.get(ExecutionPlanProgress, plan_id)
+        assert progress_row is not None
+        assert progress_row.fencing_generation == 1
+        assert progress_row.phase == "network_started"
         assert db.scalar(
             select(TestRun).where(TestRun.execution_plan_id == plan_id)
         ) is None
+        with pytest.raises(ExecutionClaimLostError):
+            ExecutionPlanClaimService(bind=engine).assert_current(stale, db=db)
+        db.rollback()
+    with pytest.raises(ExecutionProgressLostError):
+        ExecutionPlanProgressService(bind=engine).mark_network_started(stale)
