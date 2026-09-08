@@ -103,6 +103,10 @@ M14-01 introduces a pure, bounded assertion-aware BOLA matrix planner over expli
 
 This slice produces immutable planning candidates only. It is not yet connected to reviewed `EndpointResourceBinding` or TestCase persistence, and it adds no nested, query, or multiple-binding support. The existing owner-based generator and generation API remain unchanged and transitional until later M14 integration.
 
+M14-02 adds a read-only, bounded BOLA matrix preview over an exact selected Endpoint, Resource, and ordered active identities. It copies only current persisted identity auth types, calls the unchanged M12 resolver for each exact Resource/Identity pair at the caller's explicit timezone-aware evaluation time, and passes every resolved fact to the unchanged M14-01 planner. Conflict and insufficient facts remain visible even when they produce no candidates. Structural validation precedes database reads; a clean caller Session is required, autoflush is suppressed, and the caller retains ownership of the read transaction. No truth is cached across calls.
+
+This is a transient preview, not a persisted historical execution snapshot. Evaluation time governs assertion eligibility, not historical identity activity, auth type, or Endpoint metadata. Results are deterministic for the same selected persisted metadata and assertions; later changes can change a later preview. Same-Target validation establishes metadata consistency only, not a reviewed endpoint/resource binding or permission to execute. The service adds no HTTP route, TestCase persistence, or generation API integration; reviewed binding and execution integration remain separate future work.
+
 ## Wildcard asset enrollment
 
 Wildcard program domains are discovery and enrollment rules, not execution authorization:
