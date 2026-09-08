@@ -11,6 +11,7 @@ from app.db.models.finding import Finding
 from app.db.models.finding_evidence_excerpt import FindingEvidenceExcerpt
 from app.db.models.finding_evidence_fingerprint import FindingEvidenceFingerprint
 from app.db.models.finding_evidence_similarity import FindingEvidenceSimilarity
+from app.db.models.finding_evidence_retention_binding import FindingEvidenceRetentionBinding
 from app.db.models.finding_evidence_record import FindingEvidenceRecord
 from app.db.models.target import Target
 from app.db.session import get_db
@@ -22,6 +23,7 @@ from app.schemas.finding import (
     FindingEvidenceExcerptRead,
     FindingEvidenceFingerprintRead,
     FindingEvidenceSimilarityRead,
+    FindingEvidenceRetentionRead,
     FindingReviewRequest,
 )
 from app.services.finding_analysis import (
@@ -226,3 +228,17 @@ def read_finding_evidence_similarity(
     if similarity is None:
         raise HTTPException(status_code=404, detail="finding_evidence_similarity_not_found")
     return similarity
+
+
+@router.get("/findings/{finding_id}/evidence/retention", response_model=FindingEvidenceRetentionRead)
+def read_finding_evidence_retention(
+    finding_id: int,
+    db: Session = Depends(get_db),
+) -> FindingEvidenceRetentionBinding:
+    evidence = read_finding_evidence(finding_id=finding_id, db=db)
+    binding = db.scalar(select(FindingEvidenceRetentionBinding).where(
+        FindingEvidenceRetentionBinding.finding_evidence_record_id == evidence.id,
+    ))
+    if binding is None:
+        raise HTTPException(status_code=404, detail="finding_evidence_retention_binding_not_found")
+    return binding

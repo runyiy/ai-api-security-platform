@@ -107,7 +107,8 @@ def test_missing_exact_read_and_no_listing(evidence_pair):
     assert paths == {"/api/findings/{finding_id}/evidence",
                      "/api/findings/{finding_id}/evidence/excerpts",
                      "/api/findings/{finding_id}/evidence/fingerprints",
-                     "/api/findings/{finding_id}/evidence/similarity"}
+                     "/api/findings/{finding_id}/evidence/similarity",
+                     "/api/findings/{finding_id}/evidence/retention"}
     for path in ("/api/evidence", "/api/findings/evidence", "/api/finding-evidence-records"):
         assert client.get(path).status_code == 404
 

@@ -272,7 +272,7 @@ def test_analysis_has_zero_execution_network_ai_or_authority_side_effects(eviden
     def snapshot():
         with engine.connect() as db:
             return {table.name: list(db.execute(select(table).order_by(*table.primary_key.columns)).mappings())
-                    for table in Base.metadata.sorted_tables if table.name not in {"findings", "finding_evidence_records", "finding_evidence_excerpts", "finding_evidence_fingerprints", "finding_evidence_similarities"}}
+                    for table in Base.metadata.sorted_tables if table.name not in {"findings", "finding_evidence_records", "finding_evidence_excerpts", "finding_evidence_fingerprints", "finding_evidence_similarities", "finding_evidence_retention_bindings"}}
 
     before = snapshot()
     config_before = settings.model_dump()
@@ -315,5 +315,11 @@ def test_analysis_has_zero_execution_network_ai_or_authority_side_effects(eviden
     assert similarity.json()["finding_evidence_fingerprint_id"] == fingerprint.json()["id"]
     assert similarity.json()["exact_digest_match"] is True
     assert similarity.json()["length_similarity_bps"] == 10000
+    retention = client.get(f"/api/findings/{response.json()['finding']['id']}/evidence/retention")
+    assert retention.status_code == 200
+    assert retention.json()["finding_evidence_record_id"] == evidence.json()["id"]
+    assert retention.json()["automatic_deletion_enabled"] is False
+    assert retention.json()["raw_response_body_retained"] is False
+    assert analyze(ids).status_code == 200
     assert snapshot() == before
     assert settings.model_dump() == config_before

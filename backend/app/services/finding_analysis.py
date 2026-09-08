@@ -18,7 +18,11 @@ from app.db.models.finding import Finding
 from app.db.models.finding_evidence_excerpt import FindingEvidenceExcerpt
 from app.db.models.finding_evidence_fingerprint import FindingEvidenceFingerprint
 from app.db.models.finding_evidence_similarity import FindingEvidenceSimilarity
+from app.db.models.finding_evidence_retention_binding import FindingEvidenceRetentionBinding
 from app.db.models.finding_evidence_record import FindingEvidenceRecord
+from app.domain.finding_evidence_retention import (
+    FindingEvidenceRetentionPolicy, V1_FINDING_EVIDENCE_RETENTION_POLICY,
+)
 from app.db.models.resource import Resource
 from app.db.models.test_case import TestCase
 from app.db.models.test_run import TestRun
@@ -264,6 +268,7 @@ class FindingAnalysisService:
             self._persist_excerpt(stored_evidence.id, excerpt)
             stored_fingerprint = self._persist_fingerprint(stored_evidence.id, fingerprint)
             self._persist_similarity(stored_fingerprint.id, similarity)
+            self._persist_retention_binding(stored_evidence.id, V1_FINDING_EVIDENCE_RETENTION_POLICY)
 
             if finding_id is None:
                 finding.severity = (
@@ -376,6 +381,25 @@ class FindingAnalysisService:
         )
         if stored is None or any(getattr(stored, key) != value for key, value in values.items()):
             raise FindingAnalysisError("finding_evidence_similarity_conflict")
+
+    def _persist_retention_binding(
+        self, finding_evidence_record_id: int, policy: FindingEvidenceRetentionPolicy,
+    ) -> FindingEvidenceRetentionBinding:
+        values = {"finding_evidence_record_id": finding_evidence_record_id, **asdict(policy)}
+        self.db.scalar(
+            insert(FindingEvidenceRetentionBinding)
+            .values(**values)
+            .on_conflict_do_nothing(constraint="uq_finding_evidence_retention_evidence_record_id")
+            .returning(FindingEvidenceRetentionBinding.id)
+        )
+        stored = self.db.scalar(
+            select(FindingEvidenceRetentionBinding)
+            .where(FindingEvidenceRetentionBinding.finding_evidence_record_id == finding_evidence_record_id)
+            .execution_options(populate_existing=True)
+        )
+        if stored is None or any(getattr(stored, key) != value for key, value in values.items()):
+            raise FindingAnalysisError("finding_evidence_retention_policy_conflict")
+        return stored
 
     @staticmethod
     def _validate_fingerprint(

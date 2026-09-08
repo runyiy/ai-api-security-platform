@@ -113,3 +113,16 @@ class FindingEvidenceSimilarityRead(BaseModel):
     exact_digest_match: bool
     length_similarity_bps: int
     created_at: datetime
+
+
+class FindingEvidenceRetentionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    finding_evidence_record_id: int
+    policy_id: str
+    policy_version: str
+    retention_mode: str
+    automatic_deletion_enabled: bool
+    raw_response_body_retained: bool
+    bound_at: datetime
