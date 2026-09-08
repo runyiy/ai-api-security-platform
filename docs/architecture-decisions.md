@@ -99,6 +99,10 @@ The migration deterministically appends one v1 binding per existing structured e
 
 `GET /findings/{finding_id}/evidence/retention` resolves Finding, exact structured evidence, then its exact binding. It returns only binding ID, structured-evidence FK, the five policy fields, and `bound_at`. Reads do not append; no global listing, mutation/deletion API, scheduler, worker, or cleanup path is provided. This policy governs only M13 Finding evidence. `TestRun.response_body` is source execution data whose lifecycle is out of scope and unchanged. Retention metadata has zero effect on BOLA classification, Finding review, authorization, Scope, execution, or network permission.
 
+M14-01 introduces a pure, bounded assertion-aware BOLA matrix planner over explicit, already-resolved access facts. Relationship and expected access remain independent: the planner never infers owner => allowed or non_owner => denied, and it preserves unusual explicit combinations. Insufficient/conflicting resolution or unspecified expected access yields no candidate. Only the exact auth type `anonymous` selects anonymous candidates; authenticated facts also require an explicit relationship. Supporting assertion IDs are preserved as provenance without choosing a winner.
+
+This slice produces immutable planning candidates only. It is not yet connected to reviewed `EndpointResourceBinding` or TestCase persistence, and it adds no nested, query, or multiple-binding support. The existing owner-based generator and generation API remain unchanged and transitional until later M14 integration.
+
 ## Wildcard asset enrollment
 
 Wildcard program domains are discovery and enrollment rules, not execution authorization:
