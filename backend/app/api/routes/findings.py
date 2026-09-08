@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models.finding import Finding
 from app.db.models.finding_evidence_excerpt import FindingEvidenceExcerpt
+from app.db.models.finding_evidence_fingerprint import FindingEvidenceFingerprint
 from app.db.models.finding_evidence_record import FindingEvidenceRecord
 from app.db.models.target import Target
 from app.db.session import get_db
@@ -18,6 +19,7 @@ from app.schemas.finding import (
     FindingRead,
     FindingEvidenceRead,
     FindingEvidenceExcerptRead,
+    FindingEvidenceFingerprintRead,
     FindingReviewRequest,
 )
 from app.services.finding_analysis import (
@@ -194,3 +196,17 @@ def read_finding_evidence_excerpt(
     if excerpt is None:
         raise HTTPException(status_code=404, detail="finding_evidence_excerpt_not_found")
     return excerpt
+
+
+@router.get("/findings/{finding_id}/evidence/fingerprints", response_model=FindingEvidenceFingerprintRead)
+def read_finding_evidence_fingerprint(
+    finding_id: int,
+    db: Session = Depends(get_db),
+) -> FindingEvidenceFingerprint:
+    evidence = read_finding_evidence(finding_id=finding_id, db=db)
+    fingerprint = db.scalar(select(FindingEvidenceFingerprint).where(
+        FindingEvidenceFingerprint.finding_evidence_record_id == evidence.id,
+    ))
+    if fingerprint is None:
+        raise HTTPException(status_code=404, detail="finding_evidence_fingerprint_not_found")
+    return fingerprint

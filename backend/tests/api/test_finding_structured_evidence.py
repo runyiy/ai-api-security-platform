@@ -105,7 +105,8 @@ def test_missing_exact_read_and_no_listing(evidence_pair):
     assert response.json()["detail"] == "finding_structured_evidence_not_found"
     paths = {path for path in app.openapi()["paths"] if "evidence" in path}
     assert paths == {"/api/findings/{finding_id}/evidence",
-                     "/api/findings/{finding_id}/evidence/excerpts"}
+                     "/api/findings/{finding_id}/evidence/excerpts",
+                     "/api/findings/{finding_id}/evidence/fingerprints"}
     for path in ("/api/evidence", "/api/findings/evidence", "/api/finding-evidence-records"):
         assert client.get(path).status_code == 404
 
@@ -157,7 +158,10 @@ def test_large_body_does_not_change_evidence_shape_or_size(evidence_pair):
         for run_id in (ids["baseline"], ids["probe"]):
             db.get(StoredRun, run_id).response_body = body
         db.commit()
-    assert analyze(ids).status_code == 200
+    # M13-04 detects changed source bytes; immutable M13-02 rows stay intact.
+    changed = analyze(ids)
+    assert changed.status_code == 409
+    assert changed.json()["detail"] == "finding_evidence_fingerprint_conflict"
     assert evidence_rows(ids) == original
     with engine.connect() as db:
         assert db.scalar(text("SELECT pg_column_size(e) FROM finding_evidence_records e WHERE id = :id"), original[0]) == size_before

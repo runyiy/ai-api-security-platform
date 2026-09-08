@@ -85,6 +85,8 @@ M13-03 bounded excerpt clarification (Issue #110): the analyzer selects the firs
 
 The fallback label denotes a matched identifier field whose literal key is omitted; it is not a response key or a truncated key. It contains no original key content, identifier value, siblings, or body data. Baseline and probe independently use the literal form or this fallback. Both forms remain canonical compact one-field JSON in the same immutable typed excerpt with extractor `bola_matched_identifier_field`, version `1`. This representation preserves the existing analysis outcome, confidence, structured evidence, 192-character storage bound, and append-once conflict behavior without changing Resource validation or existing rows.
 
+M13-04 fingerprints record only SHA-256 digests and byte lengths of the exact persisted response strings encoded as UTF-8 (`None` means zero bytes), with no parsing, normalization, redaction, or truncation. They describe byte equality/integrity, not semantic equivalence, similarity, authorization, or a BOLA decision. Fingerprinting is independent of classification: typed metadata is available for non-finding outcomes to check an existing fingerprint on explicit reanalysis, but only POTENTIAL_BOLA may append a fingerprint. Any differing durable fingerprint fails with `finding_evidence_fingerprint_conflict` before evidence or Finding changes, including when changed bodies no longer satisfy the BOLA rule. Each fingerprint links to the exact structured evidence row and is part of the same atomic append as the Finding, structured evidence, and excerpt. Migration and reads do not backfill.
+
 ## Wildcard asset enrollment
 
 Wildcard program domains are discovery and enrollment rules, not execution authorization:

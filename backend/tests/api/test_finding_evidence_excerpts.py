@@ -313,7 +313,8 @@ def test_service_copies_only_typed_excerpt_and_uses_exact_evidence_lookup(eviden
         outcome = FindingAnalysisService(db=db).analyze_test_run(
             test_run_id=ids["probe"], baseline_test_run_id=ids["baseline"])
         assert outcome.finding.id == finding_id
-    assert lookups == [FindingEvidenceRecord, FindingEvidenceExcerpt]
+    # The integrity precheck and append both resolve this same exact evidence.
+    assert lookups == [FindingEvidenceRecord, FindingEvidenceRecord, FindingEvidenceExcerpt]
     row, = excerpt_rows(ids)
     assert {k: row[k] for k in asdict(selected)} == asdict(selected)
 
@@ -332,7 +333,10 @@ def test_huge_body_keeps_same_tiny_database_size(evidence_pair):
         db.add(fresh)
         db.commit()
         fresh_id = fresh.id
-    assert analyze(ids).status_code == 200
+    # M13-04 rejects source changes without changing the bounded excerpt.
+    changed = analyze(ids)
+    assert changed.status_code == 409
+    assert changed.json()["detail"] == "finding_evidence_fingerprint_conflict"
     assert excerpt_rows(ids) == [original]
     assert analyze({**ids, "probe": fresh_id}).status_code == 200
     rows = excerpt_rows(ids)
