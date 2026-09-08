@@ -107,6 +107,10 @@ M14-02 adds a read-only, bounded BOLA matrix preview over an exact selected Endp
 
 This is a transient preview, not a persisted historical execution snapshot. Evaluation time governs assertion eligibility, not historical identity activity, auth type, or Endpoint metadata. Results are deterministic for the same selected persisted metadata and assertions; later changes can change a later preview. Same-Target validation establishes metadata consistency only, not a reviewed endpoint/resource binding or permission to execute. The service adds no HTTP route, TestCase persistence, or generation API integration; reviewed binding and execution integration remain separate future work.
 
+M14-03 adds exact reviewed slot selection for one explicitly requested Endpoint and `EndpointResourceBinding`. The chosen row must belong to that Endpoint and currently be confirmed, regardless of confidence or provenance. Its exact path/query selector is revalidated with the existing parameter-name grammar and checked against the current flat path template or bounded query declarations. Ambiguous or malformed declarations fail closed; body bindings remain unsupported. The frozen descriptor contains only the two IDs, location, selector, and review state. It supplies no Resource association, ownership/access truth, request construction, or execution authority.
+
+Selection uses minimal exact reads in a clean caller Session with autoflush suppressed and no cross-call cache. It represents transient current metadata, not a persisted immutable review revision, historical snapshot, or execution-time approval; changes after return remain possible, and future consumers must establish their own reviewed planning/execution boundary. Binding/preview composition, multiple-parameter assignment, and persistence remain separate future work. M14-03 adds no API or legacy generation integration and leaves all downstream execution and public-runtime restrictions unchanged.
+
 ## Wildcard asset enrollment
 
 Wildcard program domains are discovery and enrollment rules, not execution authorization:
