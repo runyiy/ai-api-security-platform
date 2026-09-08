@@ -11,6 +11,7 @@ from app.analyzers.bola import AnalysisOutcome
 from app.api.routes.test_cases import generate_bola_cases
 from app.core.config import settings
 from app.credentials.bearer import BearerCredentialService
+from app.db.models.finding_evidence_similarity import FindingEvidenceSimilarity
 from app.db.models.authorization_profile import AuthorizationProfile
 from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.credential_binding import CredentialBinding
@@ -227,6 +228,13 @@ def _delete_workflow(target_id: int, profile_id: int) -> None:
         test_case_ids = select(StoredCase.id).join(Endpoint).where(
             Endpoint.target_id == target_id
         )
+        db.execute(delete(FindingEvidenceSimilarity).where(
+            FindingEvidenceSimilarity.finding_evidence_fingerprint_id.in_(
+                select(FindingEvidenceFingerprint.id).where(
+                    FindingEvidenceFingerprint.finding_evidence_record_id.in_(
+                        select(FindingEvidenceRecord.id).where(
+                            FindingEvidenceRecord.finding_id.in_(select(Finding.id).where(
+                                Finding.target_id == target_id))))))))
         db.execute(delete(FindingEvidenceFingerprint).where(
             FindingEvidenceFingerprint.finding_evidence_record_id.in_(
                 select(FindingEvidenceRecord.id).where(

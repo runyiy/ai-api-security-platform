@@ -7,6 +7,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql.dml import Insert
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.db.models.finding_evidence_similarity import FindingEvidenceSimilarity
 from app.db.models.endpoint import Endpoint
 from app.db.models.finding import Finding
 from app.db.models.finding_evidence_fingerprint import FindingEvidenceFingerprint
@@ -134,6 +135,13 @@ def analyzable_pair() -> Iterator[tuple[int, int]]:
                 Endpoint,
                 StoredCase.endpoint_id == Endpoint.id,
             ).where(Endpoint.target_id == target_id)
+            db.execute(delete(FindingEvidenceSimilarity).where(
+                FindingEvidenceSimilarity.finding_evidence_fingerprint_id.in_(
+                    select(FindingEvidenceFingerprint.id).where(
+                        FindingEvidenceFingerprint.finding_evidence_record_id.in_(
+                            select(FindingEvidenceRecord.id).where(
+                                FindingEvidenceRecord.finding_id.in_(select(Finding.id).where(
+                                    Finding.test_run_id.in_(run_ids)))))))))
             db.execute(delete(FindingEvidenceFingerprint).where(
                 FindingEvidenceFingerprint.finding_evidence_record_id.in_(
                     select(FindingEvidenceRecord.id).where(

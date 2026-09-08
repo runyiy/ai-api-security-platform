@@ -57,6 +57,28 @@ class BOLAResponseFingerprintEvidence:
     fingerprint_version: Literal["1"] = "1"
 
 
+@dataclass(frozen=True, slots=True)
+class BOLAResponseSimilarityEvidence:
+    exact_digest_match: bool
+    length_similarity_bps: int
+    comparator_id: Literal["sha256_exact_and_length_ratio"] = "sha256_exact_and_length_ratio"
+    comparator_version: Literal["1"] = "1"
+
+
+def compare_response_fingerprints(
+    fingerprint: BOLAResponseFingerprintEvidence,
+) -> BOLAResponseSimilarityEvidence:
+    """Equality and integer length metadata only; never a Finding decision."""
+    if not isinstance(fingerprint, BOLAResponseFingerprintEvidence):
+        raise TypeError("Expected BOLAResponseFingerprintEvidence")
+    shorter = min(fingerprint.baseline_body_bytes, fingerprint.probe_body_bytes)
+    longer = max(fingerprint.baseline_body_bytes, fingerprint.probe_body_bytes)
+    return BOLAResponseSimilarityEvidence(
+        exact_digest_match=fingerprint.baseline_digest == fingerprint.probe_digest,
+        length_similarity_bps=shorter * 10000 // longer if longer else 10000,
+    )
+
+
 def fingerprint_response_pair(
     *, baseline_body: str | None, probe_body: str | None,
 ) -> BOLAResponseFingerprintEvidence:
@@ -82,6 +104,7 @@ class BOLAAnalysisResult:
     evidence: BOLAStructuredEvidence | None = None
     excerpt_evidence: BOLARedactedExcerptEvidence | None = None
     fingerprint_evidence: BOLAResponseFingerprintEvidence | None = None
+    similarity_evidence: BOLAResponseSimilarityEvidence | None = None
 
 def parse_json_body(
     body: str | None,
@@ -336,7 +359,14 @@ def analyze_bola_run(
     # Carry integrity metadata even for non-finding outcomes so an explicit
     # reanalysis can detect changes to previously fingerprinted source bodies.
     # Classification and confidence never depend on these digests.
-    return replace(result, fingerprint_evidence=fingerprint_response_pair(
+    fingerprint = fingerprint_response_pair(
         baseline_body=owner_baseline_run.response_body,
         probe_body=cross_owner_run.response_body,
-    ))
+    )
+    return replace(
+        result, fingerprint_evidence=fingerprint,
+        similarity_evidence=(
+            compare_response_fingerprints(fingerprint)
+            if result.outcome == AnalysisOutcome.POTENTIAL_BOLA else None
+        ),
+    )

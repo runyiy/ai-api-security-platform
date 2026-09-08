@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.db.models.finding import Finding
 from app.db.models.finding_evidence_excerpt import FindingEvidenceExcerpt
 from app.db.models.finding_evidence_fingerprint import FindingEvidenceFingerprint
+from app.db.models.finding_evidence_similarity import FindingEvidenceSimilarity
 from app.db.models.finding_evidence_record import FindingEvidenceRecord
 from app.db.models.target import Target
 from app.db.session import get_db
@@ -20,6 +21,7 @@ from app.schemas.finding import (
     FindingEvidenceRead,
     FindingEvidenceExcerptRead,
     FindingEvidenceFingerprintRead,
+    FindingEvidenceSimilarityRead,
     FindingReviewRequest,
 )
 from app.services.finding_analysis import (
@@ -210,3 +212,17 @@ def read_finding_evidence_fingerprint(
     if fingerprint is None:
         raise HTTPException(status_code=404, detail="finding_evidence_fingerprint_not_found")
     return fingerprint
+
+
+@router.get("/findings/{finding_id}/evidence/similarity", response_model=FindingEvidenceSimilarityRead)
+def read_finding_evidence_similarity(
+    finding_id: int,
+    db: Session = Depends(get_db),
+) -> FindingEvidenceSimilarity:
+    fingerprint = read_finding_evidence_fingerprint(finding_id=finding_id, db=db)
+    similarity = db.scalar(select(FindingEvidenceSimilarity).where(
+        FindingEvidenceSimilarity.finding_evidence_fingerprint_id == fingerprint.id,
+    ))
+    if similarity is None:
+        raise HTTPException(status_code=404, detail="finding_evidence_similarity_not_found")
+    return similarity

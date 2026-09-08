@@ -10,12 +10,14 @@ from app.analyzers.bola import (
     BOLAStructuredEvidence,
     BOLARedactedExcerptEvidence,
     BOLAResponseFingerprintEvidence,
+    BOLAResponseSimilarityEvidence,
     analyze_bola_run,
 )
 from app.db.models.endpoint import Endpoint
 from app.db.models.finding import Finding
 from app.db.models.finding_evidence_excerpt import FindingEvidenceExcerpt
 from app.db.models.finding_evidence_fingerprint import FindingEvidenceFingerprint
+from app.db.models.finding_evidence_similarity import FindingEvidenceSimilarity
 from app.db.models.finding_evidence_record import FindingEvidenceRecord
 from app.db.models.resource import Resource
 from app.db.models.test_case import TestCase
@@ -184,6 +186,14 @@ class FindingAnalysisService:
         if not isinstance(fingerprint, BOLAResponseFingerprintEvidence):
             raise FindingAnalysisError("finding_evidence_fingerprint_conflict")
 
+        similarity = result.similarity_evidence
+        if (
+            not isinstance(similarity, BOLAResponseSimilarityEvidence)
+            or similarity.comparator_id != "sha256_exact_and_length_ratio"
+            or similarity.comparator_version != "1"
+        ):
+            raise FindingAnalysisError("finding_evidence_similarity_conflict")
+
         title = (
             f"Potential BOLA in "
             f"{endpoint.method} "
@@ -252,7 +262,8 @@ class FindingAnalysisService:
             self._validate_baseline_binding(finding, baseline_run.id)
             stored_evidence = self._persist_structured_evidence(finding, evidence)
             self._persist_excerpt(stored_evidence.id, excerpt)
-            self._persist_fingerprint(stored_evidence.id, fingerprint)
+            stored_fingerprint = self._persist_fingerprint(stored_evidence.id, fingerprint)
+            self._persist_similarity(stored_fingerprint.id, similarity)
 
             if finding_id is None:
                 finding.severity = (
@@ -333,7 +344,7 @@ class FindingAnalysisService:
 
     def _persist_fingerprint(
         self, finding_evidence_record_id: int, fingerprint: BOLAResponseFingerprintEvidence,
-    ) -> None:
+    ) -> FindingEvidenceFingerprint:
         self.db.scalar(
             insert(FindingEvidenceFingerprint)
             .values(finding_evidence_record_id=finding_evidence_record_id, **asdict(fingerprint))
@@ -346,6 +357,25 @@ class FindingAnalysisService:
             .execution_options(populate_existing=True)
         )
         self._validate_fingerprint(stored, fingerprint)
+        return stored
+
+    def _persist_similarity(
+        self, finding_evidence_fingerprint_id: int, similarity: BOLAResponseSimilarityEvidence,
+    ) -> None:
+        values = {"finding_evidence_fingerprint_id": finding_evidence_fingerprint_id, **asdict(similarity)}
+        self.db.scalar(
+            insert(FindingEvidenceSimilarity)
+            .values(**values)
+            .on_conflict_do_nothing(constraint="uq_finding_evidence_similarities_fingerprint_id")
+            .returning(FindingEvidenceSimilarity.id)
+        )
+        stored = self.db.scalar(
+            select(FindingEvidenceSimilarity)
+            .where(FindingEvidenceSimilarity.finding_evidence_fingerprint_id == finding_evidence_fingerprint_id)
+            .execution_options(populate_existing=True)
+        )
+        if stored is None or any(getattr(stored, key) != value for key, value in values.items()):
+            raise FindingAnalysisError("finding_evidence_similarity_conflict")
 
     @staticmethod
     def _validate_fingerprint(
