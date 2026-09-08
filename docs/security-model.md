@@ -248,6 +248,26 @@ Full third-party response bodies are not the default permanent evidence model. N
 
 Baseline and probe evidence must identify their exact source runs/plans rather than selecting an unrelated latest run at analysis time.
 
+### M13 explicit retention policy
+
+Every M13 `FindingEvidenceRecord` has one append-once, immutable/versioned retention binding with exactly:
+
+```text
+policy_id: m13_minimized_finding_evidence
+policy_version: "1"
+retention_mode: explicit_management_only
+automatic_deletion_enabled: false
+raw_response_body_retained: false
+```
+
+M13 Finding evidence is structured, bounded, redacted/minimized by default. Raw third-party response bodies are not copied into M13 Finding evidence. This release enables no automatic evidence deletion and claims or calculates no TTL or expiry. Explicit retention-management/deletion workflows are deferred to later product maturity. `explicit_management_only` means automatic deletion is disabled and any future deletion must be a separate explicit feature; it does not mean a deletion API exists.
+
+The policy applies only to the M13 Finding evidence tables. `TestRun.response_body` is source execution data and its lifecycle is out of scope. M13-06 must not alter, clear, redact, shorten, delete, or schedule deletion of TestRun bodies. There is no retention worker, scheduler, background cleanup, purge state, or DELETE/PURGE evidence route.
+
+A deterministic migration appends one binding per existing structured evidence ID without content or Resource/TestRun reads or mutation of any prior Finding, evidence, or source row. New bindings share the six-layer atomic analysis savepoint. Database checks enforce all five exact v1 constants, and a unique structured-evidence FK enforces one binding with `ON DELETE RESTRICT`. Retries converge without overwriting policy or timestamps. Conflicting stored policy raises `finding_evidence_retention_policy_conflict` and preserves all prior evidence, Finding review state/notes, and TestRuns.
+
+Policy is independent of Finding severity/confidence/review, request/response content, Target/network mode, identity, Resource ownership, and AI. Retention metadata has zero effect on BOLA classification, human review, authorization, Scope, execution, or network permission. Exact scoped reads expose only binding ID, structured-evidence FK, five policy fields, and binding time, with no global listing or read-side backfill.
+
 ## 9. Expected Access and Ownership Truth
 
 Resource ownership and expected access are assertions with provenance. Recognized source classes include, in descending trust order:

@@ -234,7 +234,21 @@ Introduce:
 - extractor/rule provenance and timestamps;
 - an explicit retention policy.
 
-Full third-party response bodies are not retained by default. Potentially sensitive identifiers, PII, and business data are stored only when materially necessary to prove a finding. Secrets are never evidence.
+M13 Finding evidence is structured, bounded, redacted/minimized by default. Raw third-party response bodies are not copied into the M13 Finding evidence tables. Potentially sensitive identifiers, PII, and business data are stored only when materially necessary to prove a finding. Secrets are never evidence.
+
+M13-06 binds every `FindingEvidenceRecord`, including existing records through deterministic migration backfill, to the immutable v1 policy:
+
+```text
+policy_id: m13_minimized_finding_evidence
+policy_version: "1"
+retention_mode: explicit_management_only
+automatic_deletion_enabled: false
+raw_response_body_retained: false
+```
+
+This release records current policy only: automatic evidence deletion is disabled, and no TTL or expiry is claimed or calculated. `explicit_management_only` means any future deletion requires a separate explicit retention-management feature; no deletion API or management workflow currently exists. Full retention management remains later product maturity.
+
+The policy governs only M13 Finding evidence. `TestRun.response_body` is source execution data; its lifecycle is out of scope and unchanged. Retention metadata has no effect on classification, Finding review, authorization, Scope, execution, or network permission.
 
 ### Milestone 14 — BOLA matrix expansion
 
