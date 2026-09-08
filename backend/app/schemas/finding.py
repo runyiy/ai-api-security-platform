@@ -87,3 +87,17 @@ class FindingEvidenceExcerptRead(BaseModel):
     baseline_excerpt: str
     probe_excerpt: str
     created_at: datetime
+
+
+class FindingEvidenceFingerprintRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    finding_evidence_record_id: int
+    algorithm: str
+    fingerprint_version: str
+    baseline_digest: str
+    probe_digest: str
+    baseline_body_bytes: int
+    probe_body_bytes: int
+    created_at: datetime

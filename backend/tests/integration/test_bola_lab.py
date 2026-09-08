@@ -17,6 +17,7 @@ from app.db.models.credential_binding import CredentialBinding
 from app.db.models.credential_secret_version import CredentialSecretVersion
 from app.db.models.endpoint import Endpoint
 from app.db.models.finding import Finding
+from app.db.models.finding_evidence_fingerprint import FindingEvidenceFingerprint
 from app.db.models.finding_evidence_excerpt import FindingEvidenceExcerpt
 from app.db.models.finding_evidence_record import FindingEvidenceRecord
 from app.db.models.resource import Resource
@@ -226,6 +227,11 @@ def _delete_workflow(target_id: int, profile_id: int) -> None:
         test_case_ids = select(StoredCase.id).join(Endpoint).where(
             Endpoint.target_id == target_id
         )
+        db.execute(delete(FindingEvidenceFingerprint).where(
+            FindingEvidenceFingerprint.finding_evidence_record_id.in_(
+                select(FindingEvidenceRecord.id).where(
+                    FindingEvidenceRecord.finding_id.in_(select(Finding.id).where(
+                        Finding.target_id == target_id))))))
         db.execute(delete(FindingEvidenceExcerpt).where(
             FindingEvidenceExcerpt.finding_evidence_record_id.in_(
                 select(FindingEvidenceRecord.id).where(

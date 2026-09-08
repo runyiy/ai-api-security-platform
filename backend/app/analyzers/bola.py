@@ -1,5 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
+import hashlib
 import json
 from typing import Any, Literal
 
@@ -46,6 +47,30 @@ class BOLARedactedExcerptEvidence:
     extractor_version: Literal["1"] = "1"
 
 
+@dataclass(frozen=True, slots=True)
+class BOLAResponseFingerprintEvidence:
+    baseline_digest: str
+    probe_digest: str
+    baseline_body_bytes: int
+    probe_body_bytes: int
+    algorithm: Literal["sha256"] = "sha256"
+    fingerprint_version: Literal["1"] = "1"
+
+
+def fingerprint_response_pair(
+    *, baseline_body: str | None, probe_body: str | None,
+) -> BOLAResponseFingerprintEvidence:
+    """Exact UTF-8 integrity metadata; no normalization or semantic comparison."""
+    baseline_bytes = b"" if baseline_body is None else baseline_body.encode("utf-8")
+    probe_bytes = b"" if probe_body is None else probe_body.encode("utf-8")
+    return BOLAResponseFingerprintEvidence(
+        baseline_digest=hashlib.sha256(baseline_bytes).hexdigest(),
+        probe_digest=hashlib.sha256(probe_bytes).hexdigest(),
+        baseline_body_bytes=len(baseline_bytes),
+        probe_body_bytes=len(probe_bytes),
+    )
+
+
 @dataclass(frozen=True)
 class BOLAAnalysisResult:
     outcome: AnalysisOutcome
@@ -56,6 +81,7 @@ class BOLAAnalysisResult:
     severity: str | None = None
     evidence: BOLAStructuredEvidence | None = None
     excerpt_evidence: BOLARedactedExcerptEvidence | None = None
+    fingerprint_evidence: BOLAResponseFingerprintEvidence | None = None
 
 def parse_json_body(
     body: str | None,
@@ -128,7 +154,7 @@ def is_success_status(
     return 200 <= status_code < 300
 
 
-def analyze_bola_run(
+def _classify_bola_run(
     *,
     test_case: TestCase,
     cross_owner_run: TestRun,
@@ -295,3 +321,22 @@ def analyze_bola_run(
             "target resource was disclosed."
         ),
     )
+
+
+def analyze_bola_run(
+    *, test_case: TestCase, cross_owner_run: TestRun,
+    owner_baseline_run: TestRun | None, resource: Resource,
+) -> BOLAAnalysisResult:
+    result = _classify_bola_run(
+        test_case=test_case, cross_owner_run=cross_owner_run,
+        owner_baseline_run=owner_baseline_run, resource=resource,
+    )
+    if owner_baseline_run is None:
+        return result
+    # Carry integrity metadata even for non-finding outcomes so an explicit
+    # reanalysis can detect changes to previously fingerprinted source bodies.
+    # Classification and confidence never depend on these digests.
+    return replace(result, fingerprint_evidence=fingerprint_response_pair(
+        baseline_body=owner_baseline_run.response_body,
+        probe_body=cross_owner_run.response_body,
+    ))

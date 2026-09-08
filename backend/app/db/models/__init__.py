@@ -19,6 +19,7 @@ from app.db.models.execution_plan_cancellation import ExecutionPlanCancellation
 from app.db.models.execution_plan_progress import ExecutionPlanProgress
 from app.db.models.finding import Finding
 from app.db.models.finding_evidence_excerpt import FindingEvidenceExcerpt
+from app.db.models.finding_evidence_fingerprint import FindingEvidenceFingerprint
 from app.db.models.finding_evidence_record import FindingEvidenceRecord
 from app.db.models.finding_ai_analysis import FindingAIAnalysis
 from app.db.models.network_control import NetworkDisabledTarget, NetworkGlobalControl
@@ -65,6 +66,7 @@ __all__ = [
     "TestCase",
     "TestRun",
     "Finding",
+    "FindingEvidenceFingerprint",
     "FindingEvidenceRecord",
     "FindingEvidenceExcerpt",
     "FindingAIAnalysis",

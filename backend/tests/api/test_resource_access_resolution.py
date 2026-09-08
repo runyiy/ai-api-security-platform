@@ -186,7 +186,7 @@ def make_observed_candidate(ids: dict[str, int]) -> int:
 
 def test_no_migration_exact_pair_and_timezone_boundaries() -> None:
     assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == [
-        "e1a3c5d7f9b2"
+        "f2b4d6e8a1c3"
     ]
     target_ids = []
     try:
