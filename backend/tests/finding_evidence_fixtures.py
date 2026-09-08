@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import delete, select
 
+from app.db.models.finding_evidence_similarity import FindingEvidenceSimilarity
 from app.db.models import (
     Endpoint, Finding, FindingEvidenceFingerprint, FindingEvidenceExcerpt, FindingEvidenceRecord, Resource, Target, TestCase as StoredCase,
     TestIdentity as StoredIdentity, TestRun as StoredRun,
@@ -64,6 +65,13 @@ def evidence_pair():
         yield ids
     finally:
         with SessionLocal() as db:
+            db.execute(delete(FindingEvidenceSimilarity).where(
+                FindingEvidenceSimilarity.finding_evidence_fingerprint_id.in_(
+                    select(FindingEvidenceFingerprint.id).where(
+                        FindingEvidenceFingerprint.finding_evidence_record_id.in_(
+                            select(FindingEvidenceRecord.id).where(
+                                FindingEvidenceRecord.finding_id.in_(select(Finding.id).where(
+                                    Finding.target_id == ids["target"]))))))))
             db.execute(delete(FindingEvidenceFingerprint).where(
                 FindingEvidenceFingerprint.finding_evidence_record_id.in_(
                     select(FindingEvidenceRecord.id).where(

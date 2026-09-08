@@ -101,3 +101,15 @@ class FindingEvidenceFingerprintRead(BaseModel):
     baseline_body_bytes: int
     probe_body_bytes: int
     created_at: datetime
+
+
+class FindingEvidenceSimilarityRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    finding_evidence_fingerprint_id: int
+    comparator_id: str
+    comparator_version: str
+    exact_digest_match: bool
+    length_similarity_bps: int
+    created_at: datetime

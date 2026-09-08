@@ -26,7 +26,7 @@ VALUES = dict(algorithm="sha256", fingerprint_version="1", baseline_digest="a" *
 def test_clean_postgres_round_trip_adds_only_bounded_fingerprint_table(monkeypatch):
     config = Config("alembic.ini")
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == [REVISION]
+    assert scripts.get_heads() == ["a3c5e7f9b2d4"]
     assert scripts.get_revision(REVISION).down_revision == PARENT
     schema = f"fingerprint_migration_{uuid4().hex}"
     with engine.begin() as db:
@@ -39,7 +39,7 @@ def test_clean_postgres_round_trip_adds_only_bounded_fingerprint_table(monkeypat
         command.upgrade(config, PARENT)
         before = set(inspect(isolated).get_table_names())
         for _ in range(2):
-            command.upgrade(config, "head")
+            command.upgrade(config, REVISION)
             inspector = inspect(isolated)
             assert set(inspector.get_table_names()) == before | {TABLE}
             with isolated.connect() as db:
