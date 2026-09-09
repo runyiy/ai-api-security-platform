@@ -3,6 +3,7 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.api.routes.bola_matrix import router as bola_matrix_router
 from app.api.routes.authorization_profiles import (
     router as authorization_profiles_router,
 )
@@ -188,3 +189,5 @@ app.include_router(
     security_reports_router,
     prefix="/api",
 )
+
+app.include_router(bola_matrix_router, prefix="/api")
