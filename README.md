@@ -342,6 +342,7 @@ local API after a test session.
 
 ## Documentation
 
+- [Research Assistant v1 plan](docs/research-assistant-roadmap.md): proposed / planning-only roadmap for a low-touch, low-token authorized research assistant.
 - [Level 3 roadmap](docs/level3-roadmap.md): goals, deferred work and public readiness gates.
 - [Architecture decisions](docs/architecture-decisions.md): normative product and subsystem boundaries.
 - [Security model](docs/security-model.md): mandatory safety invariants.
