@@ -119,6 +119,8 @@ M14-05 exposes exactly one bounded read-only planning operation, `POST /api/bola
 
 Typed explicit output allowlists preserve independent relationship/access facts, candidate omissions, and exact assertion provenance. The complete UTF-8 serialization is capped at 4,194,304 bytes before sending success, with no truncation or partial response and `Cache-Control: no-store`. There are no business writes, new composition rules, credentials, outbound calls, or persistent preview state. Assignments remain proposals, and results remain transient current metadata without Resource-to-slot approval, parent-child membership proof, executable plans, or network permission. The trusted-operator/self-hosted deployment assumptions and all public-runtime restrictions remain unchanged. See [the local API example and contract](bola-matrix-preview-api.md); consolidated local matrix acceptance/compatibility closeout remains separate work.
 
+M14-06 records tests-and-documentation acceptance for this offline planning scope in [the capability matrix and isolated runbook](m14-offline-matrix-acceptance.md). It adds no runtime behavior or execution support. Local acceptance evidence does not declare M14 COMPLETE; Tech Lead review and exact-head/exact-main CI gates remain required.
+
 ## Wildcard asset enrollment
 
 Wildcard program domains are discovery and enrollment rules, not execution authorization:
