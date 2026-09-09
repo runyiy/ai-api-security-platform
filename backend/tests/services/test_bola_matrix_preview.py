@@ -87,7 +87,8 @@ def test_signature_head_and_no_new_route_or_forbidden_dependencies(preview):
     parameters = inspect.signature(preview.preview_bola_matrix).parameters
     assert list(parameters) == ["db", "endpoint_id", "resource_id", "test_identity_ids", "evaluation_time"]
     assert all(p.default is inspect.Parameter.empty for p in parameters.values())
-    assert not any("matrix" in path for path in app.openapi()["paths"])
+    assert {path: set(operations) for path, operations in app.openapi()["paths"].items()
+            if "matrix" in path} == {"/api/bola-matrix/preview": {"post"}}
     tree = ast.parse(inspect.getsource(preview))
     modules = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
     assert modules <= {"collections.abc", "dataclasses", "datetime", "typing", "sqlalchemy", "sqlalchemy.orm",

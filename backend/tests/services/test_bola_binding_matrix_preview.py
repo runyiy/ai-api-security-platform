@@ -124,7 +124,8 @@ def test_signature_frozen_input_and_isolated_composition(composer):
     signature = inspect.signature(composer.preview_bola_binding_matrix)
     assert list(signature.parameters) == ["db", "endpoint_id", "assignments", "test_identity_ids", "evaluation_time"]
     assert all(p.default is inspect.Parameter.empty for p in signature.parameters.values())
-    assert not any("matrix" in route for route in app.openapi()["paths"])
+    assert {path: set(operations) for path, operations in app.openapi()["paths"].items()
+            if "matrix" in path} == {"/api/bola-matrix/preview": {"post"}}
     source = composer.BOLAResourceSlotAssignment(1, 2)
     assert asdict(source) == {"binding_id": 1, "resource_id": 2}
     for field in fields(source):
