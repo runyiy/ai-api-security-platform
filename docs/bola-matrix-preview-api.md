@@ -106,3 +106,6 @@ allowlist, immutable execution revision, GET-only automatic execution, and
 redirect restrictions remain unchanged. Consolidated matrix acceptance and
 compatibility closeout are separate work; this operation does not declare M14
 or public execution readiness complete.
+
+For reproducible isolated tests and the current capability/compatibility evidence,
+see [M14 offline matrix acceptance](m14-offline-matrix-acceptance.md).
