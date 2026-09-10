@@ -1,5 +1,16 @@
 # Research Assistant ADR 决策材料与 RA-02 数据契约
 
+> **后续状态：** 下方 v0.1.0 的 proposed / pending 登记保留为 W3 原始历史。DATA D1–D4 的后续采纳证据见本节；其余五项 ADR 不受影响。
+
+## DATA 后续决定记录（RA-02/W1）
+
+- **被采纳的确切材料：** 本文 **v0.1.0**，reviewed commit [`dcdb50fd36c098173c2580389577bb59558c0982`](https://github.com/runyiy/ai-api-security-platform/blob/dcdb50fd36c098173c2580389577bb59558c0982/docs/research-assistant-adr-decisions.md)，ADR-RA-DATA 的 **D1–D4 推荐方案**。
+- **决定来源：** 本次用户交接明确记录：操作者在 Review Project 的决定请求下回复 **“采纳”**；Tech Lead 在同一交接中采用这些推荐作为 RA-02/W1 的设计约束。Codex 仅转录交接事实，不补造批准人签名、账号或未提供的消息链接。
+- **观察时间：** `2026-09-10T00:56:57Z`，是确认被观察到的时间，**不是声称精确的消息发送时间**。
+- **效力：** DATA D1–D4 从待决定转为本包适用的已采纳设计约束；准入前仍须实现适用控制。W1 只接收受限 synthetic context 元数据，拒绝私有/敏感资料；observation parser/payload lifecycle 留在 RA-02/W2。新执行源数据、旧 TestRun/M13 的边界依 D4 保持。
+- **没有扩大的批准：** 不批准 INTENT / PROPOSAL / EGRESS / TASK / PUBLIC，不批准真实私有数据使用、Target 执行、provider 调用或支出，不签署 W1 reviewer-PASS 或 RA-02 COMPLETE。
+- **实现与证据：** [RA-02/W1 intake 使用说明](research-intake-context.md)。原 W3 的 P/C 描述仍指其 exact base，不能倒读为本包代码事实；原“无批准”表格是采纳之前的历史。
+
 **文档 v0.1.0 · RA-01/W3 · IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**
 **全部新架构建议：PROPOSED / NOT_APPROVED。RA-02 前置审批尚未满足。**
 

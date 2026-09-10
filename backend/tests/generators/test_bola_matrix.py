@@ -32,7 +32,7 @@ def assert_error(matrix, code, call):
 
 
 def test_no_migration_or_database_dependency(matrix):
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["b5d7f9a1c3e6"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["c7e9a1b3d5f7"]
     assert list(inspect.signature(matrix.plan_bola_matrix).parameters) == ["facts"]
     tree = ast.parse(inspect.getsource(matrix))
     imports = set()

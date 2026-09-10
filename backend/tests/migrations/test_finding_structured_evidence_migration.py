@@ -21,7 +21,7 @@ TABLE = "finding_evidence_records"
 def test_clean_migration_adds_only_fixed_shape_evidence_table(monkeypatch):
     config = Config("alembic.ini")
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["b5d7f9a1c3e6"]
+    assert scripts.get_heads() == ["c7e9a1b3d5f7"]
     assert scripts.get_revision(REVISION).down_revision == PARENT
     schema = f"structured_evidence_{uuid4().hex}"
     with engine.begin() as db:
