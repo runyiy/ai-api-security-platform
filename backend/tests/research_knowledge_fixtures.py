@@ -60,6 +60,29 @@ def source(g):
 
 
 @pytest.fixture
+def permission_knowledge_pair(two_intake_targets, request):
+    # Set the window BEFORE context creation so its permission snapshot is valid.
+    from app.db.models.authorization_revision import AuthorizationRevision
+    with SessionLocal() as db:
+        for g in two_intake_targets:
+            db.get(AuthorizationRevision, g['revision']).valid_until = NOW + timedelta(seconds=1)
+        db.commit()
+    return request.getfixturevalue('knowledge_pair')
+
+
+def future_assertion(g, boundary, *, field='valid_from', state='verified', identity=None):
+    from app.db.models.resource_access_assertion import ResourceAccessAssertion
+    with SessionLocal() as db:
+        row = ResourceAccessAssertion(resource_id=g['resource'], test_identity_id=identity or g['anonymous'],
+            relationship='non_owner', expected_access='denied', provenance='target_fixture',
+            confidence=80, verification_state=state, asserted_at=NOW-timedelta(seconds=1))
+        setattr(row, field, boundary)
+        db.add(row)
+        db.commit()
+        return row.id
+
+
+@pytest.fixture
 def knowledge_pair(subject_pair):
     try:
         for g in subject_pair:

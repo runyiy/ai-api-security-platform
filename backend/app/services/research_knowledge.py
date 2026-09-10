@@ -5,10 +5,13 @@ from sqlalchemy import select, func, or_, text, delete
 from sqlalchemy.exc import IntegrityError
 from app.db.models.research_knowledge import KnowledgeVersion as KV, KnowledgeEvent as KE, KnowledgeAudit as KA
 from app.db.models.research_observation import ObservationRecord, ObservationPreparation
+from app.db.models.resource_access_assertion import ResourceAccessAssertion
+from app.schemas.research_context import ResearchIntakeInput
 from app.schemas import research_knowledge as s
 from app.schemas.research_observation import timestamp, ObservationError
 from app.schemas.research_subject import SubjectError
 from app.services import research_context as intake, research_observation as observation, research_subject as subject
+from app.services.resource_access_resolution import MAX_ASSERTIONS_SCANNED
 
 
 # A bounded catalog mutex, always before W1 context locks; not a task scheduler.
@@ -238,9 +241,11 @@ def _shape_gaps(db, context, value, clock):
 
 def _applicable(content, value, gaps):
     p = value['proposal']
+    if p['identity_choice'] not in content.applicability.actors:
+        return None
     if content.category == 'mechanism':
         return 'general_explanation'
-    if content.category != 'rule' or p['identity_choice'] not in content.applicability.actors:
+    if content.category != 'rule':
         return None
     blocked = {'facts_missing','facts_conflict','proposal_fact_conflict','identity_missing','resource_missing',
                'slot_missing','slot_unavailable','object_shape_missing','preview_only_shape','assertion_not_current_verified','permission_missing'}
@@ -255,6 +260,43 @@ def _rank(content, query):
     return len(words.intersection(query.keywords)) + 2 * len(set(content.tags).intersection(query.tags))
 
 
+def _context_deadlines(db, context, value, readiness):
+    # Compare against the instants that produced facts/gaps, never a later clock
+    # that could silently drop a dependency which expired during retrieval.
+    deadlines = []
+    permission_at = timestamp(readiness['evaluated_at'])
+    for item in ResearchIntakeInput.model_validate(readiness['intake']).targets:
+        _, revision, _, _ = intake._authorization_metadata(db, context, item)
+        if revision:
+            deadlines.extend(revision[key] for key in ('valid_from', 'valid_until')
+                             if revision[key] is not None and revision[key] > permission_at)
+    p = value['proposal']
+    if p['resource_id'] is None or p['test_identity_id'] is None:
+        return deadlines
+    fact_at = timestamp(value['evaluated_at'])
+    # Table SHARE locks already protect this qualified Resource/identity pair.
+    # Include future verified assertions, even if not selected by the proposal:
+    # their eligibility can introduce a conflict without a concurrent DB write.
+    starts = func.greatest(ResourceAccessAssertion.asserted_at, ResourceAccessAssertion.valid_from)
+    windows = list(db.execute(select(ResourceAccessAssertion.asserted_at,
+        ResourceAccessAssertion.valid_from, ResourceAccessAssertion.valid_until).where(
+        ResourceAccessAssertion.resource_id == p['resource_id'],
+        ResourceAccessAssertion.test_identity_id == p['test_identity_id'],
+        ResourceAccessAssertion.verification_state == 'verified',
+        or_(ResourceAccessAssertion.valid_until.is_(None),
+            ResourceAccessAssertion.valid_until > func.greatest(starts, fact_at)),
+    ).order_by(ResourceAccessAssertion.id).limit(MAX_ASSERTIONS_SCANNED + 1)))
+    if len(windows) > MAX_ASSERTIONS_SCANNED:
+        raise s.KnowledgeError('knowledge_scan_limit')
+    for asserted_at, valid_from, valid_until in windows:
+        eligible_from = max(asserted_at, valid_from or asserted_at)
+        if eligible_from > fact_at:
+            deadlines.append(eligible_from)
+        elif valid_until is not None:
+            deadlines.append(valid_until)
+    return deadlines
+
+
 def retrieve(db, project, context_id, payload, *, now=None):
     query = s.validate(s.QueryInput, payload, s.MAX_QUERY)
     context = _locked(db, project, context_id)
@@ -266,11 +308,12 @@ def retrieve(db, project, context_id, payload, *, now=None):
             value = subject.read(db, project, context_id, query.subject_number, version=query.subject_version, now=now)
             if value['availability'] != 'available' or value['latest_version'] != query.subject_version:
                 raise s.KnowledgeError()
-            readiness = intake.read_context(db, project, context_id, version=query.context_version, now=now)
+            readiness = intake.read_context(db, project, context_id, version=query.context_version, now=_time(now))
         except (ObservationError, SubjectError, intake.ResearchContextError):
             raise s.KnowledgeError() from None
         # W1's generic facts_missing is superseded only by W3's independently resolved gaps.
         gaps = set(value['missing_inputs']) | (set(readiness['missing_inputs']) - {'facts_missing'})
+        deadlines = _context_deadlines(db, context, value, readiness)
         try:
             gaps |= _shape_gaps(db, context, value, now)
         except ObservationError:
@@ -324,7 +367,6 @@ def retrieve(db, project, context_id, payload, *, now=None):
         matches = matches[:query.top_k]
         # Revalidate selected sources/windows at the consumption boundary, after any waits/work.
         at = _time(now)
-        deadlines = []
         for match in matches:
             row = _exact(db, context, s.ExactRef.model_validate(match['reference']))
             publication = _publication(db, row, at)
@@ -347,15 +389,6 @@ def retrieve(db, project, context_id, payload, *, now=None):
             row = db.scalar(select(ObservationRecord).where(ObservationRecord.context_id == context.id, ObservationRecord.id == source['observation_id']))
             prep = db.scalar(select(ObservationPreparation).where(ObservationPreparation.context_id == context.id, ObservationPreparation.id == row.preparation_id))
             deadlines.extend([row.expires_at, timestamp(prep.registry['valid_until'])])
-        from app.db.models.resource_access_assertion import ResourceAccessAssertion
-        # These references were checked by W1 against this locked context/Target.
-        from app.schemas.research_context import ResearchIntakeInput
-        for item in ResearchIntakeInput.model_validate(readiness['intake']).targets:
-            _, revision, _, _ = intake._authorization_metadata(db, context, item)
-            if revision and revision['valid_until'] and revision['valid_until'] > at:
-                deadlines.append(revision['valid_until'])
-        deadlines.extend(db.scalars(select(ResourceAccessAssertion.valid_until).where(
-            ResourceAccessAssertion.id.in_(value['facts']['supporting_assertion_ids']), ResourceAccessAssertion.valid_until.is_not(None))))
         status = 'matched_synthetic' if matches else ('source_unavailable' if unavailable_source else 'no_match')
         if not matches and ('preview_only_shape' in gaps or 'slot_unavailable' in gaps):
             status = 'unsupported'
@@ -365,8 +398,11 @@ def retrieve(db, project, context_id, payload, *, now=None):
         at = _time(now)
         if deadlines and at >= min(deadlines):
             raise s.KnowledgeError()
-        return s.QueryRead(format='ra-knowledge-retrieval/1', context_id=context.id, context_version=query.context_version,
+        result = s.QueryRead(format='ra-knowledge-retrieval/1', context_id=context.id, context_version=query.context_version,
             subject_number=query.subject_number, subject_version=query.subject_version, evaluated_at=at.isoformat(), audit_id=audit,
             status=status, missing_inputs=sorted(gaps | {'ordinary_publication_closed'}), matches=matches,
             eligibility_until=min(deadlines).isoformat() if deadlines else None,
             execution_authorized=False, ordinary_publication_allowed=False).model_dump()
+        if deadlines and _time(now) >= min(deadlines):
+            raise s.KnowledgeError()
+        return result

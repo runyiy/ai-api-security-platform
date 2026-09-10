@@ -1,3 +1,4 @@
+from datetime import timedelta
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
@@ -6,6 +7,7 @@ from app.services import research_observation as observation
 from app.schemas import research_knowledge as s
 from tests.research_knowledge_fixtures import knowledge_pair, subject_pair, two_intake_targets, content, record, published, query, NOW, REF, zero_capabilities  # noqa: F401
 from tests.research_intake_fixtures import snapshot
+from tests.research_knowledge_fixtures import permission_knowledge_pair, future_assertion  # noqa: F401
 
 client=TestClient(app)
 
@@ -89,3 +91,47 @@ def test_candidate_actual_byte_boundary(api,size,expected):
     response=client.post(root+'/versions',content=raw,headers={'content-type':'application/json'})
     assert response.status_code==expected
     if expected==413:assert snapshot()==before
+
+
+@pytest.mark.parametrize('kind', ['permission', 'valid_from', 'asserted_at'])
+@pytest.mark.parametrize('offset', [-1, 0, 1])
+def test_eligibility_boundary_during_response_encoding(request, monkeypatch, kind, offset):
+    pair = request.getfixturevalue('permission_knowledge_pair' if kind == 'permission' else 'knowledge_pair')
+    g, _ = pair
+    end = NOW + timedelta(seconds=1)
+    if kind != 'permission':
+        future_assertion(g, end, field=kind)
+    published(g)
+    clock = [NOW]
+    monkeypatch.setattr(observation, '_time', lambda now: clock[0])
+    canonical = s.canonical
+    encoded_values = []
+
+    def advance(value):
+        raw = canonical(value)
+        if isinstance(value, dict) and value.get('format') == 'ra-knowledge-retrieval/1':
+            encoded_values.append(value)
+            clock[0] = end + timedelta(microseconds=offset)
+        return raw
+
+    monkeypatch.setattr(s, 'canonical', advance)
+    before = snapshot()
+    response = client.post(f"/api/research-projects/{g['project']}/contexts/{g['ctx']}/knowledge/query", json=query())
+    assert len(encoded_values) == 1 and encoded_values[0]['matches']
+    assert s.timestamp(encoded_values[0]['eligibility_until']) == end
+    assert response.headers['cache-control'] == 'no-store'
+    if offset < 0:
+        assert response.status_code == 200 and response.json()['matches']
+    else:
+        assert response.status_code == 409
+        assert response.json() == {'status': 'rejected', 'code': 'knowledge_unavailable'}
+        assert snapshot() == before
+
+
+def test_mechanism_actor_filter_applies_to_api(api):
+    root, g, _ = api
+    c = content(category='mechanism')
+    c['applicability']['actors'] = ['bearer']
+    published(g, c)
+    response = client.post(root+'/query', json=query())
+    assert response.status_code == 200 and response.json()['matches'] == []
