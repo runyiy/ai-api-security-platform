@@ -16,7 +16,7 @@ from app.db.models import SecurityReport
 from app.services.security_report import SecurityReportService
 from tests.research_subject_fixtures import subject_pair, two_intake_targets, proposal, call, NOW, REF  # noqa: F401
 from tests.services.test_research_subject import record
-from tests.research_intake_fixtures import snapshot
+from tests.research_intake_fixtures import snapshot, KNOWLEDGE_TABLES
 from tests.finding_evidence_fixtures import evidence_pair  # noqa: F401
 from tests.api.test_finding_evidence_fingerprints import old_evidence
 from tests.api.test_finding_structured_evidence import analyze
@@ -29,12 +29,12 @@ TABLE="research_subject_versions"
 def existing():
     with engine.connect() as db:
         return {t.name:list(db.execute(select(t).order_by(*t.primary_key.columns)).mappings())
-                for t in Base.metadata.sorted_tables if t.name!=TABLE}
+                for t in Base.metadata.sorted_tables if t.name not in KNOWLEDGE_TABLES | {TABLE}}
 
 
 def test_fresh_exact_schema_and_empty_rollback(monkeypatch):
     config=Config("alembic.ini");scripts=ScriptDirectory.from_config(config)
-    assert scripts.get_heads()==[REVISION] and scripts.get_revision(REVISION).down_revision==PARENT
+    assert scripts.get_heads()==["f0b2d4e6a8c0"] and scripts.get_revision(REVISION).down_revision==PARENT
     schema="subject_migration_"+uuid4().hex
     with engine.begin() as db:db.execute(text(f'CREATE SCHEMA "{schema}"'))
     url=make_url(settings.database_url).update_query_dict({"options":f"-csearch_path={schema}"})
@@ -92,7 +92,7 @@ def test_populated_rollback_and_cross_context_fk_protected(subject_pair):
     with pytest.raises(RuntimeError,match="research_subject_populated_downgrade_blocked"):
         command.downgrade(Config("alembic.ini"),PARENT)
     assert snapshot()==before
-    with engine.connect() as db:assert MigrationContext.configure(db).get_current_revision()==REVISION
+    with engine.connect() as db:assert MigrationContext.configure(db).get_current_revision()=="f0b2d4e6a8c0"
     with SessionLocal() as db:
         row=db.scalar(select(ResearchSubjectVersion).where(ResearchSubjectVersion.context_id==a["ctx"]))
         for values in ({"target_id":b["target"]},{"context_version":2},{"provenance":"observed_baseline"},{"proposal_number":0},{"proposal":{"x":"x"*16384}}):

@@ -29,7 +29,7 @@ PARENT = "b5d7f9a1c3e6"
 def test_fresh_upgrade_exact_tables_constraints_and_empty_rollback(monkeypatch):
     config = Config("alembic.ini")
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["e9a1c3d5f7b8"]
+    assert scripts.get_heads() == ["f0b2d4e6a8c0"]
     assert scripts.get_revision(REVISION).down_revision == PARENT
     schema = "intake_migration_"+uuid4().hex
     with engine.begin() as db:
@@ -109,7 +109,7 @@ def test_populated_intake_blocks_destructive_downgrade(intake_target):
     with pytest.raises(RuntimeError, match="research_intake_populated_downgrade_blocked"):
         command.downgrade(Config("alembic.ini"), PARENT)
     with engine.connect() as db:
-        assert MigrationContext.configure(db).get_current_revision() == "e9a1c3d5f7b8"
+        assert MigrationContext.configure(db).get_current_revision() == "f0b2d4e6a8c0"
     assert snapshot() == before
 
 

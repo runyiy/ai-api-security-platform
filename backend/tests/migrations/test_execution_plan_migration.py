@@ -7,7 +7,7 @@ from app.db.session import engine
 
 
 HEAD = "d5f7a9c1e3b5"
-LATEST = "e9a1c3d5f7b8"
+LATEST = "f0b2d4e6a8c0"
 PARENT = "c3e5a7b9d1f2"
 
 
@@ -53,6 +53,9 @@ def test_m5_01_migration_round_trip() -> None:
                 "research_observation_records",
                 "research_observation_payloads",
                 "research_subject_versions",
+                "research_knowledge_versions",
+                "research_knowledge_events",
+                "research_knowledge_audit",
                 "research_context_versions",
                 "research_target_associations",
             }
