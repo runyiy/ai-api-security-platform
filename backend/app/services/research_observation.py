@@ -337,6 +337,9 @@ def lifecycle(db, project, context_id, observation_id, action, payload, *, now=N
             until = timestamp(p.until)
             if not now < until <= now + timedelta(days=30):
                 raise ObservationError("observation_time_invalid", 422)
+            if row.hold_generation >= 2147483647:
+                raise ObservationError("observation_capacity_exceeded", 409)
+            row.hold_generation += 1
             row.hold_started_at, row.hold_until = now, until
             row.hold_review, row.hold_reason = p.review.model_dump(), p.reason
         elif action == "release":

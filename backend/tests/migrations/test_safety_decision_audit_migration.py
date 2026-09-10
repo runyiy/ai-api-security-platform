@@ -8,7 +8,7 @@ from tests.research_intake_fixtures import INTENT_TABLES
 
 
 HEAD = "e6a8c0d2f4b7"
-LATEST = "4e72a9c1d603"
+LATEST = "5f83bac2e714"
 PARENT = "d5f7a9c1e3b5"
 
 

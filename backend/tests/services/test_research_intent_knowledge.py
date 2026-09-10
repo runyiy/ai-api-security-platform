@@ -42,3 +42,29 @@ def test_exact_knowledge_qualification(intent_rule_graph,qualified_future,kind):
     else:
         with pytest.raises(Exception):call(service.convert,g,1,conversion(g,knowledge=ref))
         assert snapshot()==before
+
+
+@pytest.mark.parametrize('recovery',['release','expiry'])
+@pytest.mark.parametrize('intermediate_read',[False,True])
+def test_rule_only_source_hold_permanently_invalidates_intent(intent_rule_graph,qualified_future,recovery,intermediate_read):
+    from tests.research_knowledge_fixtures import source
+    from app.schemas.research_knowledge import KnowledgeError
+    from tests.services.test_research_intent_sources import hold_source,recover_source
+    from datetime import timedelta
+    g=intent_rule_graph;approve(g)
+    ref=rule(g,source_refs=[source(g)])
+    publish(g,ref,validate(g,ref)['validation_ref'])
+    old=call(service.convert,g,1,conversion(g,knowledge=ref))
+    hold_source(g,g['observation'])
+    if intermediate_read:
+        before=snapshot()
+        with pytest.raises((IntentError,KnowledgeError)):
+            call(service.read,g,'intent',old['reference'],now=NOW+timedelta(seconds=2))
+        assert snapshot()==before
+    at=recover_source(g,g['observation'],recovery)
+    # The manifest has no dependency on this rule-only observation.
+    assert call(service.read,g,'manifest',g['manifest'],now=at)['reference']==g['manifest']
+    before=snapshot()
+    with pytest.raises(IntentError,match='intent_dependency_changed'):
+        call(service.read,g,'intent',old['reference'],now=at)
+    assert snapshot()==before

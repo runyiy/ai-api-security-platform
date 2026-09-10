@@ -252,10 +252,12 @@ def _actor(db,context,action,mapping,clock):
         if {'preview_only_shape','object_shape_missing'} & gaps: raise s.IntentError('intent_source_shape_unavailable')
     sources=[]
     for source in sorted(p.sources,key=lambda x:(x.observation_id,x.source_entry_index)):
-        record=db.scalar(select(ObservationRecord).where(ObservationRecord.context_id==context.id,ObservationRecord.id==source.observation_id))
+        record=db.scalar(select(ObservationRecord).where(ObservationRecord.context_id==context.id,
+            ObservationRecord.id==source.observation_id).execution_options(populate_existing=True))
         prep=db.get(ObservationPreparation,record.preparation_id)
         deadlines.extend([record.expires_at,observation.timestamp(prep.registry['valid_until'])])
-        sources.append(source.model_dump())
+        # Availability can recover; this durable provenance must not recover.
+        sources.append({**source.model_dump(), 'hold_generation': record.hold_generation})
     actor={'subject':action.subject.model_dump(),'subject_digest':s.digest('ra-subject-reference/1',p.model_dump()),
         'identity_id':p.test_identity_id,'auth_type':p.identity_choice,'credential_binding_id':p.credential_binding_id,
         'credential_version_id':credential_version,'facts':facts,'assertions':[_json(dict(r)) for r in rows],
@@ -403,9 +405,18 @@ def _knowledge(db,context,ref,snapshot,clock):
     sources.update((r.observation_id,r.source_entry_index) for r in content.source_refs if r.kind=='observation')
     if len(sources)>8: raise s.IntentError('intent_source_limit')
     deadlines=knowledge._sources(db,context,content,snapshot['target_id'],_time(clock))+[pub[2]]
+    # Current availability alone cannot resurrect a dependency after a hold.
+    # Pin the durable counter, not a prunable audit event or a consumer read.
+    lifecycle=[]
+    for oid in sorted({r.observation_id for r in content.source_refs if r.kind=='observation'}):
+        source=db.scalar(select(ObservationRecord).where(ObservationRecord.context_id==context.id,
+            ObservationRecord.id==oid).execution_options(populate_existing=True))
+        if source is None: raise s.IntentError('intent_knowledge_unavailable')
+        lifecycle.append({'observation_id':oid,'hold_generation':source.hold_generation})
     return {'reference':ref.model_dump(),'contract':content.contract.model_dump() if hasattr(content.contract,'model_dump') else content.contract,
         'validation_ref':pub[1].validation_ref.model_dump(),'review_event_id':pub[1].review_event_id,
-        'reuse_event_id':pub[1].reuse_event_id,'publication_event_id':pub[0].id},deadlines
+        'reuse_event_id':pub[1].reuse_event_id,'publication_event_id':pub[0].id,
+        **({'source_lifecycle':lifecycle} if lifecycle else {})},deadlines
 
 
 def _selected_snapshot(snapshot,purpose):

@@ -130,3 +130,55 @@ W1验收映射（这些是本地实现测试，不能替代Review Project或W2�
 ## 6. 剩余边界与停止
 
 I1–I7设计已采纳，不代表独立Review Project对本实现PASS。W2须提供当前合资格、不可伪造的真实interpreter/health/source证明及实际pair消费时间；并在启用新purpose审批/发送前实现完整最终执行资格重验、预算消耗与M8边界集成。本包没有把这些缺口包装成已存在的能力。W3本地端到端演示及通用报告仍按roadmap次序；实际Target/health请求、operator credentials、私有资料和费用仍需各自授权。本地commit后STOP，不push/PR/merge，不开始W2。
+
+## 7. W1 source lifecycle fix（待独立复核）
+
+本次fix继续 `codex/ra-04-w1-intent-bridge`，实际clean HEAD核验为 `81533fe4eddf4ac136cb937d09434bb0f30b9be2`，不amend该commit。[协议§5 / I4、I7](research-intent-contract.md#5-等待变更与失效-p)要求合法恢复source后也不能恢复旧intent。本节追加修复记录，保留以上原始实现/验证历史；不宣告独立Review Project PASS或W2 readiness。
+
+[增量migration](../backend/alembic/versions/5f83bac2e714_pin_observation_hold_generation.py)增加observation记录的 `hold_generation INTEGER NOT NULL DEFAULT 0`，范围0–2147483647。每个合法hold在既有context锁、savepoint和审计事务内加一（包括重复hold/相同timestamp）；达到上限时拒绝，不能回绕。release、自然hold expiry、普通/human read和audit retirement不改该计数。旧记录只获得新增列默认值；不改payload、hold时间、review、source refs或immutable W1历史。此计数无需扫描事件历史，不依赖会被裁剪的audit，也无需消费者在hold期间读取。
+
+W1在既有subject和knowledge source资格核验后，把exact observation对应计数纳入manifest actor source snapshot及可选rule dependency snapshot，随core/digest冻结。消费时在同一context锁内读取当前计数并比较；hold结束后当前availability恢复也不能匹配旧pin。source仍采用context隔离的软引用；记录删除/不可用仍拒绝，不增加保留payload的FK。最多8个distinct entry的限制不变，rule-only额外metadata查询最多8次，现有core/output限制继续适用。
+
+恢复后须重新提交合资格manifest、独立budget decision和新intent/plans；旧预算不转移，旧core/link/计划不改写。旧格式中含observation依赖但未带pin的manifest/intent也拒绝重用，不能回填假历史资格；无observation依赖的旧记录不因本fix额外失效。普通读取及不相关source的hold不会使未变化依赖失效。生产 `_interpretation()` 仍无条件拒绝，所有新purpose审批/执行gate原样关闭；正向新plan测试仅使用原有显式monkeypatch未来W2 producer。
+
+新增migration的downgrade在锁表后拒绝任何非零hold计数或已有manifest/intent，避免删除实际失效依据；空域/仅未hold旧观察记录可安全回退。旧W1 migration继续对其他新域、孤立Case/plan marker拒绝破坏性回退。必须停用不认识hold计数的旧二进制的observation生命周期写入口和W1入口，不支持这些writer混用新旧版本；保留该列不能让旧二进制正确推进计数，也不能恢复新purpose执行。没有修改旧migration或M8行为。历史migration测试仅更新head，并按其当时schema比较旧字段；新增测试独立核验计数默认值、边界、升级保留和非空回退拒绝。
+
+本次验证使用Ubuntu WSL2与仓库backend `.venv`（Python3.12.3），新建自有PostgreSQL16 instance：`/tmp/ra04-w1-lifecycle.tsXYaX/data`、`127.0.0.1:55479`、database/role均 `ra04_lifecycle`。首次application import前以独立 `psql -X` 核验database/user、地址/端口、data_directory、UTF8、public表数0、其他client数0及目录owner/runyiy、mode0700（`identity.txt`）。未读取operator数据库或ambient key；使用排除 `.env*` 的临时backend副本和如下runner环境，并断言 `settings.credential_encryption_key is None`：
+
+```sh
+cd /tmp/ra04-w1-lifecycle.tsXYaX/backend
+env -i PATH=/home/runyiy/projects/ai-api-security-platform/backend/.venv/bin:/usr/bin:/bin LANG=C.UTF-8 DATABASE_URL=postgresql+psycopg://ra04_lifecycle@127.0.0.1:55479/ra04_lifecycle "$@"
+```
+
+临时logs/runner均在 `/tmp/ra04-w1-lifecycle.tsXYaX/`，不加入commit。最终全套测试启动前425个app/test/migration Python文件与仓库逐字节一致（`copy-final.log`，集合SHA256=`fa351fd0f5efc31448b2315ed2c82c5a9bb1dfd439db387e7b5ef288ee36c648`）。本次实际命令（通过该runner执行，git检查在仓库根）：
+
+```sh
+alembic upgrade head
+python -m pytest /tmp/review-ra04-w1-probe-i7udwumg/test_independent_lifecycle.py -q --tb=short
+python -m pytest tests/services/test_research_intent_sources.py tests/services/test_research_intent_knowledge.py tests/services/test_research_intent_concurrency.py tests/api/test_research_intents.py tests/migrations/test_research_intent_lifecycle_migration.py /tmp/review-ra04-w1-probe-i7udwumg/test_independent_lifecycle.py -q --tb=short
+python -m pytest tests/schemas/test_research_intent.py tests/services/test_research_intent.py tests/services/test_research_intent_gates.py tests/services/test_research_intent_concurrency.py tests/services/test_research_intent_knowledge.py tests/services/test_research_intent_sources.py tests/api/test_research_intents.py tests/migrations/test_research_intent_migration.py tests/migrations/test_research_intent_lifecycle_migration.py -q --tb=short
+python -m pytest --tb=short -q
+python -m alembic heads
+python -m alembic current
+python -m alembic check
+python -m evaluation.ra01 verify
+python -m pip check
+git diff --check
+```
+
+| 本次已执行验证 | 实际结果 |
+| --- | --- |
+| reviewed HEAD上的reviewer复现（`reviewer-before.log`） | **2 failed**，2.32s：两个旧依赖恢复后都没有拒绝 |
+| lifecycle补充组合（`lifecycle-focused.log`，含reviewer两例） | **67 passed**，1 warning，44.37s |
+| W1 focused，含fresh/populated/empty/refused migration（`w1-focused.log`） | **179 passed**，6 warnings，83.40s |
+| 首次full backend（`full-backend.log`） | **35 failed / 2934 passed**，60 warnings，337.45s；逐条核验均为旧head `4e72a9c1d603` 与新head不等，未发现运行行为失败。随后仅机械更新这些head期望；没有修改M8或其他行为 |
+| 最终full backend（`full-backend-final.log`） | **2969 passed**，60 warnings，375.34s；包含全部W1、observation lifecycle、knowledge、legacy和migration回归，无未解决失败 |
+| 最终独立复现脚本本地重跑（`reviewer-final.log`） | **2 passed**，2.22s；这是本地执行，不是独立Review Project PASS |
+| Alembic heads/current/check | 唯一head/current=`5f83bac2e714`；**No new upgrade operations detected** |
+| `python -m evaluation.ra01 verify` | **VERIFIED**，freeze=`692c33a321cc59e9799377ed512402ac33826dec06707d494b3d5853006a231a`，既有approval状态不变；未查看held-out来构造fixture |
+| `python -m pip check` | **No broken requirements found**；pip仅提示不可写用户cache并自动禁用cache |
+| 临时 `check_docs.py` / `check_scope.py` / `check_copy.py`；`git diff --check` | **PASS**：110本地链接、19 anchors，9外链未fetch；生产proof仍无条件拒绝；36个其他测试文件仅改head，冻结材料、旧migration、dependencies及execution gates未改；425个Python文件一致 |
+
+开发中首次source试跑为4 failed/20 passed：测试对hold期间拒绝的异常类型误写为IntentError；既有subject gate实际抛SubjectError。改为明确期待SubjectError，保留恢复后必须抛 `intent_dependency_changed` 的断言。永久回归另覆盖hold expiry的±1µs、是否有中间读取、production旧预算重用、新manifest独立决定、controlled future-W2旧intent/新计划、rule-only source、同timestamp重复hold、audit retirement、无关source隔离、普通/human read、计数上限、audit/receipt rollback、真实锁等待及API拒绝原子性。没有新runtime test seam或真实W2证据；未发送新purpose/Target/health请求。
+
+最终复核为同一 `ra04_lifecycle / ra04_lifecycle / 127.0.0.1:55479 / /tmp/ra04-w1-lifecycle.tsXYaX/data / UTF8 / PostgreSQL16.15`，无其他client，operator encryption key仍缺省。已执行 `/usr/lib/postgresql/16/bin/pg_ctl -D /tmp/ra04-w1-lifecycle.tsXYaX/data -m fast -w stop` 并核验 `postmaster.pid` 不存在；只停止本次自有instance。30个新增永久测试不构成W2证据或执行授权。本地fix commit后STOP，等待Review Project；不push、PR、merge或开始W2。

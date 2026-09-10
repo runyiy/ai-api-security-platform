@@ -97,3 +97,21 @@ def test_api_clock_rollback_after_service_boundary_rejects(api,intent_graph,qual
     response=api.post(url(g,'versions/1'),json=conversion(g))
     assert response.status_code==409 and response.json()['code']=='intent_clock_invalid'
     assert snapshot()==before
+
+
+@pytest.mark.parametrize('kind',['manifest','budget','intent'])
+def test_recovered_source_cannot_reuse_old_records_through_api(api,intent_graph,monkeypatch,kind,request):
+    from tests.services.test_research_intent_sources import attach_source,hold_source,recover_source
+    g=intent_graph;oid=attach_source(g);ref=g['manifest']
+    if kind=='intent':
+        request.getfixturevalue('qualified_future')
+        ref=call(service.convert,g,1,conversion(g))['reference']
+    hold_source(g,oid)
+    at=recover_source(g,oid,'release')
+    monkeypatch.setattr(service,'_time',lambda _=None:at)
+    before=snapshot()
+    path='budget-decisions' if kind=='budget' else 'read/'+kind
+    payload=dict(manifest=ref,expected_sequence=1,decision='approved',evidence=REF) if kind=='budget' else ref
+    response=api.post(url(g,path),json=payload)
+    assert response.status_code==409 and response.json()['code']=='intent_dependency_changed'
+    assert response.headers['cache-control']=='no-store' and snapshot()==before

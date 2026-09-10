@@ -21,7 +21,7 @@ PARENT = "b6d8f0a2c4e5"
 def test_clean_postgres_upgrade_downgrade_upgrade(monkeypatch):
     config = Config("alembic.ini")
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["4e72a9c1d603"]
+    assert scripts.get_heads() == ["5f83bac2e714"]
     assert scripts.get_revision(REVISION).down_revision == PARENT
     schema = f"finding_migration_{uuid4().hex}"
     with engine.begin() as db:
@@ -34,14 +34,14 @@ def test_clean_postgres_upgrade_downgrade_upgrade(monkeypatch):
                             url.render_as_string(hide_password=False).replace("%", "%%"))
         command.upgrade(config, "head")
         with isolated.connect() as db:
-            assert MigrationContext.configure(db).get_current_revision() == "4e72a9c1d603"
+            assert MigrationContext.configure(db).get_current_revision() == "5f83bac2e714"
         command.downgrade(config, PARENT)
         assert "baseline_test_run_id" not in {
             column["name"] for column in inspect(isolated).get_columns("findings")
         }
         command.upgrade(config, "head")
         with isolated.connect() as db:
-            assert MigrationContext.configure(db).get_current_revision() == "4e72a9c1d603"
+            assert MigrationContext.configure(db).get_current_revision() == "5f83bac2e714"
     finally:
         isolated.dispose()
         with engine.begin() as db:

@@ -34,7 +34,7 @@ def existing_snapshot():
 def test_fresh_upgrade_exact_schema_and_empty_downgrade(monkeypatch):
     config = Config("alembic.ini")
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["4e72a9c1d603"] and scripts.get_revision(REVISION).down_revision == PARENT
+    assert scripts.get_heads() == ["5f83bac2e714"] and scripts.get_revision(REVISION).down_revision == PARENT
     schema = "observation_migration_"+uuid4().hex
     with engine.begin() as db:
         db.execute(text(f'CREATE SCHEMA "{schema}"'))
@@ -50,6 +50,7 @@ def test_fresh_upgrade_exact_schema_and_empty_downgrade(monkeypatch):
         for name in TABLES:
             columns = {c["name"]: c for c in inspector.get_columns(name)}
             for c in Base.metadata.tables[name].columns:
+                if c.name == "hold_generation": continue  # Added by 5f83bac2e714, checked separately.
                 assert c.type.compile(dialect=engine.dialect) == columns[c.name]["type"].compile(dialect=engine.dialect)
                 assert c.nullable == columns[c.name]["nullable"]
             assert all(fk["options"] == {"ondelete": "RESTRICT"} for fk in inspector.get_foreign_keys(name))
@@ -112,7 +113,7 @@ def test_populated_rollback_protected_without_loss(observation_context):
         command.downgrade(Config("alembic.ini"), PARENT)
     assert snapshot() == before
     with engine.connect() as db:
-        assert MigrationContext.configure(db).get_current_revision() == "4e72a9c1d603"
+        assert MigrationContext.configure(db).get_current_revision() == "5f83bac2e714"
 
 
 def test_composite_fk_immutable_provenance_and_expiry_constraints(observation_context):

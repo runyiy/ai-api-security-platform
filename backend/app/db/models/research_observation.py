@@ -45,6 +45,7 @@ class ObservationRecord(Base):
         CheckConstraint("expires_at > accepted_at AND expires_at <= accepted_at + interval '2592000 seconds'", name="ck_observation_expiry"),
         CheckConstraint("hold_until IS NULL OR (hold_started_at IS NOT NULL AND hold_until > hold_started_at AND hold_until <= hold_started_at + interval '2592000 seconds')", name="ck_observation_hold"),
         CheckConstraint("jsonb_array_length(entry_order) BETWEEN 1 AND 128", name="ck_observation_entries"),
+        CheckConstraint("hold_generation BETWEEN 0 AND 2147483647", name="ck_observation_hold_generation"),
     )
     id: Mapped[int] = mapped_column(primary_key=True)
     context_id: Mapped[int] = mapped_column(ForeignKey("research_contexts.id", ondelete="RESTRICT"))
@@ -64,6 +65,8 @@ class ObservationRecord(Base):
     hold_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     hold_review: Mapped[dict | None] = mapped_column(JSONB)
     hold_reason: Mapped[str | None] = mapped_column(String(32))
+    # Durable across release, automatic hold expiry and audit retirement.
+    hold_generation: Mapped[int] = mapped_column(default=0, server_default="0")
 
 
 class ObservationPayload(Base):

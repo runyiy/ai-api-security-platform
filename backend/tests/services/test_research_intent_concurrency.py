@@ -42,3 +42,26 @@ def test_concurrent_exact_version_creates_only_one_mapping(intent_graph):
     with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(lambda _:create(),range(2)))
     assert sum(isinstance(v,dict) for v in results)==1
     assert 'intent_version_conflict' in results
+
+
+def test_hold_release_committed_while_reader_waits_invalidates_old_intent(intent_graph,qualified_future):
+    from datetime import timedelta
+    from app.services import research_observation as observation
+    from tests.services.test_research_intent_sources import attach_source
+    g=intent_graph;oid=attach_source(g);old=call(service.convert,g,1,conversion(g))
+    waiting=Event();pids={}
+    def reader():
+        with SessionLocal() as db:
+            pids['reader']=db.scalar(text('SELECT pg_backend_pid()'));waiting.set()
+            return service.read(db,g['project'],g['ctx'],'intent',old['reference'],now=NOW+timedelta(seconds=4))
+    with SessionLocal() as writer:
+        pid=writer.scalar(text('SELECT pg_backend_pid()'))
+        observation.lifecycle(writer,g['project'],g['ctx'],oid,'hold',dict(review=REF,reason='synthetic_review',
+            until=(NOW+timedelta(seconds=20)).isoformat()),now=NOW+timedelta(seconds=1))
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            result=pool.submit(reader);assert waiting.wait(10)
+            try:
+                wait_for_blocker(pids['reader'],pid)
+                observation.lifecycle(writer,g['project'],g['ctx'],oid,'release',dict(review=REF),now=NOW+timedelta(seconds=3))
+            finally:writer.commit()
+            with pytest.raises(IntentError,match='intent_dependency_changed'):result.result(15)
