@@ -2,7 +2,7 @@
 
 **PROPOSED / FOR REVIEW** · 2026-09-09 · [Issue #132](https://github.com/runyiy/ai-api-security-platform/issues/132)
 
-> **RA-01 当前实施记录（2026-09-09）：** 用户交接确认 [W1 契约 v0.1.0](research-assistant-product-contract.md) 在 `548425daf2539f61b76be319279d310f0e688934` 已通过独立审阅、anti-drift 和 exact-SHA push，尚未合入 main；W1 文档自身记录保留为当时历史。[W2 评测契约 ra01-evaluation-v1](research-assistant-evaluation.md) 已实施、待独立审查（**IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**），精确依赖为该 W1 SHA；标签及 proposed 阈值/预算仍待适用人工批准。RA-01 继续 IN_PROGRESS，未 COMPLETE；W3 未开始。下文 NOT_STARTED / NOT_AUTHORIZED、Issue #132 和 push 流程保留为规划历史；持续授权适用于已有顺序工作包，但本次仅 W2：实施、验证、本地 commit 后停止，由独立 Review Project 审查并 push 精确批准的 HEAD。不重开 Issue #132 / merged PR #133，不扩大架构决策、公网执行或费用授权。
+> **RA-01 当前实施记录（2026-09-09）：** 用户交接确认 W1/W2 已通过独立审阅及 exact-SHA push；W2 精确 HEAD 为 `ac9a5ce3142232e86576b5d789d93b95508e259d`，本次 fetch 已核验，尚未合入 main。既有 [W1 契约](research-assistant-product-contract.md) 与 [W2 评测契约](research-assistant-evaluation.md) 保留各自当时记录；工程 gate 不代表标签、阈值、预算或 ADR 已获批准。[W3 ADR 决策材料 v0.1.0](research-assistant-adr-decisions.md) 已形成、待独立审查（**IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**）；全部新架构建议及 RA-02 DATA 前置审批仍为 PENDING。RA-01 继续 IN_PROGRESS，未 COMPLETE，未启动 RA-02。下文 NOT_STARTED / NOT_AUTHORIZED、Issue #132 和 push 流程保留为规划历史；本次仅 W3：实施、验证、本地 commit 后停止，由独立 Review Project 审查并 push 精确批准的 HEAD。持续授权不替代架构决定、公网执行或费用批准；不重开 Issue #132 / merged PR #133。
 
 本文是待审计划，不代表功能已经实现或获得执行许可。所有未来阶段和工作包均为 **NOT_STARTED / NOT_AUTHORIZED**。除明确标为历史证据或本次文档任务验证的记录外，下文 PASS 均表示未来验收条件。计划书合并不等于批准 RA-01，也不启动 M15。M14-01 至 M14-06 的约定离线范围保持 COMPLETE。
 
@@ -112,7 +112,7 @@ AI 接收 typed data 并返回建议，不拥有 executor、shell、任意 fetch
 
 | 阶段 | 可观察交付 | 直接依赖/进入决策 | 退出方向 | 状态 |
 | --- | --- | --- | --- | --- |
-| RA-01 | 可执行的产品/评测契约及 ADR 规格 | 计划审阅后单独批准首个任务 | 冻结 oracle、阈值及必要 ADR | IN_PROGRESS；W1 独立 gate 已通过；W2 已实施、待独立审查；W3 未开始 |
+| RA-01 | 可执行的产品/评测契约及 ADR 规格 | 计划审阅后单独批准首个任务 | 冻结 oracle、阈值及必要 ADR | IN_PROGRESS；W1/W2 独立 review/push gate 已通过；W3 材料待独立审查，DATA 审批未满足 |
 | RA-02 | 安全观察导入及身份/资源/预算上下文 | RA-01；数据 lifecycle 决策 | 为检索/规划提供安全输入 | NOT_STARTED / NOT_AUTHORIZED |
 | RA-03 | 带版本和反例的已审规则 | RA-02；知识使用资格/隔离审查 | 可重复的受限检索 | NOT_STARTED / NOT_AUTHORIZED |
 | RA-04 | 最小本地候选→计划→验证→证据演示 | RA-03；bridge/intent/evidence ADR | 可靠验证窄请求形态 | NOT_STARTED / NOT_AUTHORIZED |
@@ -133,7 +133,7 @@ AI 接收 typed data 并返回建议，不拥有 executor、shell、任意 fetch
 - **用户操作与进入条件：** 单独获得 RA-01 授权并重新核对 exact base 后，操作者能够拿一个带标签的合成案例，确定输入、允许行为、预期输出、人工决策和客观评分方法。该阶段必须让后续验收可执行，不能继续重复宏观计划。
 - **包含与排除：** 冻结单操作者、本地 BOLA、支持的请求形态、中断策略、fixture 清单和 oracle 规范。排除 provider 集成、导入功能、自主执行和公网工作。
 - **复用与新增：** 复用基线清单、M14 验收、安全/有缺陷实验靶场及 M8/AI/M13 回归。新增版本化评测清单、独立标签依据、结果 schema、源码/兼容性清单和 ADR 决策材料。
-- **有序工作包：** (1) **RA-01/W1：** 冻结产品契约、真实调用图和支持形态；每项声明都有源码、限制和输出证据。 [W1 契约 v0.1.0](research-assistant-product-contract.md) 的独立 gate 已通过（依据当前交接的 exact SHA）。(2) **RA-01/W2：** 定义合成开发集与隔离保留集、确定性时钟、可执行评分规则、结果 schema 和第 7 节阈值；提供样例输入/输出及最小评分演示。[W2 评测契约](research-assistant-evaluation.md) 及离线 scorer 已实施、待独立审查；不代表阈值批准或产品质量 PASS。(3) **RA-01/W3：** 审查第 8 节 ADR 提案；批准 RA-02 所需数据决策，并记录其余决策的审批检查点。
+- **有序工作包：** (1) **RA-01/W1：** 冻结产品契约、真实调用图和支持形态；每项声明都有源码、限制和输出证据。 [W1 契约 v0.1.0](research-assistant-product-contract.md) 的独立 gate 已通过（依据当前交接的 exact SHA）。(2) **RA-01/W2：** 定义合成开发集与隔离保留集、确定性时钟、可执行评分规则、结果 schema 和第 7 节阈值；提供样例输入/输出及最小评分演示。[W2 评测契约](research-assistant-evaluation.md) 的独立 review/push gate 已通过（精确 SHA 见当前记录）；不代表阈值批准或产品质量 PASS。(3) **RA-01/W3：** 审查第 8 节 ADR 提案；批准 RA-02 所需数据决策，并记录其余决策的审批检查点。[W3 决策材料](research-assistant-adr-decisions.md) 已形成待审建议与验收映射；Tech Lead/操作者尚未签署 DATA 或其余 ADR 决定，依赖 gate 保持关闭。
 - **正向、负向与边界测试：** 对预定正确输出评分；故意把合法共享标成漏洞、把 unknown 标成安全、漏记一次模型调用，均须导致评分失败。检查零分母、缺失字段、保留集泄漏、恰好/超过预算，以及带时区与不带时区时间。oracle 必须先能识别错误答案，才能评测产品；模型自评不是 oracle。
 - **人工职责与 PASS 证据：** Tech Lead 批准能力清单和适用 ADR；操作者确认可用性、阈值和预算。证据包括清单版本/hash、每个场景的标签依据、机器可读结果 schema、预期样例输出、可复现评分步骤、评测前阈值冻结记录，以及已批准/待批准 ADR 台账。此阶段不要求完整的未来产品运行器。
 - **失败处理、migration、ADR、隐私与费用：** 无法客观判断结果或仍有规范冲突时停止。保留评测前版本，不为适配结果降低阈值。不做 application migration，不使用敏感真实数据或付费模型/云资源。ADR 批准是设计决策，不是执行授权。
