@@ -11,6 +11,8 @@ from app.db.session import SessionLocal, engine
 
 NOW = datetime(2031, 4, 3, 12, tzinfo=timezone.utc)
 NEW_TABLES = {"research_contexts", "research_context_versions", "research_target_associations"}
+OBSERVATION_TABLES = {"research_observation_controls", "research_observation_events",
+                     "research_observation_preparations", "research_observation_records", "research_observation_payloads"}
 REF = {"kind": "synthetic_fixture", "fixture_id": 1, "version": 1}
 
 
@@ -31,7 +33,7 @@ def intake(ids):
 def snapshot(*, legacy=False):
     with engine.connect() as db:
         return {t.name: list(db.execute(select(t).order_by(*t.primary_key.columns)).mappings())
-                for t in Base.metadata.sorted_tables if not legacy or t.name not in NEW_TABLES}
+                for t in Base.metadata.sorted_tables if not legacy or t.name not in (NEW_TABLES | OBSERVATION_TABLES)}
 
 
 @pytest.fixture

@@ -7,7 +7,7 @@ from app.db.session import engine
 
 
 HEAD = "e6a8c0d2f4b7"
-LATEST = "c7e9a1b3d5f7"
+LATEST = "d8f0b2c4e6a8"
 PARENT = "d5f7a9c1e3b5"
 
 
@@ -45,6 +45,11 @@ def test_m5_03_migration_round_trip_preserves_preexisting_schema() -> None:
                 "finding_evidence_similarities",
                 "finding_evidence_retention_bindings",
                 "research_contexts",
+                "research_observation_controls",
+                "research_observation_events",
+                "research_observation_preparations",
+                "research_observation_records",
+                "research_observation_payloads",
                 "research_context_versions",
                 "research_target_associations",
             }
