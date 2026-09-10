@@ -1,5 +1,7 @@
 # RA-02/W2：受限离线 observation intake
 
+> **v0.1.2 tombstone 时钟修复 · PENDING_INDEPENDENT_REVIEW**：父提交为 reviewed HEAD `e3da1a0e2a9a709f2b0f7fc97f7d9f5f8fc6b652`，仅处理更早已记录的不可用原因，见第 9 节。以下旧版本与验证记录保留。
+
 > **v0.1.1 生命周期修复 · PENDING_INDEPENDENT_REVIEW**：以 reviewed HEAD `ad105f3e7da24d588a2e4be161a79b50645a63d7` 为父提交，仅修复三个生命周期 blocker，见第 8 节。下方 v0.1.0、第 6–7 节保留初始 W2 提交的验证/文件历史；任务 base 仍为 `2575a34270fc53bddc75373afe220ba06a34883e`。
 
 **v0.1.0 · IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**。精确起点 `2575a34270fc53bddc75373afe220ba06a34883e`，远端 `origin/codex/ra-02-w1-intake-context` 已 fetch 核验；W1 已审阅/push、未合入 main，依据本次交接。W2 不签署 reviewer-PASS / RA-02 COMPLETE，不开始 W3，不 push。
@@ -267,5 +269,42 @@ backend/app/schemas/research_observation.py
 backend/app/services/research_observation.py
 backend/tests/api/test_research_observation_lifecycle.py
 backend/tests/services/test_research_observation_lifecycle.py
+docs/research-observation-intake.md
+```
+
+
+## 9. e3da1a0 后的已记录不可用时间修复
+
+本次只修复 tombstone clock，任务 base 仍为 `2575a34270fc53bddc75373afe220ba06a34883e`；不改变 [DATA 第 4 节](research-assistant-adr-decisions.md#4-项目访问保留与事件处理-p)的 90 天期限。模型、schema、migration、W1、evaluation freeze 与 legacy TestRun/M13 不变。
+
+[服务](../backend/app/services/research_observation.py)的 `_mark_unavailable()` 在没有已结束 hold 时，比较既存 `unavailable_at`、原 `expires_at` 和此次已记录的原因时间；后到 delete/quarantine/replay 不能覆盖更早起点。`_recorded_unavailability()` 在原有 project/context 锁及 savepoint 内读取本项目 preparation 的 `revoked_at` 和 context 的 `closed_at`，生命周期操作处理 hold 前先应用这些原因，reconcile 也使用同一规则。关闭后的这条路径不查询 Target/revision/Scope。
+
+有效 hold 仍按实际 release/end 推迟适用时钟；撤销 preparation 则在撤销时终止资格，不能等到原 hold_until。已经释放/取消的 hold 在旧模型中只保留 `hold_started_at` 和合并到 `unavailable_at` 的结束时钟；维护保留该已有时钟，不从可过期/轮换的审计日志猜测重建区间。后来操作先应用已知原因，避免在清除 hold 元数据后才发现较早撤销。没有 migration、全库 backfill 或对不具备可区分历史证据的旧 hold 时限作推测性修订；本次修复可确定的无 hold 历史复现由专门测试覆盖。
+
+合成时间以 `T=2031-04-03T12:00:00Z` 为基准。两个独立场景均为 `T+1 day` revoke preparation 或 close context，`T+2 days` delete，`T+3 days` reconcile；实际存储 `unavailable_at=T+1 day`，`T+91 days−1µs` 不删除 tombstone，`T+91 days` 删除，再次维护删除数为 0。对应的 API/service 测试也覆盖 quarantine/replay、先维护/后操作、重复维护、此前已释放的 hold、关闭后有效 release/natural end，以及撤销后取消 hold 的顺序。digest/entry order 不改写，payload 清除后不再读取。
+
+[Service 回归](../backend/tests/services/test_research_observation_lifecycle.py)及 [API 回归](../backend/tests/api/test_research_observation_lifecycle.py)增加精确时间断言、四组 delete/reconcile 真正 PostgreSQL 锁等待和审计 INSERT/响应编码故障的整体回滚。继续运行原审计轮换、revocation cleanup、零 network/provider/credential sentinel、legacy 快照、W1 跨项目与 close/transfer 回归。不增加新的入口或执行权限。
+
+本次环境为 Ubuntu WSL，项目 `.venv` Python 3.12.3 / PostgreSQL 16.15；依照[独占实例 runbook](m14-offline-matrix-acceptance.md#reproducible-isolated-local-run)，应用 import 前新建并独立核验 database/user=`ra02_w2_clock_test`、`127.0.0.1:55456`、当前用户拥有的 `/tmp/ra02-w2-clock-fix-test.gnnNof/data`；初始 public 表数 0、其他 client backend 数 0，显式配置不使用 `.env` 默认库。开发 requirements 已满足，DSN/key/log 均留在 Git 外。
+
+修复前两个复现为 **2 failed**，均为存储 T+2 而预期 T+1。修复后首轮生命周期检查 **79 passed, 1 warning**；随后加入并发/回滚检查。最终验证结果在本节下表记录，不把实现方测试当作独立 Review Project 批准。
+
+自查时保留 replay 后既有 `quarantined` 结果并增加状态断言；在该最终代码上重新串行运行以下检查。没有修改失败断言、跳过测试或重复未变失败来取得通过。
+
+| 最终命令/检查（从 backend、已配置独占环境） | 实际结果 |
+| --- | --- |
+| 第 6 节 W1/W2 focused 命令，加上两份 lifecycle 测试 | **350 passed, 1 warning**；包含 40 个本次新增案例及既有 migration compatibility |
+| `python -m pytest` | **2439 passed, 55 warnings**，无失败/跳过；warnings 为既有 collection/TestClient 提示 |
+| `python -m evaluation.ra01 verify` | **VERIFIED**，freeze digest 仍为 `692c33a321cc59e9799377ed512402ac33826dec06707d494b3d5853006a231a` |
+| `python -m pip check` | No broken requirements found；本机 pip cache 不可写提示不影响检查 |
+| `python -m alembic current` / `heads` / 初始 `upgrade head` | fresh 初始无 revision，升级成功；最终 current/唯一 head 均 `d8f0b2c4e6a8`；未改迁移 |
+| 完整修复 diff、相对链接/anchors、范围及 `git diff --check` | 通过；24 个本地链接/anchors，无额外未跟踪交付物 |
+
+验证后仅停止新建的 `ra02_w2_clock_test` 实例，确认其 postmaster.pid 已消失。本次相对 reviewed HEAD 只改以下 4 个文件；相对任务 base 的累计 54 个路径仍为第 7–8 节清单，没有新增路径。提交是本地修复，不 amend、不 push，等待 Review Project，不开始 W3。
+
+```text
+backend/app/services/research_observation.py
+backend/tests/services/test_research_observation_lifecycle.py
+backend/tests/api/test_research_observation_lifecycle.py
 docs/research-observation-intake.md
 ```

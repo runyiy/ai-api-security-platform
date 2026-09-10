@@ -156,13 +156,31 @@ def _state(row, now):
 
 
 def _mark_unavailable(row, at, *, end_hold=False):
-    # A late delete/quarantine/replay must not restart an already expired clock.
-    since = row.unavailable_at or min(row.expires_at, at)
+    # Reconcile recorded causes, including causes discovered after a later
+    # delete. A completed hold's persisted clock is also its retained end:
+    # do not reconstruct that interval from expiring/rotatable audit events.
+    since = min(row.unavailable_at or at, row.expires_at, at)
+    if row.hold_started_at and row.hold_until is None and row.unavailable_at:
+        since = row.unavailable_at
     if end_hold:
         if row.hold_until and row.hold_started_at and row.hold_started_at <= at:
             since = max(since, min(row.hold_until, at))
         row.hold_until = None
     row.unavailable_at = since
+
+
+def _recorded_unavailability(db, context, row):
+    # Only immutable project-local causes, under the caller's W1 context lock.
+    # Apply them before later lifecycle actions can consume/clear hold metadata.
+    prep = db.scalar(select(ObservationPreparation).where(
+        ObservationPreparation.context_id == context.id, ObservationPreparation.id == row.preparation_id))
+    if context.closed_at:
+        row.state = "quarantined"
+        _mark_unavailable(row, min(context.closed_at, prep.revoked_at or context.closed_at))
+    if prep.revoked_at:
+        row.state = "quarantined"
+        _mark_unavailable(row, prep.revoked_at, end_hold=True)
+    return prep
 
 
 def _receipt(row, state):
@@ -322,12 +340,14 @@ def lifecycle(db, project, context_id, observation_id, action, payload, *, now=N
             row.hold_started_at, row.hold_until = now, until
             row.hold_review, row.hold_reason = p.review.model_dump(), p.reason
         elif action == "release":
+            _recorded_unavailability(db, context, row)
             if not row.hold_until or not row.hold_started_at or not row.hold_started_at <= now < row.hold_until:
                 raise ObservationError("observation_hold_not_active")
             if row.state != "available" or now >= row.expires_at:
                 _mark_unavailable(row, now, end_hold=True)
             row.hold_until = None
         elif action in ("delete", "quarantine"):
+            _recorded_unavailability(db, context, row)
             row.state = "deleted" if action == "delete" else "quarantined"
             _mark_unavailable(row, now, end_hold=action == "quarantine")
         else:
@@ -390,17 +410,8 @@ def maintain(db, project, context_id, payload, *, now=None):
                 if row.id in p.deleted_observation_ids:
                     row.state = "deleted"
                     _mark_unavailable(row, now)
+                prep = _recorded_unavailability(db, context, row)
                 state = _state(row, now)
-                prep = db.scalar(select(ObservationPreparation).where(
-                    ObservationPreparation.context_id == context.id, ObservationPreparation.id == row.preparation_id))
-                if context.closed_at:
-                    row.state = "quarantined"
-                    state = "quarantined"
-                    _mark_unavailable(row, min(context.closed_at, prep.revoked_at or context.closed_at))
-                if prep.revoked_at:
-                    # Revocation overrides hold even after delete/close/quarantine.
-                    row.state, state = "quarantined", "quarantined"
-                    _mark_unavailable(row, prep.revoked_at, end_hold=True)
                 if state in ("available", "held"):
                     try:
                         data = validate(PreparationInput, prep.registry)

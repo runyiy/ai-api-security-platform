@@ -357,3 +357,140 @@ def test_closed_context_and_revocation_keep_earliest_known_deadline(observation_
     assert not any("from targets" in s or "from scopes" in s or "from authorization_revisions" in s for s in statements)
     with SessionLocal() as db:
         assert db.get(ObservationRecord, oid).unavailable_at == (revoked_at if held else min(close_at, revoked_at))
+
+
+def disqualify(ctx, cause, at):
+    if cause == "close":
+        from app.services.research_context import close_context
+        return call(close_context, ctx, {"expected_version": 1, "closure_reference": REF}, now=at)
+    return call(service.revoke_preparation, ctx, "preparation_1", REVIEW, now=at)
+
+
+def assert_clock(oid, at):
+    with SessionLocal() as db:
+        assert db.get(ObservationRecord, oid).unavailable_at == at
+
+
+@pytest.mark.parametrize("cause", ["revoke", "close"])
+@pytest.mark.parametrize("operation", ["delete", "quarantine", "replay"])
+@pytest.mark.parametrize("reconcile_first", [False, True])
+def test_recorded_cause_precedes_later_lifecycle_clock(observation_context, cause, operation, reconcile_first):
+    ctx, _ = observation_context
+    receipt = accepted(ctx)
+    oid = receipt["observation_id"]
+    legacy = snapshot(legacy=True)
+    first = NOW+timedelta(days=1)
+    disqualify(ctx, cause, first)
+    if reconcile_first:
+        maintain(ctx, now=first)
+    later = NOW+timedelta(days=2)
+    if operation == "replay":
+        maintain(ctx, now=later, deleted_observation_ids=[oid])
+    else:
+        call(service.lifecycle, ctx, oid, operation, REVIEW, now=later)
+    for day in (3, 3, 4):
+        maintain(ctx, now=NOW+timedelta(days=day))
+        assert_clock(oid, first)
+    with SessionLocal() as db:
+        row = db.get(ObservationRecord, oid)
+        assert row.digest == receipt["digest"] and row.entry_order == receipt["entry_order"]
+        assert row.state == "quarantined"  # Replay cannot override disqualification.
+        assert db.get(ObservationPayload, oid) is None
+    assert maintain(ctx, now=first+timedelta(days=90)-timedelta(microseconds=1))["removed_tombstones"] == 0
+    assert maintain(ctx, now=first+timedelta(days=90))["removed_tombstones"] == 1
+    assert maintain(ctx, now=first+timedelta(days=90))["removed_tombstones"] == 0
+    with SessionLocal() as db:
+        assert db.get(ObservationRecord, oid) is None
+    assert snapshot(legacy=True) == legacy
+
+
+@pytest.mark.parametrize("cause", ["revoke", "close"])
+def test_reconcile_repairs_recorded_no_hold_clock_from_reviewed_code(observation_context, cause):
+    ctx, _ = observation_context
+    oid = accepted(ctx)["observation_id"]
+    first = NOW+timedelta(days=1)
+    disqualify(ctx, cause, first)
+    call(service.lifecycle, ctx, oid, "delete", REVIEW, now=NOW+timedelta(days=2))
+    # Exact persisted state produced by the reviewed implementation, not a
+    # guessed historical cause: closed_at/revoked_at remains the recorded day 1.
+    with SessionLocal() as db:
+        row = db.get(ObservationRecord, oid)
+        assert row.hold_started_at is None
+        row.unavailable_at = NOW+timedelta(days=2)
+        db.commit()
+    maintain(ctx, now=NOW+timedelta(days=3))
+    assert_clock(oid, first)
+    assert maintain(ctx, now=first+timedelta(days=90))["removed_tombstones"] == 1
+
+
+@pytest.mark.parametrize("cause", ["revoke", "close"])
+@pytest.mark.parametrize("end_kind", ["release", "natural", "before_cause"])
+@pytest.mark.parametrize("reconcile_first", [False, True])
+def test_recorded_cause_keeps_only_qualified_hold_clock(observation_context, cause, end_kind, reconcile_first):
+    ctx, _ = observation_context
+    oid = accepted(ctx)["observation_id"]
+    hold(ctx, oid, end=NOW+timedelta(days=4))
+    if end_kind == "before_cause":
+        call(service.lifecycle, ctx, oid, "release", REVIEW, now=NOW+timedelta(hours=12))
+    first = NOW+timedelta(days=1)
+    disqualify(ctx, cause, first)
+    if reconcile_first:
+        maintain(ctx, now=first)
+    call(service.lifecycle, ctx, oid, "delete", REVIEW, now=NOW+timedelta(days=2))
+    end = first
+    if cause == "close" and end_kind != "before_cause":
+        end = NOW+timedelta(days=3 if end_kind == "release" else 4)
+        if end_kind == "release":
+            call(service.lifecycle, ctx, oid, "release", REVIEW, now=end)
+        else:
+            assert maintain(ctx, now=end-timedelta(microseconds=1))["purged_payloads"] == 0
+    for _ in range(2):
+        maintain(ctx, now=NOW+timedelta(days=5))
+        assert_clock(oid, end)
+    call(service.lifecycle, ctx, oid, "quarantine", REVIEW, now=NOW+timedelta(days=6))
+    maintain(ctx, now=NOW+timedelta(days=6), deleted_observation_ids=[oid])
+    assert_clock(oid, end)
+    assert maintain(ctx, now=end+timedelta(days=90)-timedelta(microseconds=1))["removed_tombstones"] == 0
+    assert maintain(ctx, now=end+timedelta(days=90))["removed_tombstones"] == 1
+
+
+@pytest.mark.parametrize("cause", ["revoke", "close"])
+@pytest.mark.parametrize("maintenance_first", [True, False])
+def test_recorded_clock_serializes_delete_with_reconciliation(observation_context, cause, maintenance_first):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from sqlalchemy import text
+    from tests.services.test_research_context_isolation import wait_for_blocker
+    ctx, _ = observation_context
+    oid = accepted(ctx)["observation_id"]
+    first = NOW+timedelta(days=1)
+    disqualify(ctx, cause, first)
+    ready, release, waiting = Event(), Event(), Event()
+    pids = {}
+    def worker(maintenance, leader):
+        with SessionLocal() as db:
+            pids[leader] = db.scalar(text("SELECT pg_backend_pid()"))
+            if not leader:
+                waiting.set()
+            if maintenance:
+                result = service.maintain(db, 1, ctx, {"action": "reconcile", "review": REF}, now=NOW+timedelta(days=2))
+            else:
+                result = service.lifecycle(db, 1, ctx, oid, "delete", REVIEW, now=NOW+timedelta(days=2))
+            if leader:
+                ready.set()
+                assert release.wait(10)
+            db.commit()
+            return result
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        a = pool.submit(worker, maintenance_first, True)
+        assert ready.wait(10)
+        b = pool.submit(worker, not maintenance_first, False)
+        assert waiting.wait(10)
+        try:
+            wait_for_blocker(pids[False], pids[True])
+        finally:
+            release.set()
+        assert isinstance(a.result(15), dict) and isinstance(b.result(15), dict)
+    maintain(ctx, now=NOW+timedelta(days=3))
+    assert_clock(oid, first)
+    assert maintain(ctx, now=first+timedelta(days=90))["removed_tombstones"] == 1
