@@ -28,13 +28,13 @@ REVISION, PARENT = "d8f0b2c4e6a8", "c7e9a1b3d5f7"
 def existing_snapshot():
     with engine.connect() as db:
         return {t.name: list(db.execute(select(t).order_by(*t.primary_key.columns)).mappings())
-                for t in Base.metadata.sorted_tables if t.name not in TABLES}
+                for t in Base.metadata.sorted_tables if t.name not in TABLES | {"research_subject_versions"}}
 
 
 def test_fresh_upgrade_exact_schema_and_empty_downgrade(monkeypatch):
     config = Config("alembic.ini")
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == [REVISION] and scripts.get_revision(REVISION).down_revision == PARENT
+    assert scripts.get_heads() == ["e9a1c3d5f7b8"] and scripts.get_revision(REVISION).down_revision == PARENT
     schema = "observation_migration_"+uuid4().hex
     with engine.begin() as db:
         db.execute(text(f'CREATE SCHEMA "{schema}"'))
@@ -112,7 +112,7 @@ def test_populated_rollback_protected_without_loss(observation_context):
         command.downgrade(Config("alembic.ini"), PARENT)
     assert snapshot() == before
     with engine.connect() as db:
-        assert MigrationContext.configure(db).get_current_revision() == REVISION
+        assert MigrationContext.configure(db).get_current_revision() == "e9a1c3d5f7b8"
 
 
 def test_composite_fk_immutable_provenance_and_expiry_constraints(observation_context):

@@ -56,7 +56,7 @@ class FakeResolver:
 
 def test_no_migration_and_only_focused_runtime_dependency() -> None:
     scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-    assert scripts.get_heads() == ["d8f0b2c4e6a8"]
+    assert scripts.get_heads() == ["e9a1c3d5f7b8"]
     requirements = Path("requirements.txt").read_text().splitlines()
     assert [line for line in requirements if "dns" in line.lower()] == [
         "dnspython==2.8.0"

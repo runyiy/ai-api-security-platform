@@ -33,7 +33,7 @@ def intake(ids):
 def snapshot(*, legacy=False):
     with engine.connect() as db:
         return {t.name: list(db.execute(select(t).order_by(*t.primary_key.columns)).mappings())
-                for t in Base.metadata.sorted_tables if not legacy or t.name not in (NEW_TABLES | OBSERVATION_TABLES)}
+                for t in Base.metadata.sorted_tables if not legacy or t.name not in (NEW_TABLES | OBSERVATION_TABLES | {"research_subject_versions"})}
 
 
 @pytest.fixture
