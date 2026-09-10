@@ -1,3 +1,4 @@
+from app.db.models.research_context import ResearchContext, ResearchContextVersion, ResearchTargetAssociation
 from app.db.models.authorization_profile import AuthorizationProfile
 from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.asset_candidate_evaluation import AssetCandidateEvaluation
@@ -40,6 +41,9 @@ from app.db.models.test_run import TestRun
 
 
 __all__ = [
+    "ResearchContext",
+    "ResearchContextVersion",
+    "ResearchTargetAssociation",
     "AuthorizationProfile",
     "AuthorizationRevision",
     "AssetCandidateEvaluation",

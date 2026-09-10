@@ -28,7 +28,7 @@ PARENT = "a3c5e7f9b2d4"
 def test_clean_postgres_round_trip_creates_only_exact_retention_table(monkeypatch):
     config = Config("alembic.ini")
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == [REVISION]
+    assert scripts.get_heads() == ["c7e9a1b3d5f7"]
     assert scripts.get_revision(REVISION).down_revision == PARENT
     schema = f"retention_migration_{uuid4().hex}"
     with engine.begin() as db:
@@ -40,7 +40,7 @@ def test_clean_postgres_round_trip_creates_only_exact_retention_table(monkeypatc
         command.upgrade(config, PARENT)
         before = set(inspect(isolated).get_table_names())
         for _ in range(2):
-            command.upgrade(config, "head")
+            command.upgrade(config, REVISION)
             inspector = inspect(isolated)
             assert set(inspector.get_table_names()) == before | {TABLE}
             with isolated.connect() as db:
@@ -97,7 +97,7 @@ def test_deterministic_backfill_preserves_all_old_rows_and_reanalysis(evidence_p
         def old_snapshot():
             with engine.connect() as db:
                 return {table.name: list(db.execute(select(table).order_by(*table.primary_key.columns)).mappings())
-                        for table in Base.metadata.sorted_tables if table.name != TABLE}
+                        for table in Base.metadata.sorted_tables if table.name in inspect(engine).get_table_names() and table.name != TABLE}
         before = old_snapshot()
         before_schema = {name: inspect(engine).get_columns(name) for name in before}
         # Audit executed upgrade SQL: the sole data read must be the evidence ID.
@@ -107,7 +107,7 @@ def test_deterministic_backfill_preserves_all_old_rows_and_reanalysis(evidence_p
         for _ in range(2):
             event.listen(Engine, "before_cursor_execute", capture)
             try:
-                command.upgrade(config, "head")
+                command.upgrade(config, REVISION)
             finally:
                 event.remove(Engine, "before_cursor_execute", capture)
             assert old_snapshot() == before

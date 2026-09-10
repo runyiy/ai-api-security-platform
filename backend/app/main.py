@@ -1,3 +1,4 @@
+from app.api.routes.research_contexts import router as research_contexts_router
 from fastapi import FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
@@ -191,3 +192,5 @@ app.include_router(
 )
 
 app.include_router(bola_matrix_router, prefix="/api")
+
+app.include_router(research_contexts_router, prefix="/api")
