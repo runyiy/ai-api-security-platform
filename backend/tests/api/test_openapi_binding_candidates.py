@@ -89,7 +89,7 @@ def infer(endpoint_id: int, body: dict | None = None):
 
 def test_no_migration_and_explicit_exact_endpoint_boundary() -> None:
     scripts = ScriptDirectory.from_config(Config("alembic.ini"))
-    assert scripts.get_heads() == ["e9a1c3d5f7b8"]
+    assert scripts.get_heads() == ["f0b2d4e6a8c0"]
     assert infer(999_999_999).status_code == 404
     for field in (
         "selector", "provenance", "confidence", "review_state", "target_id",

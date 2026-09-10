@@ -1,3 +1,4 @@
+from app.api.routes.research_knowledge import router as research_knowledge_router
 from app.api.routes.research_subjects import router as research_subjects_router
 from app.api.routes.research_observations import router as research_observations_router
 from app.api.routes.research_contexts import router as research_contexts_router
@@ -199,3 +200,5 @@ app.include_router(research_contexts_router, prefix="/api")
 app.include_router(research_observations_router, prefix="/api")
 
 app.include_router(research_subjects_router, prefix="/api")
+
+app.include_router(research_knowledge_router, prefix="/api")
