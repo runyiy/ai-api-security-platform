@@ -79,6 +79,8 @@ def build_session(
         "value": False,
     }
     db = Mock(spec=Session)
+    # Model the new-domain existence/member reads; this legacy case has no link.
+    db.scalar.side_effect = lambda statement: "research_intent_plan_members" if "to_regclass" in str(statement) else None
 
     def get_object(model, object_id):
         transaction_active["value"] = True

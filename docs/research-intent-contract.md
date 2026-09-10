@@ -6,6 +6,12 @@
 
 [架构授权/执行约束](architecture-decisions.md#authorization-and-execution)、[安全模型 §§3–4、8–13](security-model.md#3-core-security-invariants)、[产品契约 §§5–7](research-assistant-product-contract.md#5-请求形态支持矩阵)优先。本文不修改这些不变量。初始范围仍为 private/local 合成 Target、一个 builder-compatible 无歧义 resource path 参数、GET、完整 JSON object、显式 anonymous/bearer；query/nested/multiple 仅 preview，其他形态不转换。没有请求、凭据读取、实际批准或样本导入；示例为独立作者值，不能作为执行命令。
 
+## I1–I7 后续采纳与 W1 实施记录
+
+本次用户 **RA-04/W1 bounded conversion handoff** 明确记录：操作者采纳本文 **v0.1.0、reviewed commit `6723cb5bfa62a10453f18f8158c25000a1997711` 的 I1–I7**，Review Project Tech Lead 将其作为实现约束。Codex只转录该交接，不补造批准身份、签名或消息时间。原文PROPOSED/PENDING段落保留为该次提案历史；不再表示I1–I7设计未获采纳。
+
+采纳允许既有W1有序实现，不批准实际Target/health请求、凭据访问、私有材料或支出，也不批准其余待决ADR。W1基于main `59390a480db133db9411908af05df37dd625fc91` 实现映射确认、有限manifest与独立预算决定、不可变core/两单GET计划/link及旧入口拒绝，详见 [W1实施与实际验证](research-intent-bridge.md)。**IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**；生产W2解释/health证明入口仍明确拒绝，新purpose的审批/执行保持关闭。测试中的future-qualified envelope只是独立受控替身，不是运行时证据。§1及§8原代码/验证记录锁定原提案基点，不能倒读为本次实现事实；pair30秒实际运行/最终响应解释留在W2，未伪造执行时间。
+
 ## 1. 当前代码证据 C 与缺口
 
 以下定位以本基点实际文件和调用方为准；不是沿用旧 ADR 的历史 C 标签。链接定位文件，反引号标识可直接检索。

@@ -72,6 +72,8 @@ def record_plan_decision(
     if decision not in {"approved", "revoked"}:
         raise PlanIntegrityError("Approval decision is invalid.")
     plan = validate_persisted_plan_integrity(db, execution_plan_id)
+    from app.services.research_intent_gate import reject_plan
+    reject_plan(db, plan, PlanIntegrityError)
     record = ExecutionPlanApprovalRecord(
         execution_plan_id=plan.id,
         digest_version=plan.digest_version,
@@ -87,6 +89,9 @@ def is_plan_approved(db: Session, execution_plan_id: int) -> bool:
     try:
         plan = validate_persisted_plan_integrity(db, execution_plan_id)
     except PlanIntegrityError:
+        return False
+    from app.services.research_intent_gate import new_plan
+    if new_plan(db, plan):
         return False
     latest = db.scalar(
         select(ExecutionPlanApprovalRecord)

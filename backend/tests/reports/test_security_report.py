@@ -102,6 +102,8 @@ def test_generates_and_stores_security_report() -> None:
     )
     db.scalar.side_effect = [
         finding,
+        "research_intent_plan_members",  # new-domain table exists
+        None,  # legacy case has no intent member
         None,
         None,
     ]

@@ -4,6 +4,13 @@
 
 > **RA-04/W1 后续 INTENT 提案（documentation only）：** [INTENT 协议 v0.1.0](research-intent-contract.md)基于本地核验的 `bedc55395d2e5abf3479026fd201430b537baff2`，补齐 §6 的 session-health 来源/时间、pair/revision、凭据变化、immutable linkage 与 legacy 回退建议。I1–I7 全部 **PROPOSED / PENDING_APPROVAL**，文档 **PENDING_INDEPENDENT_REVIEW**；操作者选择先准备建议，不等于采纳建议或批准 bridge 实施。下方 v0.1.0/RA-01/W3 的原始登记及 DATA 后续采纳历史保留，不重解释其当时状态。
 
+## INTENT 后续采纳记录（RA-04/W1）
+
+- **精确材料：** [INTENT v0.1.0](research-intent-contract.md)，reviewed commit `6723cb5bfa62a10453f18f8158c25000a1997711`，I1–I7。
+- **决定来源：** 本次用户W1 implementation handoff明确说明操作者采纳I1–I7，Review Project Tech Lead采用这些推荐作为实现约束；不附造身份、签名或批准时间。原pending/提案段落作为历史保留。
+- **适用边界：** 仅批准既有W1有序实现；未授权Target/health请求、operator credential访问、私有数据或费用。其他ADR不受影响；I6规定的W2解释/可信健康证明依赖未实现时，新purpose执行继续关闭，不能以fixture、NOT_RUN或operator claim替代。
+- **实现状态：** [bounded bridge实施记录](research-intent-bridge.md)，IMPLEMENTED / PENDING_INDEPENDENT_REVIEW；W2/W3和RA-04 COMPLETE不在本次声明范围。
+
 ## DATA 后续决定记录（RA-02/W1）
 
 - **被采纳的确切材料：** 本文 **v0.1.0**，reviewed commit [`dcdb50fd36c098173c2580389577bb59558c0982`](https://github.com/runyiy/ai-api-security-platform/blob/dcdb50fd36c098173c2580389577bb59558c0982/docs/research-assistant-adr-decisions.md)，ADR-RA-DATA 的 **D1–D4 推荐方案**。
@@ -29,7 +36,7 @@
 | 现有标识 | 本包建议与依赖 | 批准责任及最晚检查点 | 实际批准证据 |
 | --- | --- | --- | --- |
 | ADR-RA-DATA | 第 2–5 节的输入、隔离、资格、lifecycle 与兼容方案 | Tech Lead 批准字段/存储/迁移/兼容；操作者确认数据资格、保留期限及运维可行性。RA-02/W1 使用输入设计前确认适用部分；RA-02/W2 持久化前批准并实现全部适用控制 | **无；PENDING** |
-| ADR-RA-INTENT | 第 6 节及后续 [INTENT v0.1.0 / I1–I7](research-intent-contract.md#9-待决定表)：精确协议、health120s/pair30s/intent300s、失效与兼容建议 | Tech Lead 批准协议/模型/兼容；操作者决定时间和操作可行性、确认业务事实。RA-04/W1 依赖代码前，health/verifier及预算依赖按I6检查 | **无采纳证据；PROPOSED / PENDING_APPROVAL。仅文档准备已授权** |
+| ADR-RA-INTENT | 第 6 节及后续 [INTENT v0.1.0 / I1–I7](research-intent-contract.md#9-待决定表)：精确协议、health120s/pair30s/intent300s、失效与兼容建议 | Tech Lead 批准协议/模型/兼容；操作者决定时间和操作可行性、确认业务事实。RA-04/W1 依赖代码前，health/verifier及预算依赖按I6检查 | **I1–I7 ADOPTED（本次W1用户交接，见后续采纳记录）；实际请求/凭据/数据/费用未授权** |
 | ADR-RA-PROPOSAL | 第 7 节：独立、无 authority 的 typed suggestion | Tech Lead 批准协议/消费边界；操作者确认解释与拒绝方式。RA-05 proposal 集成前 | **无；PENDING** |
 | ADR-RA-EGRESS | 第 8 节：默认关闭的独立 provider transport、资格与核算 | Tech Lead 批准边界/用量解释；操作者独立批准模型、账号、数据及费用。RA-05 provider 代码前；每次真实运行前再次核验许可 | **无；PENDING** |
 | ADR-RA-TASK | 第 9 节：PostgreSQL 任务预算/观察账本与 M8 精确计划协调分工 | Tech Lead 批准状态/事务/恢复；操作者批准硬预算与审批操作。RA-06 实施前，若更早引入审批聚合则更早 | **无；PENDING** |

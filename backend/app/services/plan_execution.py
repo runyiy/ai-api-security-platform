@@ -104,6 +104,9 @@ class PlanExecutionService:
         except PlanIntegrityError as exc:
             raise PlanExecutionError("ExecutionPlan integrity validation failed.") from exc
 
+        from app.services.research_intent_gate import reject_plan
+        reject_plan(self.db, plan, PlanExecutionError)
+
         actions = list(
             self.db.scalars(
                 select(PlanAction)

@@ -98,6 +98,8 @@ def analyze_response_body(
         (Resource, 7): resource,
     }
     db = Mock(spec=Session)
+    # Model the new-domain existence/member reads; this legacy case has no link.
+    db.scalar.side_effect = lambda statement: "research_intent_plan_members" if "to_regclass" in str(statement) else None
     db.get.side_effect = (
         lambda model, object_id: objects.get(
             (model, object_id)

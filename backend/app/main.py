@@ -202,3 +202,6 @@ app.include_router(research_observations_router, prefix="/api")
 app.include_router(research_subjects_router, prefix="/api")
 
 app.include_router(research_knowledge_router, prefix="/api")
+
+from app.api.routes.research_intents import router as research_intents_router
+app.include_router(research_intents_router, prefix="/api")

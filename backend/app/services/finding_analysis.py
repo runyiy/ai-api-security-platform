@@ -84,6 +84,9 @@ class FindingAnalysisService:
                 "TestCase not found."
             )
 
+        from app.services.research_intent_gate import reject_case
+        reject_case(self.db, test_case, FindingAnalysisError)
+
         if (
             test_case.test_type
             != BOLA_CROSS_OWNER
@@ -138,6 +141,7 @@ class FindingAnalysisService:
                 "finding_baseline_test_run_not_found"
             )
         baseline_case = self.db.get(TestCase, baseline_run.test_case_id)
+        reject_case(self.db, baseline_case, FindingAnalysisError)
         if (
             baseline_run.id == test_run.id
             or baseline_case is None

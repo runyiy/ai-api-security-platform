@@ -82,6 +82,10 @@ class SecurityReportService:
                 "TestCase not found."
             )
 
+        from app.services.research_intent_gate import reject_case, reject_baseline
+        reject_case(self.db, test_case, SecurityReportError)
+        reject_baseline(self.db, finding, SecurityReportError)
+
         endpoint = self.db.get(
             Endpoint,
             test_case.endpoint_id,
