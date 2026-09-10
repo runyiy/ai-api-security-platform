@@ -1,4 +1,4 @@
-"""Bounded offline knowledge API; ordinary publish always fails closed."""
+"""Bounded offline knowledge API; genuine proof and explicit review gate publication."""
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.schemas import research_knowledge as s
 from app.services import research_knowledge as service
+from app.services import research_rule_validation as validation
+from app.schemas import research_rule_validation as v
 from app.api.routes.research_contexts import request_body
 
 NO_STORE = {'Cache-Control': 'no-store'}
@@ -76,3 +78,33 @@ def query(project:int,context_id:int,payload=Depends(body(s.QueryInput,s.MAX_QUE
 def audit_maintenance(project:int,context_id:int,payload=Depends(body(s.AuditInput)),db:Session=Depends(get_db)):
     with db.begin():
         return encoded(service.rotate_audit(db,project,context_id,payload))
+
+
+@router.post('/validations',openapi_extra=request_body(v.ValidateInput))
+def validate_rule(project:int,context_id:int,payload=Depends(body(v.ValidateInput)),db:Session=Depends(get_db)):
+    with db.begin():
+        return encoded(validation.validate_rule(db,project,context_id,payload))
+
+
+@router.post('/validations/read',openapi_extra=request_body(v.ValidationReadInput))
+def read_validation(project:int,context_id:int,payload=Depends(body(v.ValidationReadInput)),db:Session=Depends(get_db)):
+    with db.begin():
+        return encoded(validation.read_validation(db,project,context_id,payload))
+
+
+@router.post('/feedback',openapi_extra=request_body(v.FeedbackInput))
+def submit_feedback(project:int,context_id:int,payload=Depends(body(v.FeedbackInput)),db:Session=Depends(get_db)):
+    with db.begin():
+        return encoded(validation.submit_feedback(db,project,context_id,payload))
+
+
+@router.post('/feedback/read',openapi_extra=request_body(v.FeedbackReadInput))
+def read_feedback(project:int,context_id:int,payload=Depends(body(v.FeedbackReadInput)),db:Session=Depends(get_db)):
+    with db.begin():
+        return encoded(validation.read_feedback(db,project,context_id,payload))
+
+
+@router.post('/feedback/reviews',openapi_extra=request_body(v.FeedbackReviewInput))
+def review_feedback(project:int,context_id:int,payload=Depends(body(v.FeedbackReviewInput)),db:Session=Depends(get_db)):
+    with db.begin():
+        return encoded(validation.review_feedback(db,project,context_id,payload))

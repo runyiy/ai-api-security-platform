@@ -1,4 +1,4 @@
-"""Eligibility first, offline synthetic retrieval; ordinary publication stays closed."""
+"""Eligibility first, offline retrieval; publication needs W3 proof and human decision."""
 from datetime import timedelta
 import re
 from sqlalchemy import select, func, or_, text, delete
@@ -118,32 +118,56 @@ def decide(db, project, context_id, payload, *, now=None):
     context = _locked(db, project, context_id)
     with db.begin_nested():
         row = _exact(db, context, data.reference, owned=True)
-        if data.action == 'publish':
+        if data.action == 'publish' and data.validation_ref is None:
             raise s.KnowledgeError('knowledge_publication_closed')
         events = list(db.scalars(select(KE).where(KE.version_id == row.id).order_by(KE.sequence).limit(17)))
         if len(events) != data.expected_sequence or len(events) >= s.MAX_EVENTS:
             raise s.KnowledgeError('knowledge_decision_conflict')
         if any(e.action == 'disable' for e in events):
             raise s.KnowledgeError('knowledge_decision_conflict')
-        if data.action in {'review', 'reuse'}:
+        deadlines = []
+        if data.action != 'publish' and (data.review_event_id is not None or data.reuse_event_id is not None):
+            raise s.KnowledgeError('knowledge_invalid', 422)
+        if data.validation_ref is not None:
+            from app.services import research_rule_validation as validation
+            if data.action not in {'review', 'reuse', 'publish'}:
+                raise s.KnowledgeError('knowledge_invalid', 422)
+            deadlines.extend(validation._live(db, context, row, now))
+            evidence = validation.qualified(db, row, data.validation_ref, _time(now))
+            deadlines.append(evidence.valid_until)
+        if data.action in {'review', 'reuse', 'publish'}:
             if len(events) >= s.MAX_EVENTS - 2 or any(e.action == 'withdraw' for e in events):
                 raise s.KnowledgeError('knowledge_decision_conflict')
             try:
                 observation._eligible_context(db, context, row.context_version)
                 observation._target(db, context, row.target_id)
-                _sources(db, context, s.validate(s.Content, row.content), row.target_id, now)
+                deadlines.extend(_sources(db, context, s.validate(s.Content, row.content), row.target_id, now))
             except ObservationError:
                 raise s.KnowledgeError() from None
         at = _time(now)
         body = s.EventBody(digest=row.digest, actor='local_operator', evidence='operator_recorded',
             review=data.review, context_version=row.context_version, valid_from=data.valid_from, valid_until=data.valid_until,
-            review_event_id=None, reuse_event_id=None, validation_ref='NOT_RUN')
+            review_event_id=data.review_event_id, reuse_event_id=data.reuse_event_id,
+            validation_ref=data.validation_ref or 'NOT_RUN')
         event = KE(version_id=row.id, sequence=len(events)+1, action=data.action, body=body.model_dump(), recorded_at=at)
         db.add(event)
         db.flush()
+        if data.action == 'publish':
+            publication = _publication(db, row, _time(now))
+            if publication is None:
+                raise s.KnowledgeError('knowledge_validation_unavailable')
+            deadlines.append(publication[2])
+        if data.action == 'disable':
+            from app.services.research_rule_validation import invalidate_pending
+            invalidate_pending(db, context, now)
         audit = _audit(db, context, 'decision', at, data.review.model_dump())
-        return {'reference': _ref(row), 'event_id': event.id, 'sequence': event.sequence, 'action': event.action,
-                'audit_id': audit, 'ordinary_publication_allowed': False}
+        result = {'reference': _ref(row), 'event_id': event.id, 'sequence': event.sequence, 'action': event.action,
+                'audit_id': audit, 'validation_qualified': data.validation_ref is not None,
+                'ordinary_publication_allowed': False}
+        if data.validation_ref is not None:
+            from app.services.research_rule_validation import _finish
+            return _finish(result, deadlines, now)
+        return result
 
 
 def rotate_audit(db, project, context_id, payload, *, now=None):
@@ -180,11 +204,18 @@ def _publication(db, row, at):
         return None
     pub = events[-1]
     b = parsed[pub.id][1]
-    # There is NO ordinary publication implementation or test-mode switch.
-    # Only explicitly marked fixture records inserted by tests can exercise this branch.
-    if pub.action != 'publish' or b.evidence != 'synthetic_test_only' or b.validation_ref != 'synthetic_test_only' or not _window(b, at):
+    if pub.action != 'publish' or not _window(b, at):
         return None
     deadlines = [timestamp(b.valid_until)]
+    synthetic = b.evidence == 'synthetic_test_only' and b.validation_ref == 'synthetic_test_only'
+    if not synthetic:
+        if b.evidence != 'operator_recorded' or b.actor != 'local_operator':
+            return None
+        from app.services.research_rule_validation import qualified
+        try:
+            deadlines.append(qualified(db, row, b.validation_ref, at).valid_until)
+        except s.KnowledgeError:
+            return None
     for ref, kind in ((b.review_event_id, 'review'), (b.reuse_event_id, 'reuse')):
         if kind == 'reuse' and row.scope == 'project' and ref is None:
             continue
@@ -192,6 +223,9 @@ def _publication(db, row, at):
             return None
         e, q = parsed[ref]
         if e.action != kind or e.sequence >= pub.sequence or not _window(q, at):
+            return None
+        if not synthetic and (q.evidence != 'operator_recorded' or q.actor != 'local_operator'
+                or (kind == 'review' and q.validation_ref != b.validation_ref)):
             return None
         deadlines.append(timestamp(q.valid_until))
     return pub, b, min(deadlines), parsed[b.review_event_id][1].actor
@@ -355,7 +389,8 @@ def retrieve(db, project, context_id, payload, *, now=None):
                     pub, b, _, review_actor = publication
                     matches.append({'reference': _ref(row), 'content': content.model_dump(), 'score': score,
                         'review_event_id': b.review_event_id, 'reuse_event_id': b.reuse_event_id,
-                        'publication_event_id': pub.id, 'publication_evidence': 'synthetic_test_only',
+                        'publication_event_id': pub.id, 'publication_evidence': b.evidence,
+                        'validation_ref': b.validation_ref.model_dump() if isinstance(b.validation_ref, s.ValidationRef) else None,
                         'review_actor': review_actor, 'publication_actor': b.actor, 'applicability': applicable})
             except (ValueError, ObservationError, s.KnowledgeError) as exc:
                 if getattr(exc, 'code', '') in {'knowledge_scan_limit','observation_capacity_exceeded'}:
@@ -400,7 +435,7 @@ def retrieve(db, project, context_id, payload, *, now=None):
             raise s.KnowledgeError()
         result = s.QueryRead(format='ra-knowledge-retrieval/1', context_id=context.id, context_version=query.context_version,
             subject_number=query.subject_number, subject_version=query.subject_version, evaluated_at=at.isoformat(), audit_id=audit,
-            status=status, missing_inputs=sorted(gaps | {'ordinary_publication_closed'}), matches=matches,
+            status=status, missing_inputs=sorted(gaps | {'human_publication_required'}), matches=matches,
             eligibility_until=min(deadlines).isoformat() if deadlines else None,
             execution_authorized=False, ordinary_publication_allowed=False).model_dump()
         if deadlines and _time(now) >= min(deadlines):
