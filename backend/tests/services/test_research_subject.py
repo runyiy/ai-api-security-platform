@@ -5,7 +5,7 @@ from app.db.session import SessionLocal, engine
 from app.db.models.research_subject import ResearchSubjectVersion
 from app.services import research_subject as service, research_observation as observation
 from app.schemas.research_subject import SubjectError
-from tests.research_subject_fixtures import subject_pair, two_intake_targets, proposal, assertion, call, NOW, REF, zero_capabilities  # noqa: F401
+from tests.research_subject_fixtures import subject_pair, subject_encryption, two_intake_targets, proposal, assertion, call, NOW, REF, zero_capabilities  # noqa: F401
 from tests.research_intake_fixtures import snapshot
 
 
@@ -121,7 +121,7 @@ def test_bearer_sessions_never_become_anonymous_or_health_proof(subject_pair,ses
     with pytest.raises(SubjectError):record(g,p,number=2)
 
 
-def test_existing_token_update_boundary_changes_metadata_not_health(subject_pair):
+def test_existing_token_update_boundary_changes_metadata_not_health(subject_pair, subject_encryption):
     from app.credentials.bearer import BearerCredentialService
     from app.db.models.credential_binding import CredentialBinding
     from pydantic import SecretStr

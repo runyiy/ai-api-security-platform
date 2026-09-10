@@ -7,7 +7,7 @@ from app.db.models.research_subject import ResearchSubjectVersion
 from app.services import research_subject as service, research_observation as observation
 from app.services.research_context import close_context, create_context
 from app.schemas.research_subject import SubjectError
-from tests.research_subject_fixtures import subject_pair, two_intake_targets, proposal, call, NOW, REF, zero_capabilities  # noqa: F401
+from tests.research_subject_fixtures import subject_pair, subject_encryption, two_intake_targets, proposal, call, NOW, REF, zero_capabilities  # noqa: F401
 from tests.research_intake_fixtures import intake, snapshot
 from tests.services.test_research_context_isolation import wait_for_blocker
 
@@ -69,7 +69,7 @@ def test_closed_transferred_history_never_reads_new_project_metadata(subject_pai
     assert snapshot()==before
 
 
-def test_credential_update_waits_for_w3_metadata_transaction(subject_pair):
+def test_credential_update_waits_for_w3_metadata_transaction(subject_pair, subject_encryption):
     from pydantic import SecretStr
     from app.credentials.bearer import BearerCredentialService
     from app.db.models.credential_binding import CredentialBinding

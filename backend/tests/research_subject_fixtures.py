@@ -1,5 +1,7 @@
 """Owned synthetic graphs; no frozen corpus or operator credentials."""
+import base64
 from datetime import timedelta
+import secrets
 import pytest
 from sqlalchemy import delete
 from app.db.models import TestIdentity, Resource, Endpoint
@@ -14,6 +16,17 @@ from app.services import research_observation as observation_service
 from app.schemas.research_observation import canonical
 from tests.research_observation_fixtures import preparation, observation, cleanup, call, zero_capabilities  # noqa: F401
 from tests.research_intake_fixtures import two_intake_targets, intake, NOW, REF  # noqa: F401
+
+
+@pytest.fixture
+def subject_encryption(monkeypatch):
+    """Opt-in per-test encryption; restore both settings after worker teardown."""
+    from pydantic import SecretStr
+    from app.core.config import settings
+
+    key = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode("ascii")
+    monkeypatch.setattr(settings, "credential_encryption_key", SecretStr(key))
+    monkeypatch.setattr(settings, "credential_encryption_key_version", "research-subject-test-v1")
 
 
 def proposal(g):
