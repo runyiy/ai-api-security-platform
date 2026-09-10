@@ -2,6 +2,8 @@
 
 > **后续状态：** 下方 v0.1.0 的 proposed / pending 登记保留为 W3 原始历史。DATA D1–D4 的后续采纳证据见本节；其余五项 ADR 不受影响。
 
+> **RA-04/W1 后续 INTENT 提案（documentation only）：** [INTENT 协议 v0.1.0](research-intent-contract.md)基于本地核验的 `bedc55395d2e5abf3479026fd201430b537baff2`，补齐 §6 的 session-health 来源/时间、pair/revision、凭据变化、immutable linkage 与 legacy 回退建议。I1–I7 全部 **PROPOSED / PENDING_APPROVAL**，文档 **PENDING_INDEPENDENT_REVIEW**；操作者选择先准备建议，不等于采纳建议或批准 bridge 实施。下方 v0.1.0/RA-01/W3 的原始登记及 DATA 后续采纳历史保留，不重解释其当时状态。
+
 ## DATA 后续决定记录（RA-02/W1）
 
 - **被采纳的确切材料：** 本文 **v0.1.0**，reviewed commit [`dcdb50fd36c098173c2580389577bb59558c0982`](https://github.com/runyiy/ai-api-security-platform/blob/dcdb50fd36c098173c2580389577bb59558c0982/docs/research-assistant-adr-decisions.md)，ADR-RA-DATA 的 **D1–D4 推荐方案**。
@@ -27,7 +29,7 @@
 | 现有标识 | 本包建议与依赖 | 批准责任及最晚检查点 | 实际批准证据 |
 | --- | --- | --- | --- |
 | ADR-RA-DATA | 第 2–5 节的输入、隔离、资格、lifecycle 与兼容方案 | Tech Lead 批准字段/存储/迁移/兼容；操作者确认数据资格、保留期限及运维可行性。RA-02/W1 使用输入设计前确认适用部分；RA-02/W2 持久化前批准并实现全部适用控制 | **无；PENDING** |
-| ADR-RA-INTENT | 第 6 节：新 intent 与旧执行/evidence 分离，显式 allowed baseline | Tech Lead 批准模型/兼容；操作者确认业务事实与 session 操作。RA-04/W1 实施前；RA-02/W3 仅提供事实/提议，不实现转换 | **无；PENDING** |
+| ADR-RA-INTENT | 第 6 节及后续 [INTENT v0.1.0 / I1–I7](research-intent-contract.md#9-待决定表)：精确协议、health120s/pair30s/intent300s、失效与兼容建议 | Tech Lead 批准协议/模型/兼容；操作者决定时间和操作可行性、确认业务事实。RA-04/W1 依赖代码前，health/verifier及预算依赖按I6检查 | **无采纳证据；PROPOSED / PENDING_APPROVAL。仅文档准备已授权** |
 | ADR-RA-PROPOSAL | 第 7 节：独立、无 authority 的 typed suggestion | Tech Lead 批准协议/消费边界；操作者确认解释与拒绝方式。RA-05 proposal 集成前 | **无；PENDING** |
 | ADR-RA-EGRESS | 第 8 节：默认关闭的独立 provider transport、资格与核算 | Tech Lead 批准边界/用量解释；操作者独立批准模型、账号、数据及费用。RA-05 provider 代码前；每次真实运行前再次核验许可 | **无；PENDING** |
 | ADR-RA-TASK | 第 9 节：PostgreSQL 任务预算/观察账本与 M8 精确计划协调分工 | Tech Lead 批准状态/事务/恢复；操作者批准硬预算与审批操作。RA-06 实施前，若更早引入审批聚合则更早 | **无；PENDING** |
@@ -230,6 +232,10 @@ M13 常量继续为 `policy_id=m13_minimized_finding_evidence`、`policy_version
 M12 当前 review 会追加 human_verified 行、保留原 candidate；`observed_baseline` 只能由合资格真实 TestRun 生成 candidate，且 source FK 不为空 [C09]。建议 RA-02 的 observation 引用留在新上下文中，由操作者独立决定业务 facts 并调用现有人工 assertion 边界 [C09a]；不要把 imported ID 填入 source_test_run_id，也不增加第五种 provenance 来绕过既有约束。旧 Resource 要求非空 owner；owner 未知时只保留新上下文中的 Resource 提议/缺项，不能为了满足 NOT NULL 填入假 owner 或启动旧 owner-based generator。
 
 ## 6. ADR-RA-INTENT：显式访问语义、精确配对与 session
+
+**RA-04/W1 后续材料：** [详细协议 v0.1.0](research-intent-contract.md)提供本基点实际调用证据（§1）、immutable core/摘要/plan link（§2–3）、health与精确时间窗（§4）、等待/变化失效规则（§5）、TestCase/M13/rollback选择（§6）及独立合成验收映射（§7）。下列原始 C/P 段落保留为 RA-01/W3 历史，不作为当前代码未经核验的证明。
+
+**当前未决：** I1–I7 尚无批准。推荐数值为 **PROPOSED / PENDING_APPROVAL：health120秒、baseline完成至probe开始及最终pair消费30秒、intent300秒**，均以半开边界及更早依赖截止收窄。建议两单GET plan同revision、分别适用审批；凭据版本/身份/映射/事实/Scope/来源变化重建整对。当前缺少可信health receipt与运行预算核验，不能把RA-02的operator claim或unverified budget升格为执行资格。受控新TestCase类型、所有旧读者分派和保留数据的回退要求须Tech Lead明确决定；health解释器属RA-04/W2，提前依赖须按I6确认次序。本文仅提供review材料，不实施bridge、验证器或迁移；不改变其他ADR状态。
 
 **具体问题：** 如何把有来源的 access facts 和确认的 Resource-to-slot 关联变成可审批的单动作计划，并用合法 baseline 验证 probe，同时保留旧 cross-owner 证据与报告？
 
