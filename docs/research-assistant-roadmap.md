@@ -2,7 +2,9 @@
 
 **PROPOSED / FOR REVIEW** · 2026-09-09 · [Issue #132](https://github.com/runyiy/ai-api-security-platform/issues/132)
 
-> **RA-02/W1 当前实施记录（2026-09-10）：** 本包基于 reviewed W3 HEAD `dcdb50fd36c098173c2580389577bb59558c0982`（本次 fetch 核验）；操作者采纳 DATA D1–D4、Tech Lead 采用其为设计约束的交接证据已记入 [DATA 后续决定](research-assistant-adr-decisions.md#data-后续决定记录ra-02w1)。[W1 synthetic intake context](research-intake-context.md) 已实施、待独立审查；仅元数据输入/准备度，零网络/凭据/执行，无私有资料准入。RA-02 IN_PROGRESS，W2/W3 未开始；不以本包签署 RA-01 stage exit、W1 reviewer-PASS 或 RA-02 COMPLETE。实施、验证、本地 commit 后停止，由 Review Project 审查；不 push。下方 W3 pending 和历史 NOT_AUTHORIZED 记录不替代后续明确交接。
+> **RA-02/W2 当前实施记录（2026-09-10）：** W1 已独立审阅并 push 精确 HEAD `2575a34270fc53bddc75373afe220ba06a34883e`，本次 fetch 核验，未合入 main。[W2 bounded observation intake](research-observation-intake.md) 已实施、待独立审查；仅合成离线导入、资格/隔离及适用生命周期，无私有数据准入、网络/凭据/执行或 export。RA-02 IN_PROGRESS，W3 未开始；不签署 reviewer-PASS 或 stage COMPLETE。本次仅本地 commit 后停止，不 push。下方记录保留当时历史。
+
+> **RA-02/W1 历史实施记录（2026-09-10）：** 本包基于 reviewed W3 HEAD `dcdb50fd36c098173c2580389577bb59558c0982`（本次 fetch 核验）；操作者采纳 DATA D1–D4、Tech Lead 采用其为设计约束的交接证据已记入 [DATA 后续决定](research-assistant-adr-decisions.md#data-后续决定记录ra-02w1)。[W1 synthetic intake context](research-intake-context.md) 已实施、待独立审查；仅元数据输入/准备度，零网络/凭据/执行，无私有资料准入。RA-02 IN_PROGRESS，W2/W3 未开始；不以本包签署 RA-01 stage exit、W1 reviewer-PASS 或 RA-02 COMPLETE。实施、验证、本地 commit 后停止，由 Review Project 审查；不 push。下方 W3 pending 和历史 NOT_AUTHORIZED 记录不替代后续明确交接。
 
 > **RA-01 历史实施记录（2026-09-09）：** 用户交接确认 W1/W2 已通过独立审阅及 exact-SHA push；W2 精确 HEAD 为 `ac9a5ce3142232e86576b5d789d93b95508e259d`，本次 fetch 已核验，尚未合入 main。既有 [W1 契约](research-assistant-product-contract.md) 与 [W2 评测契约](research-assistant-evaluation.md) 保留各自当时记录；工程 gate 不代表标签、阈值、预算或 ADR 已获批准。[W3 ADR 决策材料 v0.1.0](research-assistant-adr-decisions.md) 已形成、待独立审查（**IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**）；全部新架构建议及 RA-02 DATA 前置审批仍为 PENDING。RA-01 继续 IN_PROGRESS，未 COMPLETE，未启动 RA-02。下文 NOT_STARTED / NOT_AUTHORIZED、Issue #132 和 push 流程保留为规划历史；本次仅 W3：实施、验证、本地 commit 后停止，由独立 Review Project 审查并 push 精确批准的 HEAD。持续授权不替代架构决定、公网执行或费用批准；不重开 Issue #132 / merged PR #133。
 
@@ -146,7 +148,7 @@ AI 接收 typed data 并返回建议，不拥有 executor、shell、任意 fetch
 - **用户操作与进入条件：** RA-01 PASS、独立阶段授权及适用的源数据/lifecycle 审批完成。操作者能输入一个项目的规则和硬预算，导入本地观察文件，补齐身份与资源事实。
 - **包含与排除：** 从一种版本化、受限的 HAR-derived JSON observation 格式开始：允许的方法、脱敏 origin/path、明确资源标签、时间戳和选定响应事实。RA-01 冻结字段及字节/条目/深度上限；仅接受 UTF-8，拒绝额外字段和外部引用。不承诺完整 HAR 兼容，不获取 URL/HTML 资源、不重放、不执行脚本、不自动登记 Target、不自动取得身份认证。
 - **复用与新增：** 复用 Target/Scope/revision、TestIdentity、Resource、M11 binding 与 M12 assertion API、AuthenticationContext 和加密 bearer 存储。新增任务输入元数据、独立 observation provenance、预算配置和事实缺口。导入观察绝不能冒充 Executor 产生的 TestRun，也不能自动成为 verified assertion。
-- **有序工作包：** (1) **RA-02/W1：** 输入项目规则、许可和预算并校验来源；缺少许可时阻止执行准备。[W1 实现与验证](research-intake-context.md) 已形成，待独立审查。(2) **RA-02/W2：** 受限离线解析、项目隔离和最小化持久化，不产生网络副作用。(3) **RA-02/W3：** 明确身份/Resource/slot 提议、业务事实输入和人工凭据更新；缺少事实进入 NEEDS_INPUT。为 RA-04 提供会话检查事实，本阶段不发送 Target 请求。
+- **有序工作包：** (1) **RA-02/W1：** 输入项目规则、许可和预算并校验来源；缺少许可时阻止执行准备。[W1 实现与验证](research-intake-context.md) 已独立审阅并 push（精确 SHA 见本页当前记录）。(2) **RA-02/W2：** 受限离线解析、项目隔离和最小化持久化，不产生网络副作用。[W2 实现与验证](research-observation-intake.md) 已形成，待独立审查。(3) **RA-02/W3：** 明确身份/Resource/slot 提议、业务事实输入和人工凭据更新；缺少事实进入 NEEDS_INPUT。为 RA-04 提供会话检查事实，本阶段不发送 Target 请求。
 - **正向、负向与边界测试：** 有效合成文件保留 provenance 和顺序。跨项目 ID、恶意 URL/HTML 指令、重复/过深 JSON、secret 字段和未审查 Target 必须失败或隔离，fetch/execution 为零。检查字节/条目恰好上限与超限、空输入、标签冲突及未知登录/MFA/权限事实。普通字段名不能让 PII 自动获得持久化资格。
 - **人工职责与 PASS 证据：** 人工提供许可、允许使用的账号/合成数据、业务事实及保留字段的数据资格；凭据走现有边界。证据包括完整导入示例、schema/限制版本、零网络/零 TestRun 断言、项目隔离与 secret/PII canary 测试、缺失输入/更正历史，以及已批准的数据处理记录。
 - **失败处理、migration、ADR、隐私与费用：** 数据资格、provenance 或 binding 不确定时暂停。受限且脱敏的错误不得回显或记录原始导入内容。新增 observation/intake 存储可能需要 migration，须在隔离数据库测试旧数据兼容性。敏感持久化前实现适用 lifecycle 控制；不改 M13 v1 常量或历史 source body。不使用付费 provider 或公网资源。

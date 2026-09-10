@@ -28,7 +28,7 @@ PARENT = "a3c5e7f9b2d4"
 def test_clean_postgres_round_trip_creates_only_exact_retention_table(monkeypatch):
     config = Config("alembic.ini")
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["c7e9a1b3d5f7"]
+    assert scripts.get_heads() == ["d8f0b2c4e6a8"]
     assert scripts.get_revision(REVISION).down_revision == PARENT
     schema = f"retention_migration_{uuid4().hex}"
     with engine.begin() as db:

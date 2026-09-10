@@ -292,3 +292,5 @@ docs/research-intake-context.md
 本次没有测试失败、跳过或环境阻塞；首轮 focused 通过后，将并发暂停点加强到关联检查与元数据读取之间，再运行最终 focused/full，并非重试未变代码至绿。warnings 为既有 TestClient deprecation/collection 提示。
 
 本次修复文件仅 service、其 service/API/fixture 回归、独立隔离测试及本文。没有新 migration/schema/route、W2 内容、运行预算批准或 reviewer-PASS；本地提交后停止，等待 Review Project，不 push。
+
+W1 后续 gate：本次 W2 交接确认 `2575a34270fc53bddc75373afe220ba06a34883e` 已独立审阅/push，并已 fetch 核验。[W2 observation 实现](research-observation-intake.md)复用本节归属锁；本文件前述 W1 pending、W2 未实施等文字保留为原切片历史。
