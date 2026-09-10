@@ -87,3 +87,5 @@ __all__ = [
     "OpenAPIImportRecord",
     "SecurityReport",
 ]
+
+from app.db.models.research_intent import IntentMapping, IntentManifest, IntentBudgetDecision, IntentVersion, IntentPlanMember, IntentAudit

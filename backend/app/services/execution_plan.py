@@ -8,7 +8,7 @@ from typing import Any, Mapping, Sequence
 from urllib.parse import parse_qsl, urlsplit
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from app.db.models.authorization_revision import AuthorizationRevision
 from app.db.models.credential_binding import CredentialBinding
@@ -189,7 +189,7 @@ def compute_plan_digest_v1(
     return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
 
 
-def create_execution_plan(
+def _create_execution_plan(
     db: Session,
     *,
     target_id: int,
@@ -224,7 +224,8 @@ def create_execution_plan(
         raise ExecutionPlanValidationError("revision is not active for target")
 
     actor = db.scalar(
-        select(TestIdentity)
+        select(TestIdentity).options(load_only(TestIdentity.id, TestIdentity.target_id,
+            TestIdentity.auth_type, TestIdentity.is_active, raiseload=True))
         .where(TestIdentity.id == actor_identity_id)
         .with_for_update()
     )
@@ -329,3 +330,19 @@ def create_execution_plan(
     db.add(plan)
     db.flush()
     return plan
+
+
+def create_execution_plan(db: Session, *, target_id: int, authorization_revision_id: int,
+    actor_identity_id: int, credential_binding_id: int | None, actions: Sequence[PlanActionInput],
+    policy_context: Mapping[str, Any] | Sequence[Any] | None = None) -> ExecutionPlan:
+    """Legacy public creator. W1 uses the private persistence primitive atomically."""
+    from app.services.research_intent_gate import reject_case
+    frozen_actions = tuple(actions)
+    if isinstance(policy_context, Mapping) and 'research_intent' in policy_context:
+        raise ExecutionPlanValidationError('intent_w2_execution_closed')
+    for action in frozen_actions:
+        if action.test_case_id is not None:
+            reject_case(db, db.get(TestCase, action.test_case_id), ExecutionPlanValidationError)
+    return _create_execution_plan(db, target_id=target_id, authorization_revision_id=authorization_revision_id,
+        actor_identity_id=actor_identity_id, credential_binding_id=credential_binding_id,
+        actions=frozen_actions, policy_context=policy_context)

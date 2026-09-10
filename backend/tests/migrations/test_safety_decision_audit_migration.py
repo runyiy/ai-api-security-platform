@@ -4,10 +4,11 @@ from alembic.migration import MigrationContext
 from sqlalchemy import inspect
 
 from app.db.session import engine
+from tests.research_intake_fixtures import INTENT_TABLES
 
 
 HEAD = "e6a8c0d2f4b7"
-LATEST = "a1c3e5f7b9d0"
+LATEST = "4e72a9c1d603"
 PARENT = "d5f7a9c1e3b5"
 
 
@@ -23,6 +24,7 @@ def test_m5_03_migration_round_trip_preserves_preexisting_schema() -> None:
         inspector = inspect(engine)
         tables_before = set(inspector.get_table_names())
         later_tables = {
+            *INTENT_TABLES,
             "execution_plan_approval_records",
             "rate_reservation_states",
             "execution_plan_claims",

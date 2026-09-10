@@ -186,6 +186,9 @@ class TestExecutionService:
                 "TestCase is already running."
             )
 
+        from app.services.research_intent_gate import reject_case
+        reject_case(self.db, test_case, TestExecutionError)
+
         endpoint = self.db.get(
             Endpoint,
             test_case.endpoint_id,

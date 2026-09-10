@@ -13,7 +13,7 @@ from app.db.session import engine, SessionLocal
 from app.db.models import SecurityReport
 from app.services.security_report import SecurityReportService
 from tests.research_knowledge_fixtures import knowledge_pair, subject_pair, two_intake_targets, content, record, call, NOW, REF  # noqa: F401
-from tests.research_intake_fixtures import snapshot, KNOWLEDGE_TABLES, RULE_VALIDATION_TABLES
+from tests.research_intake_fixtures import INTENT_TABLES, snapshot, KNOWLEDGE_TABLES, RULE_VALIDATION_TABLES
 from tests.finding_evidence_fixtures import evidence_pair  # noqa: F401
 from tests.api.test_finding_evidence_fingerprints import old_evidence
 from tests.api.test_finding_structured_evidence import analyze
@@ -24,12 +24,12 @@ PARENT='e9a1c3d5f7b8'
 
 def previous_snapshot():
     with engine.connect() as db:
-        return {t.name:list(db.execute(select(t).order_by(*t.primary_key.columns)).mappings()) for t in Base.metadata.sorted_tables if t.name not in RULE_VALIDATION_TABLES | KNOWLEDGE_TABLES}
+        return {t.name:list(db.execute(select(t).order_by(*t.primary_key.columns)).mappings()) for t in Base.metadata.sorted_tables if t.name not in INTENT_TABLES | RULE_VALIDATION_TABLES | KNOWLEDGE_TABLES}
 
 
 def test_fresh_exact_schema_and_empty_rollback(monkeypatch):
     config=Config('alembic.ini');scripts=ScriptDirectory.from_config(config)
-    assert scripts.get_heads()==['a1c3e5f7b9d0'] and scripts.get_revision(REVISION).down_revision==PARENT
+    assert scripts.get_heads()==['4e72a9c1d603'] and scripts.get_revision(REVISION).down_revision==PARENT
     schema='knowledge_migration_'+uuid4().hex
     with engine.begin() as db:db.execute(text(f'CREATE SCHEMA "{schema}"'))
     url=make_url(settings.database_url).update_query_dict({'options':f'-csearch_path={schema}'})
@@ -87,4 +87,4 @@ def test_nonempty_rollback_refused_without_history_loss(knowledge_pair):
     with pytest.raises(RuntimeError,match='research_knowledge_populated_downgrade_blocked'):
         command.downgrade(Config('alembic.ini'),PARENT)
     assert snapshot()==before
-    with engine.connect() as db:assert MigrationContext.configure(db).get_current_revision()=='a1c3e5f7b9d0'
+    with engine.connect() as db:assert MigrationContext.configure(db).get_current_revision()=='4e72a9c1d603'

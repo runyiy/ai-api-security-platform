@@ -91,6 +91,8 @@ def create_test_case_execution_plan(
     if test_case is None:
         raise TestCasePlanningError("TestCase not found")
 
+    from app.services.research_intent_gate import reject_case
+    reject_case(db, test_case, TestCasePlanningError)
     endpoint = db.get(Endpoint, test_case.endpoint_id)
     resource = db.get(Resource, test_case.resource_id)
     actor = db.get(TestIdentity, test_case.actor_identity_id)

@@ -26,6 +26,8 @@ def load_eligible_source(
     test_case = db.get(TestCase, run.test_case_id)
     if test_case is None:
         raise ObservedAccessAssertionError("source_test_case_not_found")
+    from app.services.research_intent_gate import reject_case
+    reject_case(db, test_case, ObservedAccessAssertionError)
     if test_case.test_type != "owner_baseline":
         raise ObservedAccessAssertionError("source_test_run_not_owner_baseline")
     expected_statuses = test_case.expected_statuses
