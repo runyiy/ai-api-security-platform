@@ -317,12 +317,12 @@ class HoldInput(ReviewInput):
 
 
 class ControlInput(ReviewInput):
-    action: Literal["suspend", "reconcile"]
+    action: Literal["suspend", "reconcile", "rotate_audit"]
     deleted_observation_ids: Annotated[list[ID], Field(max_length=1024)] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def unique_replay(self):
         unique(self.deleted_observation_ids)
-        if self.action == "suspend" and self.deleted_observation_ids:
+        if self.action != "reconcile" and self.deleted_observation_ids:
             raise ValueError()
         return self

@@ -1,5 +1,7 @@
 # RA-02/W2：受限离线 observation intake
 
+> **v0.1.1 生命周期修复 · PENDING_INDEPENDENT_REVIEW**：以 reviewed HEAD `ad105f3e7da24d588a2e4be161a79b50645a63d7` 为父提交，仅修复三个生命周期 blocker，见第 8 节。下方 v0.1.0、第 6–7 节保留初始 W2 提交的验证/文件历史；任务 base 仍为 `2575a34270fc53bddc75373afe220ba06a34883e`。
+
 **v0.1.0 · IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**。精确起点 `2575a34270fc53bddc75373afe220ba06a34883e`，远端 `origin/codex/ra-02-w1-intake-context` 已 fetch 核验；W1 已审阅/push、未合入 main，依据本次交接。W2 不签署 reviewer-PASS / RA-02 COMPLETE，不开始 W3，不 push。
 
 采用已记录的 [DATA D1–D4 决定](research-assistant-adr-decisions.md#data-后续决定记录ra-02w1)，不改原 proposed 历史、其余 ADR、[产品支持范围](research-assistant-product-contract.md#5-请求形态支持矩阵)、[架构](architecture-decisions.md)或[安全模型](security-model.md)。本次只提供 **synthetic-only** 的本地操作者 API；不是 HAR 转换器、网络 importer、验证器或研究任务执行器。
@@ -56,11 +58,11 @@ Preparation 与导入文件分开。操作者通过固定 API 记录 `source/rev
 | admission | 默认仅 synthetic。每个进程启动生成 recovery token；数据库中未完成该进程 reconcile 的 context 不能接纳/消费 payload。未知部署保证不转为私有许可 |
 | expiry | 默认 2592000 秒，可缩短为 1–2592000；从 server accepted_at 计算，`now < expires_at` 才可用。读取/重试不续期 |
 | deletion | 显式 delete 原子撤销普通可用性，maintenance 物理删除在线 payload row；active hold 阻止 purge。删除不改变 digest，也不删除旧执行/evidence |
-| hold | 明确 synthetic reason、review、起止时间，单次 >0 且 ≤30 天；续期重新调用并记录审计。禁止对 expired/deleted/quarantined/missing payload 新建 hold；停止普通读，仅受限人工复核。Release/end 不重开 retention |
+| hold | 明确 synthetic reason、review、起止时间，单次 >0 且 ≤30 天；续期重新调用并记录审计。禁止对 expired/deleted/quarantined/missing payload 新建 hold；停止普通读，仅受限人工复核。Release/end 不重开 retention；无 active hold 的 release 返回 409，不变更时限 |
 | incident | quarantine 撤销该记录可用性并取消 hold，secret/不合资格不能借 hold 留存；preparation revoke 停止相关消费；context suspend 停止整个新域消费/准入。Rejected batch 不会触碰已批准历史；发现既有资格事故由操作者立即 suspend/revoke/quarantine 并核对已知副本 |
 | maintenance | 显式处理最多 1024 records/context，无 worker/scheduler；expiry/deletion 积压超过 24 小时仍有 payload 时，新的消费/准入 fail closed。离线或 audit 故障期间不声称已物理清理 |
-| tombstone | 不可用且无 active hold 后保留 90 天；maintenance 到期移除无内容 provenance。Hold 结束后才起算有效计时；不因未来软引用无限保留。无引用的过期/撤销 preparation 也可在 90 天后清理 |
-| logs | 只写固定事件码、scoped IDs、synthetic review、aware 时间及 hold 终点；maintenance 清除 ≥90 天事件。每 context 最多 8192 事件，超限拒绝成功操作；需先处理维护/审计故障，不能通过绕过 audit 返回成功 |
+| tombstone | 不可用且无 active hold 后保留 90 天；maintenance 到期移除无内容 provenance。只有实际有效 hold 的释放/结束可以延后适用起点；迟到/重复 release、delete、quarantine 或 replay 不重开时钟。不因未来软引用无限保留。无引用的过期/撤销 preparation 也可在 90 天后清理 |
+| logs | 只写固定事件码、scoped IDs、synthetic review、aware 时间及 hold 终点；maintenance 清除 ≥90 天事件。每 context 最多 8192 事件；普通操作满额时拒绝。操作者可显式 `rotate_audit`：原子暂停、退休最旧 1024 事件并写入带 review 的轮换审计，随后执行清理；不是保留全部历史的无损归档，详见第 8 节。真正 audit 故障仍拒绝成功 |
 | recovery | 服务暴露前先 suspend、在隔离的恢复库重放本项目 `deleted_observation_ids`、reconcile expiry/hold/资格/完整性与积压，再开放。外项目/不存在 replay ID 整次拒绝；损坏 payload 在 reconcile 中 quarantine/purge |
 | backups / export | 无实际备份/恢复基础设施操作、无 export API。DATA 的加密、最大 7 天副本/WAL/PITR 清单及删除重放证明仍是私有资料准入前置，本包不声称这些已部署。进程 token 不能检测同一进程内被外部替换的数据库；恢复前停服/隔离是操作者责任，私有资料仍无条件拒收 |
 
@@ -217,5 +219,53 @@ backend/tests/services/test_bola_matrix_preview.py
 backend/tests/services/test_research_observation.py
 docs/research-assistant-roadmap.md
 docs/research-intake-context.md
+docs/research-observation-intake.md
+```
+
+## 8. ad105f3 后的三个生命周期修复
+
+本节记录 RA-02/W2 的局部修复，不扩展到 W3、不改变 synthetic-only 准入、私有资料/backup/export 边界、W1 归属锁或 legacy TestRun/M13。没有新 migration，唯一 head 仍为 `d8f0b2c4e6a8`。本次仅 service、ControlInput action、两份新增回归测试及本文；不 amend、不 push，不签署 reviewer-PASS。
+
+1. **稳定 tombstone 起点。** `release` 要求 `hold_started_at <= now < hold_until`；不存在、已经结束或重复 release 一律 409 `observation_hold_not_active`，不写入成功审计、不改变源或期限。真正 active hold 的释放使用实际结束时间；自然结束仍用原 hold_until。已经过期的数据被迟到 delete/quarantine/replay 标记时，采用已有不可用时间或原 expires_at，而不是另起 90 天。关闭/撤销同时存在时先处理最早已知的不可用原因；只有真实有效 hold 区间可延后该起点。不会推测并改写 reviewed HEAD 以前可能已被错误延期的历史时限。
+2. **资格撤销优先于 hold。** `maintain` 对所有旧 state 检查 preparation.revoked_at；held、deleted、quarantined、expired 不能绕过。撤销取消 hold 并允许当次 purge，按实际撤销/既有期限计算，不等到未来 hold_until。合资格的 deleted+held payload 仍受保护。关闭 context 的清理不读取新归属项目的 Target/revision/Scope；digest、entry order 和来源版本不改写。
+3. **显式、可审计的容量恢复。** 增加下面的维护 action，继续要求现有 `SyntheticReference` review。只有清除过期日志后仍恰好 8192 事件时可执行；按本项目 event ID 升序退休固定 1024 条，保留其余行原值，并通过正常 `_event` 写入固定码 `audit_rotated_1024`、context、review、aware 时间。事件数变为 7169，context 留在 suspended/unavailable。未满额或重复轮换返回 409 `observation_rotation_not_required`；不能同时提交 deleted_observation_ids。正常读/写不自动轮换，也不提高 8192 上限。
+
+```json
+{
+  "action": "rotate_audit",
+  "review": {"kind": "synthetic_fixture", "fixture_id": 1, "version": 1}
+}
+```
+
+入口仍为 `POST /api/research-projects/{project}/contexts/{context_id}/observations/maintenance`。成功返回 `status=unavailable`、`retired_audit_events=1024`、`purged_payloads=0`；它不表示源 payload 已清理。随后显式 delete/quarantine、必要的 preparation revoke、reconcile 完成所需清理与重验。测试在满额后实际执行这些步骤，没有等待 90 天或手工改数据库恢复。
+
+轮换是操作者明确选择的**日志提前退休**：被退休事件的逐条细节不再保留，轮换本身有固定计数码、review 与时间审计；以后同样受最长 90 天/显式轮换约束，不承诺无限历史。DATA 的 logs 条款是最长保留期限，不是强制保存每条日志满 90 天。此操作不退休 observation provenance/tombstone，不清除或更改 hold 记录，不复制到临时文件、备份或 export。不能以该合成日志流程声称真实敏感部署具备审计或备份保证。
+
+暂停、日志退休、轮换审计与响应编码处于同一事务边界；缺 review、外项目引用、数据库审计 INSERT 失败或响应序列化失败均不提交部分结果。测试通过 PostgreSQL 的实际错误中止 audit 写入，验证即便 caller catch 后 commit，也完整保留原日志/期限/payload/control 状态。容量拒绝不是绕过真实审计故障的理由。
+
+[Service 回归](../backend/tests/services/test_research_observation_lifecycle.py)与 [API 回归](../backend/tests/api/test_research_observation_lifecycle.py)覆盖三个复现、expired/deleted deadline、真实 hold 释放/自然结束、撤销与关闭顺序、满额/重复/外项目轮换、七组真实并发先后次序及审计/序列化失败回滚。并发使用 `pg_blocking_pids` 确认锁等待，沿用 W1 context 锁。既有零 network/provider/credential sentinel、legacy 全表快照及 W1 isolation 回归保留。
+
+本次验证使用 Ubuntu WSL、项目 `.venv` Python 3.12.3 / PostgreSQL 16.15。应用 import 前新建并独立核验 `ra02_w2_lifecycle_test` database/user、`127.0.0.1:55455`、当前用户拥有的 `/tmp/ra02-w2-lifecycle-fix-test.L2gSO2/data`；初始 public 表 0、无其他 client backend，显式环境未使用 `.env` 的数据库。开发 requirements 已满足。DSN、临时 key 和日志在 Git 外。
+
+修复前新测试针对两个时间/撤销复现及容量恢复缺口为 **3 failed**；修复后新增 service/API **45 passed, 1 warning**。随后扩展关闭/撤销交错的同一时钟问题，未跳过、弱化原断言或重试未变失败至绿。
+
+| 本次实际命令/检查 | 结果 |
+| --- | --- |
+| 第 6 节 W2/W1 focused 命令，加入 `tests/services/test_research_observation_lifecycle.py tests/api/test_research_observation_lifecycle.py` | **310 passed, 1 warning**，包括既有 W1/W2 migration compatibility |
+| `python -m pytest` | **2399 passed, 55 warnings**；无失败/跳过，warnings 为既有 TestClient/collection 提示 |
+| `python -m evaluation.ra01 verify` | **VERIFIED**，freeze digest 仍为 `692c33a321cc59e9799377ed512402ac33826dec06707d494b3d5853006a231a` |
+| `python -m pip check` | No broken requirements found；只有本机 pip cache 不可写提示 |
+| Alembic current / heads / 初始 upgrade | fresh 初始无 revision，upgrade 成功；最终 current/唯一 head 均 `d8f0b2c4e6a8`，未新增或修改迁移 |
+| 完整 diff、文档 JSON/链接/anchors、`git diff --check` | 通过；模型、W1 service、evaluation/freeze、ADR 原文不变 |
+
+仅停止了本次新建的专用 PostgreSQL，确认其 postmaster.pid 消失；未操作其他数据库。以上是实现方验证，不是独立 reviewer-PASS。
+
+相对 reviewed HEAD 的完整修复文件清单（5 个）；任务 base-to-HEAD 则为第 7 节原 52 个路径再加两份 lifecycle 回归，共 54 个路径：
+
+```text
+backend/app/schemas/research_observation.py
+backend/app/services/research_observation.py
+backend/tests/api/test_research_observation_lifecycle.py
+backend/tests/services/test_research_observation_lifecycle.py
 docs/research-observation-intake.md
 ```

@@ -155,6 +155,16 @@ def _state(row, now):
     return "available"
 
 
+def _mark_unavailable(row, at, *, end_hold=False):
+    # A late delete/quarantine/replay must not restart an already expired clock.
+    since = row.unavailable_at or min(row.expires_at, at)
+    if end_hold:
+        if row.hold_until and row.hold_started_at and row.hold_started_at <= at:
+            since = max(since, min(row.hold_until, at))
+        row.hold_until = None
+    row.unavailable_at = since
+
+
 def _receipt(row, state):
     return {"status": "accepted", "context_id": row.context_id, "observation_id": row.id,
         "preparation_id": row.preparation_id, "batch_ref": row.batch_ref,
@@ -312,16 +322,14 @@ def lifecycle(db, project, context_id, observation_id, action, payload, *, now=N
             row.hold_started_at, row.hold_until = now, until
             row.hold_review, row.hold_reason = p.review.model_dump(), p.reason
         elif action == "release":
+            if not row.hold_until or not row.hold_started_at or not row.hold_started_at <= now < row.hold_until:
+                raise ObservationError("observation_hold_not_active")
+            if row.state != "available" or now >= row.expires_at:
+                _mark_unavailable(row, now, end_hold=True)
             row.hold_until = None
-            if row.unavailable_at is not None:
-                row.unavailable_at = now
-            if now >= row.expires_at and row.unavailable_at is None:
-                row.unavailable_at = now
         elif action in ("delete", "quarantine"):
             row.state = "deleted" if action == "delete" else "quarantined"
-            row.unavailable_at = row.unavailable_at or now
-            if action == "quarantine":
-                row.hold_until = None  # Incident disqualification cannot use hold to retain content.
+            _mark_unavailable(row, now, end_hold=action == "quarantine")
         else:
             raise ObservationError("observation_shape_invalid", 422)
         _event(db, context, action, now, row, p.review.model_dump())
@@ -359,6 +367,17 @@ def maintain(db, project, context_id, payload, *, now=None):
         # Purge old audit first so an explicit recovery can resolve the audit cap.
         db.execute(delete(ObservationEvent).where(ObservationEvent.context_id == context.id,
                                                  ObservationEvent.recorded_at <= now-DAYS90))
+        if p.action == "rotate_audit":
+            # Explicit operator-reviewed log retirement, not an audit bypass.
+            # Keep the cap; suspension + retirement + replacement audit are atomic.
+            count = db.scalar(select(func.count()).select_from(ObservationEvent).where(
+                ObservationEvent.context_id == context.id))
+            if count != 8192:
+                raise ObservationError("observation_rotation_not_required")
+            retired = list(db.scalars(select(ObservationEvent.id).where(
+                ObservationEvent.context_id == context.id).order_by(ObservationEvent.id).limit(1024)))
+            db.execute(delete(ObservationEvent).where(ObservationEvent.context_id == context.id,
+                                                     ObservationEvent.id.in_(retired)))
         if p.action == "reconcile":
             rows = list(db.scalars(select(ObservationRecord).where(ObservationRecord.context_id == context.id)
                                    .order_by(ObservationRecord.id).limit(1025)))
@@ -370,18 +389,18 @@ def maintain(db, project, context_id, payload, *, now=None):
             for row in rows:
                 if row.id in p.deleted_observation_ids:
                     row.state = "deleted"
-                    row.unavailable_at = row.unavailable_at or now
+                    _mark_unavailable(row, now)
                 state = _state(row, now)
+                prep = db.scalar(select(ObservationPreparation).where(
+                    ObservationPreparation.context_id == context.id, ObservationPreparation.id == row.preparation_id))
                 if context.closed_at:
                     row.state = "quarantined"
                     state = "quarantined"
-                    row.unavailable_at = row.unavailable_at or context.closed_at
-                prep = db.scalar(select(ObservationPreparation).where(
-                    ObservationPreparation.context_id == context.id, ObservationPreparation.id == row.preparation_id))
-                if prep.revoked_at and row.state == "available":
+                    _mark_unavailable(row, min(context.closed_at, prep.revoked_at or context.closed_at))
+                if prep.revoked_at:
+                    # Revocation overrides hold even after delete/close/quarantine.
                     row.state, state = "quarantined", "quarantined"
-                    row.hold_until = None
-                    row.unavailable_at = row.unavailable_at or prep.revoked_at
+                    _mark_unavailable(row, prep.revoked_at, end_hold=True)
                 if state in ("available", "held"):
                     try:
                         data = validate(PreparationInput, prep.registry)
@@ -393,8 +412,7 @@ def maintain(db, project, context_id, payload, *, now=None):
                         _payload(db, row)
                     except ObservationError:
                         row.state, state = "quarantined", "quarantined"
-                        row.hold_until = None
-                        row.unavailable_at = row.unavailable_at or now
+                        _mark_unavailable(row, now, end_hold=True)
                 if state != "available":
                     if row.hold_until and now < row.hold_until:
                         continue
@@ -414,6 +432,10 @@ def maintain(db, project, context_id, payload, *, now=None):
                     db.delete(prep)
             if not context.closed_at:
                 control.recovery_token = BOOT_TOKEN
-        _event(db, context, p.action, now, review=p.review.model_dump())
-        return {"status": "ready" if control.recovery_token else "unavailable", "purged_payloads": purged,
-                "removed_tombstones": tombstones, "private_data_admitted": False, "exports_enabled": False}
+        _event(db, context, "audit_rotated_1024" if p.action == "rotate_audit" else p.action,
+               now, review=p.review.model_dump())
+        result = {"status": "ready" if control.recovery_token else "unavailable", "purged_payloads": purged,
+                  "removed_tombstones": tombstones, "private_data_admitted": False, "exports_enabled": False}
+        if p.action == "rotate_audit":
+            result["retired_audit_events"] = 1024
+        return result
