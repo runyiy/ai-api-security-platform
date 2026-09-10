@@ -1,6 +1,8 @@
 # Research Assistant v1 — 低人工参与、低 Token 的授权安全研究助手
 
-> **RA-03/W2 当前实施记录：** 用户交接确认 W1 经 PR #140 集成；fetch 后核验 clean main、origin/main 均为 `dcf3ec044157bb7db816368d5b7683a1b7edfb1d`，新分支 `codex/ra-03-w2-knowledge-retrieval` 从此开始。[K1–K4 后续采纳记录](research-knowledge-contract.md#k1k4-后续采纳记录ra-03w2) 与 [W2 有界检索实施记录](research-knowledge-retrieval.md) 记录本次范围、实际验证与限制。W2 IMPLEMENTED / PENDING_INDEPENDENT_REVIEW，最终全量回归有1项M8计时断言失败待复核（见实施记录），RA-03 IN_PROGRESS；普通 publication 关闭，W3 未开始，不宣告 reviewer-PASS 或 stage COMPLETE。旧 pending/NOT_AUTHORIZED 记录保留为当时历史。本地 commit 后停止，不 push。
+> **RA-03/W3 当前实施记录：** 本地核验clean main为 `cd60493cafc1d8bdcbf57cea84638d3138b3e78b`，从此新建 `codex/ra-03-w3-rule-validation`。用户交接确认W2 reviewed `69b6713ecbaadfcf3d23219953460e786b34463e` 已经PR #141合并、main验证2690 passed。[W3独立规则验证与反馈审核](research-rule-validation.md)实施有界离线正反例检查、不可变证据、反馈人工审核及真实证明加另一次显式publish gate；未进行实际规则发布。W3 IMPLEMENTED / PENDING_INDEPENDENT_REVIEW，RA-03 IN_PROGRESS；不代签reviewer PASS或stage COMPLETE。Planning Issue #132保持关闭；本地commit后停止，不push/PR/merge，不开始RA-04。
+
+> **RA-03/W2 历史实施记录：** 用户交接确认 W1 经 PR #140 集成；fetch 后核验 clean main、origin/main 均为 `dcf3ec044157bb7db816368d5b7683a1b7edfb1d`，新分支 `codex/ra-03-w2-knowledge-retrieval` 从此开始。[K1–K4 后续采纳记录](research-knowledge-contract.md#k1k4-后续采纳记录ra-03w2) 与 [W2 有界检索实施记录](research-knowledge-retrieval.md) 记录本次范围、实际验证与限制。W2 IMPLEMENTED / PENDING_INDEPENDENT_REVIEW，最终全量回归有1项M8计时断言失败待复核（见实施记录），RA-03 IN_PROGRESS；普通 publication 关闭，W3 未开始，不宣告 reviewer-PASS 或 stage COMPLETE。旧 pending/NOT_AUTHORIZED 记录保留为当时历史。本地 commit 后停止，不 push。
 
 > **RA-03/W1 历史实施记录：** 用户交接确认 RA-02/W3 已通过独立 review 及 exact-SHA push；本次 fetch 核验 `origin/codex/ra-02-w3-identity-resource-context` 与本地 HEAD 均为 `4ac9b284029a515766d7532a0381be86bea7ce09`，未合入 main。[W1 知识分类、版本与人工审核发布契约 v0.1.0](research-knowledge-contract.md) 已形成、待独立审查；分类/复用决定仍待明确批准，依赖 migration 前须通过。RA-03 IN_PROGRESS，未实现知识持久化/发布/检索；不签署 reviewer-PASS 或 stage COMPLETE。本次只做 W1，本地 commit 后停止，不 push、不开始 W2。下方 NOT_AUTHORIZED 与各包 pending 记录保留为当时历史，不覆盖本次交接。
 
@@ -124,7 +126,7 @@ AI 接收 typed data 并返回建议，不拥有 executor、shell、任意 fetch
 | --- | --- | --- | --- | --- |
 | RA-01 | 可执行的产品/评测契约及 ADR 规格 | 计划审阅后单独批准首个任务 | 冻结 oracle、阈值及必要 ADR | W1–W3 材料已审阅；DATA D1–D4 已采纳（本次交接），其余 ADR 按依赖门槛待批 |
 | RA-02 | 安全观察导入及身份/资源/预算上下文 | RA-01；数据 lifecycle 决策 | 为检索/规划提供安全输入 | W1–W3 已独立审阅/push（W3 exact SHA 见当前记录）；不代签 stage COMPLETE |
-| RA-03 | 带版本和反例的已审规则 | RA-02；知识使用资格/隔离审查 | 可重复的受限检索 | IN_PROGRESS；W1 契约已形成待独立审查，分类/复用待批；W2/W3 未实施 |
+| RA-03 | 带版本和反例的已审规则 | RA-02；知识使用资格/隔离审查 | 可重复的受限检索 | IN_PROGRESS；W1契约/K1–K4已采纳，W2已review并经PR #141合并；W3已实施、待独立review |
 | RA-04 | 最小本地候选→计划→验证→证据演示 | RA-03；bridge/intent/evidence ADR | 可靠验证窄请求形态 | NOT_STARTED / NOT_AUTHORIZED |
 | RA-05 | 按需、预算内的真实 AI 建议 | RA-04；AI proposal 和 provider egress ADR | fake 回归及单独获准的真实验证 | NOT_STARTED / NOT_AUTHORIZED |
 | RA-06 | CLI 启动/暂停/取消/恢复持久任务 | RA-05；编排/审批/恢复 ADR | 日常使用无需 SQL/Python | NOT_STARTED / NOT_AUTHORIZED |
@@ -165,7 +167,7 @@ AI 接收 typed data 并返回建议，不拥有 executor、shell、任意 fetch
 - **用户操作与进入条件：** RA-02 PASS 且获得独立授权。操作者能查看规则的来源、版本、适用条件、反例、审核人和拒绝判断的原因。
 - **包含与排除：** 分开存放通用机制、已审查规则、私有证据、反例和外部 triage 结果。使用 PostgreSQL 结构化/标签/关键词检索。初期排除 embeddings、向量平台和 fine-tuning；数据库增长不等于模型训练。
 - **复用与新增：** 复用 PostgreSQL 和已有 provenance/review 模式；知识审核不能替代 M12 access-truth 审核。新增版本化规则、许可/复用/隐私资格、审核状态、适用条件和受限检索。私有项目证据留在本项目，且不进入模型输入；只有经独立审核的通用化材料才能成为可复用知识。
-- **有序工作包：** (1) **RA-03/W1：** 定义分类/版本与审核发布契约；候选规则永不自动发布。[W1 契约 v0.1.0](research-knowledge-contract.md) 已经 PR #140 集成；K1–K4 采纳见后续记录。(2) **RA-03/W2：** 在受限关键词/标签排序前，先按项目、数据资格和审核状态过滤；返回准确版本与引用；[W2 实施与验证](research-knowledge-retrieval.md) 已形成、待独立审查，普通 publication 关闭。(3) **RA-03/W3：** 规则正例/反例验证和反馈提升审核；保留样本不得进入检索或训练。
+- **有序工作包：** (1) **RA-03/W1：** 定义分类/版本与审核发布契约；候选规则永不自动发布。[W1 契约 v0.1.0](research-knowledge-contract.md) 已经 PR #140 集成；K1–K4 采纳见后续记录。(2) **RA-03/W2：** 在受限关键词/标签排序前，先按项目、数据资格和审核状态过滤；返回准确版本与引用；[W2 实施与验证](research-knowledge-retrieval.md) 已review并经PR #141合并（原文保留历史边界）。(3) **RA-03/W3：** [规则正反例验证和反馈提升审核](research-rule-validation.md)已实施、待独立review；保留样本不得进入检索或训练，PASS不自动publish。
 - **正向、负向与边界测试：** 固定上下文检索出预期且合资格的规则。跨项目 canary、过期/未审核/无许可条目、注入指令和存储脚本不得到达执行端或模型输入。AI 假设不能成为 verified truth。检查零匹配、重复版本、top-k 恰好上限/超限及高排名但不适用的规则；所有权假设不能覆盖合法共享反例。
 - **人工职责与 PASS 证据：** 审核规则、反例、provenance 和复用资格。证据包括规则卡示例、正负结果、发布历史、受限检索轨迹、跨项目/保留集泄漏失败测试和可重复查询结果。一个项目的许可或 access truth 绝不能授权另一个项目。
 - **失败处理、migration、ADR、隐私与费用：** 禁用受污染版本，保留引用/历史并重新评估待处理候选；不覆盖旧证据。规则/知识表可能需要增量 migration，先批准分类/复用决策。不执行下载内容或数据库中的任意脚本，不产生模型费用。

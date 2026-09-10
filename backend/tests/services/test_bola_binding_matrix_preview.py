@@ -120,7 +120,7 @@ def prohibit_work(composer, guard, db):
 
 
 def test_signature_frozen_input_and_isolated_composition(composer):
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["f0b2d4e6a8c0"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["a1c3e5f7b9d0"]
     signature = inspect.signature(composer.preview_bola_binding_matrix)
     assert list(signature.parameters) == ["db", "endpoint_id", "assignments", "test_identity_ids", "evaluation_time"]
     assert all(p.default is inspect.Parameter.empty for p in signature.parameters.values())

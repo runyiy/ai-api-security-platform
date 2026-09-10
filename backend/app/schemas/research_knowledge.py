@@ -120,6 +120,11 @@ class RecordInput(StrictRecord):
     review: SyntheticReference
 
 
+class ValidationRef(StrictRecord):
+    validation_id: ID
+    digest: Digest
+
+
 class DecisionInput(StrictRecord):
     reference: ExactRef
     expected_sequence: Annotated[int, Field(strict=True, ge=0, le=16)]
@@ -127,6 +132,9 @@ class DecisionInput(StrictRecord):
     review: SyntheticReference
     valid_from: str | None
     valid_until: str | None
+    validation_ref: ValidationRef | None = None
+    review_event_id: ID | None = None
+    reuse_event_id: ID | None = None
 
     @model_validator(mode='after')
     def window(self):
@@ -148,7 +156,7 @@ class EventBody(StrictRecord):
     valid_until: str | None
     review_event_id: ID | None
     reuse_event_id: ID | None
-    validation_ref: Literal['NOT_RUN', 'synthetic_test_only']
+    validation_ref: ValidationRef | Literal['NOT_RUN', 'synthetic_test_only']
 
 
 class QueryInput(StrictRecord):
@@ -181,9 +189,10 @@ class Match(StrictRecord):
     review_event_id: ID
     reuse_event_id: ID | None
     publication_event_id: ID
-    publication_evidence: Literal['synthetic_test_only']
+    publication_evidence: Literal['synthetic_test_only', 'operator_recorded']
     review_actor: Literal['local_operator', 'synthetic_test_reviewer']
     publication_actor: Literal['local_operator', 'synthetic_test_reviewer']
+    validation_ref: ValidationRef | None = None
     applicability: Literal['general_explanation', 'context_facts_present']
 
 

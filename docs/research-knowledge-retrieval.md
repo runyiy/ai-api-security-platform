@@ -1,5 +1,7 @@
 # RA-03/W2：有界、先资格过滤的知识检索
 
+> **后续W3：** 本文保留W2实施/修复历史；[W3验证与反馈审核](research-rule-validation.md)新增真实证据加独立人工publish的有条件gate。W2的NOT_RUN/synthetic_test_only不成为W3证明；过滤、actor、来源和最终时间边界保持。
+
 **实施记录 v0.1.0 · IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**。源码基点 main `dcf3ec044157bb7db816368d5b7683a1b7edfb1d`；分支 `codex/ra-03-w2-knowledge-retrieval`。此文记录 W2 实现，不替代 [W1 知识契约](research-knowledge-contract.md)、[K1–K4 采纳记录](research-knowledge-contract.md#k1k4-后续采纳记录ra-03w2)、[roadmap RA-03](research-assistant-roadmap.md#ra-03--版本化知识已审查规则和受限检索)。普通 publication 未启用；本次自检不是独立 review、W3 validation、实际规则发布或 RA-03 COMPLETE。
 
 ## 1. 实际边界与证据
