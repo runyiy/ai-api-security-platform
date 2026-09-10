@@ -43,20 +43,38 @@ def _validate(schema, value):
         raise ResearchContextError("intake_invalid_request", 422) from None
 
 
-def _authorization_metadata(db, item):
+def _authorization_metadata(db, context, item):
+    # Callers hold the context lock (or own its uncommitted insertion). Keep
+    # the association locked until the caller transaction ends as well.
+    if context.closed_at is not None:
+        return None, None, [], None
+    association_id = db.scalar(select(ResearchTargetAssociation.id).where(
+        ResearchTargetAssociation.context_id == context.id,
+        ResearchTargetAssociation.target_id == item.target_id,
+        ResearchTargetAssociation.released_at.is_(None),
+    ).with_for_update(read=True))
+    if association_id is None:
+        return None, None, [], None
     t = db.execute(select(Target.id, Target.authorization_profile_id,
         Target.authorization_revision_id, Target.base_url, Target.is_enabled, Target.network_mode)
-        .where(Target.id == item.target_id)).mappings().one_or_none()
+        .where(Target.id == item.target_id).with_for_update(read=True)).mappings().one_or_none()
     if t is None:
-        raise ResearchContextError()
+        return None, None, [], None
     r = None
-    if item.authorization_revision_id is not None:
+    if (item.authorization_revision_id is not None
+            and item.authorization_revision_id == t["authorization_revision_id"]):
         r = db.execute(select(AuthorizationRevision.id, AuthorizationRevision.authorization_profile_id,
             AuthorizationRevision.revision_number, AuthorizationRevision.lifecycle_state,
             AuthorizationRevision.valid_from, AuthorizationRevision.valid_until,
             AuthorizationRevision.automation_allowed, AuthorizationRevision.allow_get,
             AuthorizationRevision.max_requests_per_second, AuthorizationRevision.require_human_execution_approval)
-            .where(AuthorizationRevision.id == item.authorization_revision_id)).mappings().one_or_none()
+            .where(AuthorizationRevision.id == item.authorization_revision_id,
+                   AuthorizationRevision.authorization_profile_id == t["authorization_profile_id"])
+            ).mappings().one_or_none()
+    # Do not read Scope, hash metadata or compare rates for an unavailable or
+    # foreign selection. In particular, never distinguish a foreign ID's existence.
+    if item.authorization_revision_id is not None and r is None:
+        return t, None, [], None
     scopes = [dict(row) for row in db.execute(select(Scope.id, Scope.hostname, Scope.path_pattern,
         Scope.allowed_methods, Scope.is_active).where(Scope.target_id == item.target_id).order_by(Scope.id).limit(257)).mappings()]
     value = {"target": dict(t), "revision": dict(r) if r else None, "scopes": scopes}
@@ -66,7 +84,9 @@ def _authorization_metadata(db, item):
 
 
 def _permission_status(t, r, scopes, item, original, now):
-    if item.authorization_revision_id is None or item.permission_source is None or r is None:
+    if t is None or (item.authorization_revision_id is not None and r is None):
+        return "unavailable"
+    if item.authorization_revision_id is None or item.permission_source is None:
         return "missing"
     if (r["authorization_profile_id"] != t["authorization_profile_id"]
             or r["id"] != t["authorization_revision_id"]):
@@ -112,7 +132,10 @@ def _latest(db, context_id):
 def _append(db, context, intake, number, reference, now):
     snapshots = {}
     for item in intake.targets:
-        _, _, _, digest = _authorization_metadata(db, item)
+        t, r, _, digest = _authorization_metadata(db, context, item)
+        if (t is None or t["network_mode"] != "private_local"
+                or (item.authorization_revision_id is not None and r is None)):
+            raise ResearchContextError()
         snapshots[str(item.target_id)] = digest
     row = ResearchContextVersion(context_id=context.id, version_number=number,
         intake=intake.model_dump(mode="json"), permission_snapshots=snapshots,
@@ -133,10 +156,7 @@ def create_context(db: Session, payload, *, now=None):
             db.add(context)
             db.flush()
             for item in sorted(payload.intake.targets, key=lambda t: t.target_id):
-                # Reads only selected authorization columns; does not enroll or mutate Target.
-                t, _, _, _ = _authorization_metadata(db, item)
-                if t["network_mode"] != "private_local":
-                    raise ResearchContextError()
+                # Establish exclusive active ownership before any live metadata read.
                 db.add(ResearchTargetAssociation(context_id=context.id, target_id=item.target_id,
                     review_reference=item.association_review.model_dump(), reviewed_at=now))
             db.flush()  # Partial unique index arbitrates concurrent ownership, not a precheck.
@@ -187,7 +207,9 @@ def read_context(db: Session, project_number, context_id, *, version=None, now=N
     _clean(db)
     now = _now(now)
     with db.no_autoflush:
-        context = _context(db, project_number, context_id)
+        # Serializes latest/history reads with correction and close/transfer.
+        # Caller retains the transaction and must promptly end it after reading.
+        context = _context(db, project_number, context_id, lock=True)
         row = _latest(db, context.id) if version is None else db.scalar(select(ResearchContextVersion)
             .where(ResearchContextVersion.context_id == context.id,
                    ResearchContextVersion.version_number == version))
@@ -200,7 +222,7 @@ def _readiness(db, context, row, now):
     intake = ResearchIntakeInput.model_validate(row.intake)
     permissions, budget_rate_exceeded = [], False
     for item in intake.targets:
-        t, r, scopes, digest = _authorization_metadata(db, item)
+        t, r, scopes, digest = _authorization_metadata(db, context, item)
         status = _permission_status(t, r, scopes, item,
             row.permission_snapshots.get(str(item.target_id)) == digest, now)
         rate = intake.budget.rate_millirequests_per_second

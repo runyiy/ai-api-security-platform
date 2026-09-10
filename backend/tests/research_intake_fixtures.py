@@ -68,3 +68,19 @@ def intake_target():
             db.execute(delete(AuthorizationRevision).where(AuthorizationRevision.authorization_profile_id == ids["profile"]))
             db.execute(delete(AuthorizationProfile).where(AuthorizationProfile.id == ids["profile"]))
             db.commit()
+
+
+@pytest.fixture
+def two_intake_targets():
+    """Two independently owned fixture graphs, including distinct profiles/revisions."""
+    first = intake_target.__wrapped__()
+    second = intake_target.__wrapped__()
+    try:
+        a, b = next(first), next(second)
+        with SessionLocal() as db:
+            db.get(Target, b["target"]).base_url = "http://127.0.0.1:58124"
+            db.commit()
+        yield a, b
+    finally:
+        second.close()
+        first.close()

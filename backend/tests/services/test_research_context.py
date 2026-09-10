@@ -37,7 +37,7 @@ def test_current_permission_is_not_execution_or_budget_approval(intake_target):
 @pytest.mark.parametrize("change,expected", [
     ("missing", "missing"), ("reference_missing", "missing"), ("revoked", "revoked"),
     ("draft", "draft"), ("superseded", "superseded"), ("expired", "expired"),
-    ("not_yet_valid", "not_yet_valid"), ("mismatched", "mismatched"),
+    ("not_yet_valid", "not_yet_valid"), ("mismatched", "unavailable"),
     ("disabled", "target_unavailable"), ("get", "get_not_permitted"),
     ("automation", "get_not_permitted"), ("scope", "scope_missing"),
     ("scope_changed", "changed"), ("origin_changed", "changed"),
@@ -92,6 +92,15 @@ def test_independent_revision_never_unions_and_budget_rate_remains_visible(intak
     payload = intake(ids)
     payload["targets"][0]["authorization_revision_id"] = 2147483647
     correction = {"expected_version": 1, "correction_reference": REF, "intake": payload}
+    before = snapshot()
+    with SessionLocal() as db:
+        with pytest.raises(ResearchContextError) as rejected:
+            correct_context(db, 1, result["context_id"], correction, now=NOW)
+        assert rejected.value.code == "intake_context_unavailable"
+        db.commit()
+    assert snapshot() == before
+    # An explicit missing-permission draft remains supported; no fallback grant.
+    payload["targets"][0].update(authorization_revision_id=None, permission_source=None)
     with SessionLocal() as db:
         changed = correct_context(db, 1, result["context_id"], correction, now=NOW)
         db.commit()

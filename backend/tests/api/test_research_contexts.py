@@ -7,7 +7,7 @@ from sqlalchemy import event
 
 from app.db.session import engine
 from app.main import app
-from tests.research_intake_fixtures import REF, intake, intake_target, snapshot  # noqa: F401
+from tests.research_intake_fixtures import REF, intake, intake_target, snapshot, two_intake_targets  # noqa: F401
 
 client = TestClient(app)
 ROOT = "/api/research-projects/1/contexts"
@@ -208,3 +208,124 @@ def test_generated_openapi_has_inline_request_and_typed_response():
     assert "$defs" not in json.dumps(request_schema) and "$ref" not in json.dumps(request_schema)
     assert request_schema["additionalProperties"] is False
     assert operation["responses"]["201"]["content"]["application/json"]["schema"]["$ref"].endswith("/ResearchContextRead")
+
+
+def test_foreign_revision_api_create_correct_are_generic_atomic_rejections(two_intake_targets):
+    from tests.services.test_research_context_isolation import change_rate
+    a, b = two_intake_targets
+    assert client.post("/api/research-projects/2/contexts", json=intake(b)).status_code == 201
+    for revision_id in (b["revision"], 2147483647):
+        for rate in (.1, 10):
+            change_rate(b, rate)
+            payload = intake(a)
+            payload["targets"][0]["authorization_revision_id"] = revision_id
+            before = snapshot()
+            response = client.post(ROOT, json=payload)
+            assert (response.status_code, response.json()) == (409, {"detail": "intake_context_unavailable"})
+            assert snapshot() == before
+    # Null explicitly represents missing permission, independent of another project's grant.
+    draft = intake(a)
+    draft["targets"][0].update(authorization_revision_id=None, permission_source=None)
+    response = client.post(ROOT, json=draft)
+    assert response.status_code == 201
+    result = response.json()
+    assert result["permissions"][0]["status"] == "missing"
+    assert "permission_missing" in result["missing_inputs"]
+    for revision_id in (b["revision"], 2147483647):
+        payload = intake(a)
+        payload["targets"][0]["authorization_revision_id"] = revision_id
+        before = snapshot()
+        response = client.post(f'{ROOT}/{result["context_id"]}/versions', json={
+            "expected_version": 1, "correction_reference": REF, "intake": payload})
+        assert (response.status_code, response.json()) == (409, {"detail": "intake_context_unavailable"})
+        assert snapshot() == before
+
+
+def test_old_foreign_revision_api_cannot_observe_existence_or_rates(two_intake_targets):
+    from sqlalchemy import delete
+    from app.db.models import AuthorizationRevision, Target
+    from app.db.session import SessionLocal
+    from tests.services.test_research_context_isolation import seed_old_foreign_selection
+    a, b = two_intake_targets
+    first = client.post(ROOT, json=intake(a)).json()
+    assert client.post("/api/research-projects/2/contexts", json=intake(b)).status_code == 201
+    seed_old_foreign_selection(first["context_id"], b["revision"])
+    original = None
+    for rate in (.1, 10, None):
+        with SessionLocal() as db:
+            if rate is None:
+                db.get(Target, b["target"]).authorization_revision_id = None
+                db.flush()
+                db.execute(delete(AuthorizationRevision).where(AuthorizationRevision.id == b["revision"]))
+            else:
+                db.get(AuthorizationRevision, b["revision"]).max_requests_per_second = rate
+            db.commit()
+        before = snapshot()
+        outputs = []
+        for suffix in ("", "/versions/1"):
+            response = client.get(f'{ROOT}/{first["context_id"]}{suffix}')
+            assert response.status_code == 200
+            result = response.json()
+            result.pop("evaluated_at")  # API clock changes independently of the foreign project.
+            assert result["permissions"][0]["status"] == "unavailable"
+            assert result["budget_rate_exceeded"] is False
+            outputs.append(result)
+        if original is None:
+            original = outputs
+        else:
+            assert outputs == original
+        assert snapshot() == before
+
+
+def test_closed_api_history_stops_live_reads_after_transfer(two_intake_targets):
+    from app.db.models import AuthorizationRevision, Scope, Target
+    from app.db.session import SessionLocal
+    from tests.services.test_research_context_isolation import assert_no_live_reads
+    a, b = two_intake_targets
+    first = client.post(ROOT, json=intake(a)).json()
+    url = f'{ROOT}/{first["context_id"]}'
+    corrected = intake(a)
+    corrected["rules"][0]["source"]["version"] = 2
+    second = client.post(url+"/versions", json={"expected_version": 1,
+        "correction_reference": REF, "intake": corrected}).json()
+    before_close = snapshot(legacy=True)
+    closed = client.post(url+"/close", json={"expected_version": 2, "closure_reference": REF})
+    assert closed.status_code == 200
+    assert closed.json()["permissions"][0]["status"] == "unavailable"
+    assert snapshot(legacy=True) == before_close
+    combined = intake(b)
+    combined["targets"].append(intake(a)["targets"][0])
+    assert client.post("/api/research-projects/2/contexts", json=combined).status_code == 201
+    original = None
+    for changed in (False, True):
+        if changed:
+            with SessionLocal() as db:
+                revision = db.get(AuthorizationRevision, a["revision"])
+                revision.lifecycle_state, revision.max_requests_per_second = "revoked", .01
+                db.get(Scope, a["scope"]).allowed_methods = []
+                db.get(Scope, a["scope"]).path_pattern = "/another-project/*"
+                db.get(Target, a["target"]).authorization_revision_id = None
+                db.commit()
+        before = snapshot()
+        statements = []
+        def capture(conn, cursor, statement, parameters, context, executemany):
+            statements.append(statement)
+        event.listen(engine, "before_cursor_execute", capture)
+        try:
+            outputs = []
+            for suffix in ("", "/versions/1", "/versions/2"):
+                response = client.get(url+suffix)
+                assert response.status_code == 200
+                result = response.json()
+                result.pop("evaluated_at")
+                outputs.append(result)
+        finally:
+            event.remove(engine, "before_cursor_execute", capture)
+        assert_no_live_reads(statements)
+        assert snapshot() == before
+        assert [r["intake"] for r in outputs] == [second["intake"], first["intake"], second["intake"]]
+        assert all(r["permissions"][0]["status"] == "unavailable" and not r["budget_rate_exceeded"] for r in outputs)
+        if original is None:
+            original = outputs
+        else:
+            assert outputs == original

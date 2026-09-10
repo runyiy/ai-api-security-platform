@@ -15,9 +15,9 @@
 | 方法及路径（均在 `/api` 下） | 行为 |
 | --- | --- |
 | `POST /research-projects/{project_number}/contexts` | 一次事务创建 context、1–16 个已显式选择的 Target 关联及 version 1；201 |
-| `GET /research-projects/{project_number}/contexts/{context_id}` | 重读最新版本与当前许可元数据，返回缺项；200 |
+| `GET /research-projects/{project_number}/contexts/{context_id}` | 重读最新版本；仅活跃 context/关联可评估当前许可元数据，否则 unavailable；200 |
 | `POST /research-projects/{project_number}/contexts/{context_id}/versions` | `expected_version` + `correction_reference` + 完整 `intake`；追加新版本，保留规则、来源、预算和更正历史 |
-| `GET /research-projects/{project_number}/contexts/{context_id}/versions/{version}` | 精确读取本项目版本，标明 latest/is_current；许可状态仍按现在重读，非历史授权决定 |
+| `GET /research-projects/{project_number}/contexts/{context_id}/versions/{version}` | 精确读取本项目版本，标明 latest/is_current；历史 intake 不变；仅仍有活跃归属时重读许可，非历史授权决定 |
 | `POST /research-projects/{project_number}/contexts/{context_id}/close` | `expected_version` + `closure_reference`；关闭 context 并原子释放全部活跃关联，保留版本和旧归属 |
 
 没有全局 list、删除、重新开启或执行 API。一个 project_number 唯一标识一个本地 context；关闭后要转移 Target，须在另一个显式项目 context 中重新 review/关联。现有 context 的更正不能替换 Target 集合或 association_review。所有精确读取/更正/关闭同时匹配 project_number 和 context_id；不存在与不属于本项目使用同一固定 404，绑定冲突使用固定 409，不返回另一项目 ID/内容。
@@ -42,14 +42,14 @@
 
 | 准备度字段 | 现有含义及限制 |
 | --- | --- |
-| `permission_missing` | 至少一个选择缺 revision/source、revision 不存在、绑定/profile 不匹配、draft/superseded/revoked、未生效/已过期、Target 停用/非 private_local、GET/automation 不允许、Scope 缺失/超限或快照相关元数据变化 |
+| `permission_missing` | 至少一个选择缺 revision/source、已存引用不可用（不存在或绑定/profile 不匹配）、context 已关闭/关联已释放、draft/superseded/revoked、未生效/已过期、Target 停用/非 private_local、GET/automation 不允许、Scope 缺失/超限或快照相关元数据变化 |
 | `data_ineligible` | 固定结构的合成草稿可保存，但 `data_eligibility=unknown` 或 eligibility_reference=null 时不能进入后续准备；真实私有/敏感输入直接拒绝，不保存所谓隔离原文 |
-| `budget_unapproved` | 本 W1 没有运行预算批准权；引用非批准证据。`budget_rate_exceeded` 另显示已知 rate 超 selected revision 上限或该上限无效 |
+| `budget_unapproved` | 本 W1 没有运行预算批准权；引用非批准证据。`budget_rate_exceeded` 仅对归属校验通过的 revision 比较 rate；无可用元数据时不参与比较，false 不表示预算通过 |
 | `facts_missing` | W3 的身份、Resource/slot、独立业务事实及 session 仍未提供；规则缺失也未解决，不制造 allowed baseline |
 | `execution_preparation_allowed` / `execution_authorized` | 始终 false；缺许可明确阻止准备，其他情况也不因元数据齐全而开放未实现的 bridge |
 | `activity_limits` | Target requests=0、provider calls=0、provider cost=0；是此 intake 操作的能力边界，不是把未知未来预算归零 |
 
-[服务](../backend/app/services/research_context.py) 只按每个明确的 Target/revision 组合重读当前数据，绝不 union grants。记录的是受限授权元数据的 digest（版本标识、origin、状态、时间窗、GET/automation/rate/审批要求和 Scope），不保存旧 description/notes、原始许可内容、凭据或响应 body；更正追加新的版本快照。相同 Session 也重新发出列级查询，不拿 ORM 旧值当许可。
+[服务](../backend/app/services/research_context.py) 先确认 context 未关闭且拥有该 Target 的活跃关联，再按明确的 Target/revision/profile 组合读取当前数据，绝不 union grants。非空 revision 必须等于 Target 当前绑定，且属于 Target 的 profile，才能读取其字段、记录 digest 或参与预算比较。创建/更正的外项目与不可用非空引用统一返回 409 intake_context_unavailable，原子回滚；revision=null 且 permission_source=null 的缺许可草稿仍可保存。已有不合关系的历史引用统一显示 unavailable，不根据外项目 revision 的存在、速率或状态区分。记录的是受限授权元数据的 digest（版本标识、origin、状态、时间窗、GET/automation/rate/审批要求和 Scope），不保存旧 description/notes、原始许可内容、凭据或响应 body；更正追加新的版本快照。相同 Session 也重新发出列级查询，不拿 ORM 旧值当许可。
 
 `referenced_current` 仅说明目前选中的 revision/profile/Target 关联、基本时间/GET 状态及元数据 digest 相符。没有具体 action/path、身份、凭据、allowlist/DNS、kill switch 或精确审批判定，未逐条匹配 Scope；不是 authorized/allowed 的另一种拼法。读取是当前元数据观察，不是跨多个查询冻结的授权事务；后续执行仍必须按原规范立即重验一个 immutable revision、Scope、安全及适用 exact-plan approval。valid_until 为半开边界，时间来自服务 UTC clock；测试可注入 aware time，API 不接受 evaluation_time 覆盖。
 
@@ -58,7 +58,8 @@
 新增 [三个模型](../backend/app/db/models/research_context.py)：`research_contexts`、`research_target_associations`、`research_context_versions`。只向这三个表写入；新关联到旧 Target 使用 RESTRICT FK，未修改旧 Target/profile/revision/Scope、Resource、assertion、TestRun、Finding、report 或 M13。
 
 - `uq_research_target_active_context` 对 `released_at IS NULL` 的 Target 建 partial unique index，是跨连接并发的最终归属约束。context 内 Target 也唯一；没有仅靠“先查不存在”的竞态。
-- 更正/关闭持有该 context row lock；expected_version 不符、已关闭或版本耗尽时失败。成功更正追加 version，旧 intake/provenance 不覆盖。Target 归属更改必须走关闭和显式重新关联。
+- 最新/历史读取及更正/关闭持有该 context row lock；实时评估另持有活跃 association 与 Target 的共享 row lock，直至 caller transaction 结束，避免归属校验后被关闭/转移或换 Target 绑定。service 调用方须及时结束事务；API 由 request-owned Session 清理释放锁。这些锁不是执行审批，也未把 revision/Scope 观察变成冻结的授权决定。
+- 更正/关闭在 expected_version 不符、已关闭或版本耗尽时失败。成功更正追加 version，旧 intake/provenance 不覆盖。Target 归属更改必须走关闭和显式重新关联。
 - service 要求 clean Session，在 savepoint 内完成全部写入，失败后即便调用者捕获错误再 commit 也不留下前缀状态；service 不 commit 外层事务。API 在响应校验/编码成功后提交外层事务。异常、解析错误和数据库约束失败只返回固定码，不回显参数、规则文本、secret、原始路径或 SQL。
 - 本 W1 没有敏感存储/备份/hold/purge/export 保证，因此只允许固定形态的 synthetic 元数据。历史合成记录保留以供更正/审阅；关闭不是删除，也不是实现 observation 的 30/30/90/7 天生命周期。适用的敏感资料必须保持拒收，不能用已采纳 DATA 取代未实现的运维控制；W2 首次敏感持久化前仍须满足 DATA 条件。
 
@@ -166,7 +167,7 @@
 同一次演示逐表比较 legacy 快照一致；结束后 fixture 清理自身合成记录。独立 API 回归还覆盖跨项目 GET/correction、关闭、迟发序列化失败回滚、无凭据 SQL、network/provider/executor sentinel 及拒绝输入的全表无变更。
 
 
-## 5. 验证与剩余边界
+## 5. 初始提交验证与剩余边界
 
 按 [隔离 runbook](m14-offline-matrix-acceptance.md#reproducible-isolated-local-run)，使用 Ubuntu WSL、项目 `.venv` Python 3.12.3、PostgreSQL 16.15。应用 import/migration 前创建独占 native instance：database/user `ra02_w1_test`、`127.0.0.1:55452`，owned data directory `/tmp/ra02-w1-test.pHYnlr/data`；独立 psql 核验以上字段、版本、当前用户目录属主、初始 public 表数 0、无其他 client backend。DATABASE_URL 与临时 key 显式配置，未依赖 `.env` 选库。开发 requirements 已满足，无 dependency/config/.env 变更。日志/DSN/key 只在仓库外。
 
@@ -208,7 +209,7 @@ python -m pytest tests/migrations \
 
 ## 6. 完整 base-to-HEAD 文件清单
 
-共 49 个文件；既有测试除精确 head、后续表清单和旧 retention 迁移切片定位外没有断言变更。
+截至本次隔离修复共 50 个文件；任务 base 中已有测试除精确 head、后续表清单和旧 retention 迁移切片定位外没有断言变更。
 
 ```text
 backend/alembic/versions/c7e9a1b3d5f7_add_research_intake_context.py
@@ -257,7 +258,37 @@ backend/tests/services/test_bola_binding_matrix_preview.py
 backend/tests/services/test_bola_binding_selection.py
 backend/tests/services/test_bola_matrix_preview.py
 backend/tests/services/test_research_context.py
+backend/tests/services/test_research_context_isolation.py
 docs/research-assistant-adr-decisions.md
 docs/research-assistant-roadmap.md
 docs/research-intake-context.md
 ```
+
+## 7. a592f7a 后的项目隔离修复
+
+本节对应对 reviewed HEAD `a592f7ac79f79e61c3bda1368115626318f3d138` 的两个 blocker 修复；任务 base 仍为 `dcdb50fd36c098173c2580389577bb59558c0982`。第 4–5 节保留初始提交的示例和验证历史，本节记录修复证据；不改变 DATA 批准、预算、W2/W3 或其他 ADR 的范围。
+
+- 外项目 revision：原实现先读字段、后返回 mismatched，仍让外项目 rate 影响预算输出。现在先用 Target 当前绑定和 profile 限定 revision 查询；外项目和不可用非空引用的写入统一失败，读取旧记录统一 unavailable。对该不可用选择不哈希 revision 或查询 Scope，不产生部分 context/关联/version。人工可提交明确 null 的缺许可草稿，不能隐式选择另一个 grant。
+- 关闭/转移：旧 context 保留自己的 intake、来源、版本和更正历史，但不再查询实时 Target/revision/Scope；每项 permission status=unavailable，permission_missing 与 budget_unapproved 保持，两个 execution 字段仍 false。没有合资格 revision 参与比较时 budget_rate_exceeded=false，表示未进行该比较，**不代表预算满足或安全**。活跃关联缺失/已释放但 context 未关闭的防御性路径也如此。
+- 并发：latest/history 读先锁 context，再校验并共享锁定 association，最后共享锁定 Target、验证其 revision 关系。close/correction 使用同一 context 锁；创建先通过活跃归属唯一索引，再进入元数据读取。close/transfer 不能在归属检查与元数据使用之间完成；如 close 先持锁，读等待提交后只返回 unavailable。读事务不写 legacy 行，也不授予执行权限。
+
+[服务隔离测试](../backend/tests/services/test_research_context_isolation.py) 使用两个不同 Target/profile/revision 的合成项目，覆盖外项目 rate 高/低与 revision 删除、ID 相同但 profile 不符、旧 latest/history、关联单独释放、无 legacy SELECT、拒绝写入后 caller commit 仍全表不变。它显式构造初始提交曾接受的 unsafe intake 作为测试历史，不迁移或改写任何真实历史。
+
+[API 回归](../backend/tests/api/test_research_contexts.py) 覆盖相同泄漏面、固定错误码、缺许可草稿、完整旧响应除服务评估时间外不随外项目变化；现有 network/credential/executor sentinel 和 legacy 快照断言保留。并发测试用 `pg_blocking_pids` 观察真实锁等待，分别让读取或关闭先获得锁，并覆盖 latest 和 history；读取先行时精确暂停在关联检查后、Target SELECT 前，不靠时间睡眠猜测顺序。
+
+本次于 2026-09-10 UTC 在 Ubuntu WSL、项目 `.venv` Python 3.12.3 / PostgreSQL 16.15 串行验证。应用 import 前新建独占实例 `ra02_w1_fix_test`（database/user）、`127.0.0.1:55453`、当前用户拥有的 `/tmp/ra02-w1-fix-test.HN01b1/data`；独立 psql 核验 database/user/address/port/version/data_directory、初始 public 表数 0、无其他 client backend。显式环境选择该库及临时 key，不依赖 `.env`；开发 requirements 已满足。验证后仅停止此实例并确认 postmaster.pid 移除；日志/DSN/key 留在仓库外。
+
+| 本次命令 | 实际结果 |
+| --- | --- |
+| `python -m alembic current` / `python -m alembic heads` / `python -m alembic upgrade head` | fresh 初始无 revision，唯一 head c7e9a1b3d5f7，upgrade 成功；没有新迁移 |
+| `python -m pytest tests/services/test_research_context.py tests/services/test_research_context_isolation.py tests/api/test_research_contexts.py tests/migrations/test_research_intake_migration.py` | **106 passed, 1 warning**；包括四个真实锁等待顺序/latest-history 组合 |
+| `python -m evaluation.ra01 verify` / `python -m pytest tests/evaluation` | VERIFIED，freeze digest 仍为 `692c33a321cc59e9799377ed512402ac33826dec06707d494b3d5853006a231a`；**79 passed** |
+| 第 5 节完整 migration/compatibility 命令 | **237 passed, 7 warnings**；保留 legacy pair/fingerprint/review/report、空/非空新域 rollback 证据 |
+| `python -m pytest` | **2195 passed, 55 warnings** |
+| `python -m pip check` | No broken requirements found |
+| 最终 `python -m alembic current` / `python -m alembic heads` | 均 c7e9a1b3d5f7 (head) |
+| 完整 diff、修复范围、链接/anchors、文件清单、`git diff --check` | 通过；相对 reviewed HEAD 仅六个修复相关文件，任务 base-to-HEAD 共 50 文件 |
+
+本次没有测试失败、跳过或环境阻塞；首轮 focused 通过后，将并发暂停点加强到关联检查与元数据读取之间，再运行最终 focused/full，并非重试未变代码至绿。warnings 为既有 TestClient deprecation/collection 提示。
+
+本次修复文件仅 service、其 service/API/fixture 回归、独立隔离测试及本文。没有新 migration/schema/route、W2 内容、运行预算批准或 reviewer-PASS；本地提交后停止，等待 Review Project，不 push。
