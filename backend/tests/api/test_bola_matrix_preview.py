@@ -92,7 +92,7 @@ def error(response, status, code):
 def test_only_preview_operation_and_unchanged_head():
     paths = app.openapi()["paths"]
     assert {p: set(v) for p, v in paths.items() if "matrix" in p} == {URL: {"post"}}
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["d8f0b2c4e6a8"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["e9a1c3d5f7b8"]
     assert "/api/test-cases/generate/bola" in paths
 
 

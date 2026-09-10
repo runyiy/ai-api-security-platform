@@ -1,3 +1,4 @@
+from app.db.models.research_subject import ResearchSubjectVersion
 from app.db.models.research_observation import ObservationControl, ObservationPreparation, ObservationRecord, ObservationPayload, ObservationEvent
 from app.db.models.research_context import ResearchContext, ResearchContextVersion, ResearchTargetAssociation
 from app.db.models.authorization_profile import AuthorizationProfile
