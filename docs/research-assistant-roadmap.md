@@ -1,6 +1,8 @@
 # Research Assistant v1 — 低人工参与、低 Token 的授权安全研究助手
 
-> **RA-05/W1 当前文档准备记录（2026-09-11）：** 本地核验clean main/HEAD及remote main均为 `d058cb82215c61b4c7811784abb24dc0ae069f80`，从精确base新建 `codex/ra-05-w1-provider-proposal`。既有W1内的 [AI proposal/provider契约 v0.1.0](research-ai-provider-contract.md) 为 **DOCUMENTATION_ONLY / PENDING_INDEPENDENT_REVIEW**，推荐全部 **PROPOSED / PENDING_APPROVAL**；adapter未实施，W1/RA-05未完成，W2未开始。Tech Lead协议/transport决定与operator模型/数据/账号/预算决定分别待批；文档准备不授权实际调用或支出。仅本地commit后STOP，等待Review Project，不push/PR/merge或开始另一包。
+> **RA-05/W1 current implementation:** Exact starting main/remote main `386b08b2cca8f49a8ebeff14cc64e4a30d8b2037`; branch `codex/ra-05-w1-provider-adapter`. [P1–P6/E1–E6 design adoption](research-ai-provider-contract.md#w1-design-adoption-and-implementation-record) authorizes this existing W1 fake-only implementation. [Adapter and validation evidence](research-ai-provider-implementation.md): **IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**. Live calls and operational approvals remain disabled/pending; W1 acceptance and RA-05 completion are not declared; W2/W3 are not started. PR #149 integrated reviewed timing fix `48c7f48e6110c30e3ff6825607032629f88fca7f`; main CI `34582003149` succeeded at this exact base. Earlier package records below remain historical. Local commit then STOP for Review Project; no push/PR/merge or new package.
+
+> **RA-05/W1 历史文档准备记录（2026-09-11）：** 本地核验clean main/HEAD及remote main均为 `d058cb82215c61b4c7811784abb24dc0ae069f80`，从精确base新建 `codex/ra-05-w1-provider-proposal`。既有W1内的 [AI proposal/provider契约 v0.1.0](research-ai-provider-contract.md) 为 **DOCUMENTATION_ONLY / PENDING_INDEPENDENT_REVIEW**，推荐全部 **PROPOSED / PENDING_APPROVAL**；adapter未实施，W1/RA-05未完成，W2未开始。Tech Lead协议/transport决定与operator模型/数据/账号/预算决定分别待批；文档准备不授权实际调用或支出。仅本地commit后STOP，等待Review Project，不push/PR/merge或开始另一包。
 
 > **RA-04/W3 集成记录：** 用户交接确认 reviewed `167853e2a7386088b3d915e12e2c2e383fa3effe` 经PR #147集成；独立本地、PR CI `34569913522`、main CI `34570935882` 各通过完整3266 tests。本包核验上述main tree等于reviewed feature，未重跑suite或审计CI日志。此记录建立有界合成本地演示验收，不是production/public/provider readiness，也不代签额外stage裁决。下方W1/W2/W3 pending及禁止后续工作的文字保留为各包历史，不撤销本次W1文档准备授权。
 
@@ -138,7 +140,7 @@ AI 接收 typed data 并返回建议，不拥有 executor、shell、任意 fetch
 | RA-02 | 安全观察导入及身份/资源/预算上下文 | RA-01；数据 lifecycle 决策 | 为检索/规划提供安全输入 | W1–W3 已独立审阅/push（W3 exact SHA 见当前记录）；不代签 stage COMPLETE |
 | RA-03 | 带版本和反例的已审规则 | RA-02；知识使用资格/隔离审查 | 可重复的受限检索 | W1/K1–K4已采纳；W2经PR #141、W3经PR #142集成（交接2790 passed）；不在此代签stage COMPLETE |
 | RA-04 | 最小本地候选→计划→验证→证据演示 | RA-03；bridge/intent/evidence ADR | 可靠验证窄请求形态 | I1–I7已采纳；W1/W2及CI分片经PR #144–146集成；W3 reviewed feature经PR #147集成，交接local/PR/main各3266 passed；仅有界合成本地演示验收 |
-| RA-05 | 按需、预算内的真实 AI 建议 | RA-04；AI proposal 和 provider egress ADR | fake 回归及单独获准的真实验证 | W1 DOCUMENTATION_ONLY / PENDING_INDEPENDENT_REVIEW；设计推荐待批，adapter未实施，W1/RA-05未完成；W2未开始 |
+| RA-05 | 按需、预算内的真实 AI 建议 | RA-04；AI proposal 和 provider egress ADR | fake 回归及单独获准的真实验证 | W1 fake-only IMPLEMENTED / PENDING_INDEPENDENT_REVIEW；P1–P6/E1–E6 design adopted，operational approvals/live acceptance pending；W1/RA-05未宣告完成，W2/W3未开始 |
 | RA-06 | CLI 启动/暂停/取消/恢复持久任务 | RA-05；编排/审批/恢复 ADR | 日常使用无需 SQL/Python | NOT_STARTED / NOT_AUTHORIZED |
 | RA-07 | 验收包、报告、反馈及实测本地发布 | RA-06；冻结评测及费用批准 | 本地 go/no-go | NOT_STARTED / NOT_AUTHORIZED |
 | RA-08 | 公网控制差距审查及独立自有公网演练 | RA-07 go；公网 ADR 和专项范围 | 分别裁决控制就绪/演练 | NOT_STARTED / NOT_AUTHORIZED |
@@ -214,7 +216,9 @@ AI 接收 typed data 并返回建议，不拥有 executor、shell、任意 fetch
 
 ### RA-05 — 有硬预算约束的真实 AI 辅助
 
-- **当前W1文档范围：** [proposal/provider契约](research-ai-provider-contract.md)补齐PROPOSAL/EGRESS的协议、官方provider比较、数据/凭据边界及用量建议，DOCUMENTATION_ONLY / PENDING_INDEPENDENT_REVIEW；推荐待Tech Lead/operator分别决定。先准备文档不等于以下adapter实施或真实使用条件已满足；W1/RA-05未完成，W2未开始。
+- **当前W1实现范围：** [独立proposal/Responses adapter及fake-only验证](research-ai-provider-implementation.md)遵守已采纳设计，保留legacy advice与Target边界。只有有界协议、传输/认证边界和usage投影及未来W2接口；没有retrieval/ledger/reconciliation/shared coordination或cache。真实调用关闭，IMPLEMENTED / PENDING_INDEPENDENT_REVIEW。
+
+- **W1文档准备历史范围：** [proposal/provider契约](research-ai-provider-contract.md)补齐PROPOSAL/EGRESS的协议、官方provider比较、数据/凭据边界及用量建议，DOCUMENTATION_ONLY / PENDING_INDEPENDENT_REVIEW；推荐待Tech Lead/operator分别决定。先准备文档不等于以下adapter实施或真实使用条件已满足；W1/RA-05未完成，W2未开始。
 
 - **用户操作与进入条件：** RA-04 PASS、独立实施授权，以及 AI proposal/provider-egress ADR 获批。操作者可显式启用一个 provider，处理合资格且有上限的建议任务，查看带引用的建议、拒绝判断和实际用量。真实调用验证还需要凭据、数据资格及获批费用上限。
 - **包含与排除：** 一个真实 provider adapter、一项模型选择策略，在该任务中依据届时官方文档选择；不静默更换 provider 或 fallback。先用已审查规则，再做受限检索，仅在解释或提议仍无法确定时升级至模型。类型化输出包含证据引用、不确定性和拒绝判断。AI 不能执行、批准、确认 Finding、访问凭据、获取任意 URL、使用 shell 工具或修改策略。
