@@ -1,6 +1,8 @@
 # Research Assistant v1 — 低人工参与、低 Token 的授权安全研究助手
 
-> **RA-05/W1 current implementation:** Exact starting main/remote main `386b08b2cca8f49a8ebeff14cc64e4a30d8b2037`; branch `codex/ra-05-w1-provider-adapter`. [P1–P6/E1–E6 design adoption](research-ai-provider-contract.md#w1-design-adoption-and-implementation-record) authorizes this existing W1 fake-only implementation. [Adapter and validation evidence](research-ai-provider-implementation.md): **IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**. Live calls and operational approvals remain disabled/pending; W1 acceptance and RA-05 completion are not declared; W2/W3 are not started. PR #149 integrated reviewed timing fix `48c7f48e6110c30e3ff6825607032629f88fca7f`; main CI `34582003149` succeeded at this exact base. Earlier package records below remain historical. Local commit then STOP for Review Project; no push/PR/merge or new package.
+> **RA-05/W2 current documentation preparation (2026-09-11):** Verified clean local/remote main `658464c5ae45f058cbb3c6a0bdd8ad3f371ad114`; new branch `codex/ra-05-w2-budget-proposal`. The user handoff records W1 independent review at `0e3b94a909ee01eba41c79a264f056665c0222ce`, PR #150 integration and local/PR/exact-main gates passing **3798 tests**; this task verified matching Git trees, without rerunning those gates. [W2 proposal v0.1.0](research-ai-budget-contract.md) is **DOCUMENTATION_ONLY / PROPOSED / PENDING_APPROVAL**. W1 design adoption remains effective; W2 B1–B8/TASK choices require independent review and User adoption before implementation. Real-provider acceptance and account/key/data/retention/budget approvals remain pending. W2 implementation, W3/cache and RA-06 have not started; RA-05 is not complete. Earlier package records preserve their historical status.
+
+> **RA-05/W1 historical implementation record:** Exact starting main/remote main `386b08b2cca8f49a8ebeff14cc64e4a30d8b2037`; branch `codex/ra-05-w1-provider-adapter`. [P1–P6/E1–E6 design adoption](research-ai-provider-contract.md#w1-design-adoption-and-implementation-record) authorizes this existing W1 fake-only implementation. [Adapter and validation evidence](research-ai-provider-implementation.md): **IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**. Live calls and operational approvals remain disabled/pending; W1 acceptance and RA-05 completion are not declared; W2/W3 are not started. PR #149 integrated reviewed timing fix `48c7f48e6110c30e3ff6825607032629f88fca7f`; main CI `34582003149` succeeded at this exact base. Earlier package records below remain historical. Local commit then STOP for Review Project; no push/PR/merge or new package.
 
 > **RA-05/W1 历史文档准备记录（2026-09-11）：** 本地核验clean main/HEAD及remote main均为 `d058cb82215c61b4c7811784abb24dc0ae069f80`，从精确base新建 `codex/ra-05-w1-provider-proposal`。既有W1内的 [AI proposal/provider契约 v0.1.0](research-ai-provider-contract.md) 为 **DOCUMENTATION_ONLY / PENDING_INDEPENDENT_REVIEW**，推荐全部 **PROPOSED / PENDING_APPROVAL**；adapter未实施，W1/RA-05未完成，W2未开始。Tech Lead协议/transport决定与operator模型/数据/账号/预算决定分别待批；文档准备不授权实际调用或支出。仅本地commit后STOP，等待Review Project，不push/PR/merge或开始另一包。
 
@@ -140,7 +142,7 @@ AI 接收 typed data 并返回建议，不拥有 executor、shell、任意 fetch
 | RA-02 | 安全观察导入及身份/资源/预算上下文 | RA-01；数据 lifecycle 决策 | 为检索/规划提供安全输入 | W1–W3 已独立审阅/push（W3 exact SHA 见当前记录）；不代签 stage COMPLETE |
 | RA-03 | 带版本和反例的已审规则 | RA-02；知识使用资格/隔离审查 | 可重复的受限检索 | W1/K1–K4已采纳；W2经PR #141、W3经PR #142集成（交接2790 passed）；不在此代签stage COMPLETE |
 | RA-04 | 最小本地候选→计划→验证→证据演示 | RA-03；bridge/intent/evidence ADR | 可靠验证窄请求形态 | I1–I7已采纳；W1/W2及CI分片经PR #144–146集成；W3 reviewed feature经PR #147集成，交接local/PR/main各3266 passed；仅有界合成本地演示验收 |
-| RA-05 | 按需、预算内的真实 AI 建议 | RA-04；AI proposal 和 provider egress ADR | fake 回归及单独获准的真实验证 | W1 fake-only IMPLEMENTED / PENDING_INDEPENDENT_REVIEW；P1–P6/E1–E6 design adopted，operational approvals/live acceptance pending；W1/RA-05未宣告完成，W2/W3未开始 |
+| RA-05 | 按需、预算内的真实 AI 建议 | RA-04；AI proposal 和 provider egress ADR | fake 回归及单独获准的真实验证 | W1 fake-only independently reviewed / PR #150 integrated；W2 documentation-only proposal pending approval；operational approvals/live acceptance pending，RA-05未完成；W2实施/W3未开始 |
 | RA-06 | CLI 启动/暂停/取消/恢复持久任务 | RA-05；编排/审批/恢复 ADR | 日常使用无需 SQL/Python | NOT_STARTED / NOT_AUTHORIZED |
 | RA-07 | 验收包、报告、反馈及实测本地发布 | RA-06；冻结评测及费用批准 | 本地 go/no-go | NOT_STARTED / NOT_AUTHORIZED |
 | RA-08 | 公网控制差距审查及独立自有公网演练 | RA-07 go；公网 ADR 和专项范围 | 分别裁决控制就绪/演练 | NOT_STARTED / NOT_AUTHORIZED |
@@ -216,7 +218,9 @@ AI 接收 typed data 并返回建议，不拥有 executor、shell、任意 fetch
 
 ### RA-05 — 有硬预算约束的真实 AI 辅助
 
-- **当前W1实现范围：** [独立proposal/Responses adapter及fake-only验证](research-ai-provider-implementation.md)遵守已采纳设计，保留legacy advice与Target边界。只有有界协议、传输/认证边界和usage投影及未来W2接口；没有retrieval/ledger/reconciliation/shared coordination或cache。真实调用关闭，IMPLEMENTED / PENDING_INDEPENDENT_REVIEW。
+- **当前W2文档准备范围：** [预算/可信发送观察提案 v0.1.0](research-ai-budget-contract.md)明确确定性准备、有界检索、receipt/原子预留/核销、取消与恢复及独立证据缺口。仅文档，**DOCUMENTATION_ONLY / PROPOSED / PENDING_APPROVAL**；B1–B8和适用TASK选择须独立review及User采纳后才实施。W1 fake-only已review并经PR #150集成，真实provider验收和operational批准仍待定。
+
+- **W1实现历史范围：** [独立proposal/Responses adapter及fake-only验证](research-ai-provider-implementation.md)遵守已采纳设计，保留legacy advice与Target边界。只有有界协议、传输/认证边界和usage投影及未来W2接口；没有retrieval/ledger/reconciliation/shared coordination或cache。真实调用关闭，IMPLEMENTED / PENDING_INDEPENDENT_REVIEW。
 
 - **W1文档准备历史范围：** [proposal/provider契约](research-ai-provider-contract.md)补齐PROPOSAL/EGRESS的协议、官方provider比较、数据/凭据边界及用量建议，DOCUMENTATION_ONLY / PENDING_INDEPENDENT_REVIEW；推荐待Tech Lead/operator分别决定。先准备文档不等于以下adapter实施或真实使用条件已满足；W1/RA-05未完成，W2未开始。
 
