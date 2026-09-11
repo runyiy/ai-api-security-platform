@@ -182,3 +182,7 @@ git diff --check
 开发中首次source试跑为4 failed/20 passed：测试对hold期间拒绝的异常类型误写为IntentError；既有subject gate实际抛SubjectError。改为明确期待SubjectError，保留恢复后必须抛 `intent_dependency_changed` 的断言。永久回归另覆盖hold expiry的±1µs、是否有中间读取、production旧预算重用、新manifest独立决定、controlled future-W2旧intent/新计划、rule-only source、同timestamp重复hold、audit retirement、无关source隔离、普通/human read、计数上限、audit/receipt rollback、真实锁等待及API拒绝原子性。没有新runtime test seam或真实W2证据；未发送新purpose/Target/health请求。
 
 最终复核为同一 `ra04_lifecycle / ra04_lifecycle / 127.0.0.1:55479 / /tmp/ra04-w1-lifecycle.tsXYaX/data / UTF8 / PostgreSQL16.15`，无其他client，operator encryption key仍缺省。已执行 `/usr/lib/postgresql/16/bin/pg_ctl -D /tmp/ra04-w1-lifecycle.tsXYaX/data -m fast -w stop` 并核验 `postmaster.pid` 不存在；只停止本次自有instance。30个新增永久测试不构成W2证据或执行授权。本地fix commit后STOP，等待Review Project；不push、PR、merge或开始W2。
+
+## 8. W2 continuation
+
+The current handoff records W1 independent review and PR #144 integration at main `c4d6750eb42af5556036419980a0eb312f892d78`. [W2 verification](research-response-verification.md) now supplies production interpretation and a dedicated exact dispatcher. The original W1 refusal, validation results and §7 lifecycle fix above remain historical. Hold-generation invalidation and all legacy consumer refusals remain enforced. W1 receipts now report `requires_exact_dispatch`, with `execution_authorized=false`; the former controlled test seam cannot qualify the production dispatcher. W2 independent review and W3 demonstration remain outstanding.

@@ -1,4 +1,4 @@
-"""No new-purpose action may fall back to a legacy consumer before RA-04/W2."""
+"""No new-purpose action may fall back to a legacy consumer outside the dedicated W2 dispatcher."""
 from sqlalchemy import select, text
 from app.db.models.test_case import TestCase
 from app.db.models.test_run import TestRun

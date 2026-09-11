@@ -11,6 +11,10 @@
 - **适用边界：** 仅批准既有W1有序实现；未授权Target/health请求、operator credential访问、私有数据或费用。其他ADR不受影响；I6规定的W2解释/可信健康证明依赖未实现时，新purpose执行继续关闭，不能以fixture、NOT_RUN或operator claim替代。
 - **实现状态：** [bounded bridge实施记录](research-intent-bridge.md)，IMPLEMENTED / PENDING_INDEPENDENT_REVIEW；W2/W3和RA-04 COMPLETE不在本次声明范围。
 
+## INTENT W2 continuation record
+
+The current W2 handoff records reviewed W1 integration in PR #144 and authorizes the existing next package from main `c4d6750eb42af5556036419980a0eb312f892d78`. Adopted I1–I7 continue to constrain the [W2 verifier and dedicated dispatcher](research-response-verification.md). Historical W1-only/pending text remains historical; no approval signature or time is invented. The implementation replaces W1's unavailable production interpreter only with exact platform provenance, independent expectations and bounded current qualification. Legacy execution/analysis remain closed to new semantics. Actual Target requests, operator credentials/private data, provider costs, public execution and all other pending ADRs receive no new authorization. Independent W2 review and W3 remain outstanding.
+
 ## DATA 后续决定记录（RA-02/W1）
 
 - **被采纳的确切材料：** 本文 **v0.1.0**，reviewed commit [`dcdb50fd36c098173c2580389577bb59558c0982`](https://github.com/runyiy/ai-api-security-platform/blob/dcdb50fd36c098173c2580389577bb59558c0982/docs/research-assistant-adr-decisions.md)，ADR-RA-DATA 的 **D1–D4 推荐方案**。
@@ -243,6 +247,8 @@ M12 当前 review 会追加 human_verified 行、保留原 candidate；`observed
 **RA-04/W1 后续材料：** [详细协议 v0.1.0](research-intent-contract.md)提供本基点实际调用证据（§1）、immutable core/摘要/plan link（§2–3）、health与精确时间窗（§4）、等待/变化失效规则（§5）、TestCase/M13/rollback选择（§6）及独立合成验收映射（§7）。下列原始 C/P 段落保留为 RA-01/W3 历史，不作为当前代码未经核验的证明。
 
 **当前未决：** I1–I7 尚无批准。推荐数值为 **PROPOSED / PENDING_APPROVAL：health120秒、baseline完成至probe开始及最终pair消费30秒、intent300秒**，均以半开边界及更早依赖截止收窄。建议两单GET plan同revision、分别适用审批；凭据版本/身份/映射/事实/Scope/来源变化重建整对。当前缺少可信health receipt与运行预算核验，不能把RA-02的operator claim或unverified budget升格为执行资格。受控新TestCase类型、所有旧读者分派和保留数据的回退要求须Tech Lead明确决定；health解释器属RA-04/W2，提前依赖须按I6确认次序。本文仅提供review材料，不实施bridge、验证器或迁移；不改变其他ADR状态。
+
+**W2 continuation:** the adopted I1–I7 constraints are implemented as recorded in [W2 verification](research-response-verification.md); the original C/P paragraphs below remain historical. No W2 reviewer PASS or stage completion is asserted.
 
 **具体问题：** 如何把有来源的 access facts 和确认的 Resource-to-slot 关联变成可审批的单动作计划，并用合法 baseline 验证 probe，同时保留旧 cross-owner 证据与报告？
 

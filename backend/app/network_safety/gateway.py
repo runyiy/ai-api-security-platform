@@ -52,6 +52,52 @@ class NetworkGatewayResult:
     selected_ip: str
     peer_ip: str
     content_encoding: str | None = None
+    content_type: str | None = None
+
+
+class _BoundaryStream(httpcore.NetworkStream):
+    """Linearize a typed request after connect/TLS, at its first HTTP write.
+
+    No database lock spans connection setup or response reading. A single GET
+    header write is the only sending critical section; no redirect or retry.
+    """
+    def __init__(self, stream, boundary, state=None):
+        self.stream, self.boundary = stream, boundary
+        self.state = state if state is not None else {'sent': False, 'deadline': None}
+
+    def _timeout(self, timeout):
+        if self.state['deadline'] is None:
+            return timeout
+        remaining = self.state['deadline'] - time.monotonic()
+        if remaining <= 0:
+            raise NetworkGatewayError(code='response_deadline', reason='Response deadline reached.')
+        return min(timeout, remaining) if timeout is not None else remaining
+
+    def write(self, buffer, timeout=None):
+        if buffer and not self.state['sent']:
+            with self.boundary.sending() as remaining:
+                if remaining <= 0:
+                    raise NetworkGatewayError(code='request_deadline', reason='Request deadline reached.')
+                self.state['sent'] = True
+                self.state['deadline'] = time.monotonic() + min(5.0, remaining)
+                self.stream.write(buffer, timeout=self._timeout(timeout))
+        else:
+            self.stream.write(buffer, timeout=self._timeout(timeout))
+
+    def read(self, max_bytes, timeout=None):
+        data = self.stream.read(max_bytes, timeout=self._timeout(timeout))
+        self._timeout(None)  # A completed OS read cannot extend the absolute bound.
+        return data
+
+    def start_tls(self, ssl_context, server_hostname=None, timeout=None):
+        stream = self.stream.start_tls(ssl_context, server_hostname=server_hostname, timeout=timeout)
+        return _BoundaryStream(stream, self.boundary, self.state)
+
+    def close(self):
+        self.stream.close()
+
+    def get_extra_info(self, info):
+        return self.stream.get_extra_info(info)
 
 
 class TCPConnector(Protocol):
@@ -107,6 +153,7 @@ class _BoundNetworkBackend(httpcore.NetworkBackend):
         mode: str,
         controller: NetworkExecutionControllerProtocol,
         target_id: int,
+        request_boundary=None,
     ) -> None:
         self.connector = connector
         self.logical_hostname = logical_hostname
@@ -114,6 +161,7 @@ class _BoundNetworkBackend(httpcore.NetworkBackend):
         self.mode = mode
         self.controller = controller
         self.target_id = target_id
+        self.request_boundary = request_boundary
         self.peer_ip: IPAddress | None = None
 
     def connect_tcp(
@@ -156,7 +204,7 @@ class _BoundNetworkBackend(httpcore.NetworkBackend):
             stream.close()
             raise
         self.peer_ip = peer_ip
-        return stream
+        return _BoundaryStream(stream, self.request_boundary) if self.request_boundary is not None else stream
 
     def connect_unix_socket(self, *args, **kwargs) -> httpcore.NetworkStream:
         raise NetworkGatewayError(
@@ -189,6 +237,7 @@ class NetworkGateway:
         headers: dict[str, str],
         max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+        request_boundary=None,
     ) -> NetworkGatewayResult:
         if max_response_bytes <= 0 or timeout_seconds <= 0:
             raise NetworkGatewayError(
@@ -205,6 +254,7 @@ class NetworkGateway:
                     headers=headers,
                     max_response_bytes=max_response_bytes,
                     timeout_seconds=timeout_seconds,
+                    request_boundary=request_boundary,
                 )
         except NetworkExecutionDenied as exc:
             raise NetworkGatewayError(code=exc.code, reason=exc.reason) from exc
@@ -219,6 +269,7 @@ class NetworkGateway:
         headers: dict[str, str],
         max_response_bytes: int,
         timeout_seconds: float,
+        request_boundary=None,
     ) -> NetworkGatewayResult:
         decision = evaluate_destination_policy(
             mode=network_mode, url=url, resolver=self.resolver
@@ -247,6 +298,7 @@ class NetworkGateway:
             mode=network_mode,
             controller=self.controller,
             target_id=target_id,
+            request_boundary=request_boundary,
         )
         request_headers = _build_headers(
             headers=headers,
@@ -277,6 +329,9 @@ class NetworkGateway:
                     body = _read_bounded(response.iter_stream(), max_response_bytes)
                     status_code = response.status
                     content_encoding = _content_encoding(response.headers)
+                    content_type = _header_value(response.headers, b'content-type')
+                    if request_boundary is not None:
+                        request_boundary.completed(status_code, body, content_type, content_encoding)
         except NetworkGatewayError:
             raise
         except (httpcore.TimeoutException, socket.timeout) as exc:
@@ -304,14 +359,19 @@ class NetworkGateway:
             selected_ip=selected_ip.compressed,
             peer_ip=backend.peer_ip.compressed,
             content_encoding=content_encoding,
+            content_type=content_type,
         )
 
 
 def _content_encoding(headers: list[tuple[bytes, bytes]]) -> str | None:
+    return _header_value(headers, b'content-encoding')
+
+
+def _header_value(headers, field):
     values = [
         value.decode("latin-1")
         for name, value in headers
-        if name.lower() == b"content-encoding"
+        if name.lower() == field
     ]
     return ",".join(values) if values else None
 

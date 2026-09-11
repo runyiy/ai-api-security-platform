@@ -17,6 +17,7 @@ KNOWLEDGE_TABLES = {"research_knowledge_versions", "research_knowledge_events", 
 RULE_VALIDATION_TABLES = {"research_rule_validations", "research_rule_feedback", "research_rule_feedback_reviews"}
 INTENT_TABLES = {'research_intent_mappings','research_intent_manifests','research_intent_versions',
                  'research_intent_budget_decisions','research_intent_plan_members','research_intent_audit'}
+VERIFICATION_TABLES = {"research_verification_"+name for name in ("contracts","health_selections","attempts","witnesses","pairs","audit","clock_faults")}
 REF = {"kind": "synthetic_fixture", "fixture_id": 1, "version": 1}
 
 
@@ -37,7 +38,7 @@ def intake(ids):
 def snapshot(*, legacy=False):
     with engine.connect() as db:
         return {t.name: list(db.execute(select(t).order_by(*t.primary_key.columns)).mappings())
-                for t in Base.metadata.sorted_tables if not legacy or t.name not in (NEW_TABLES | OBSERVATION_TABLES | KNOWLEDGE_TABLES | RULE_VALIDATION_TABLES | INTENT_TABLES | {"research_subject_versions"})}
+                for t in Base.metadata.sorted_tables if not legacy or t.name not in (NEW_TABLES | OBSERVATION_TABLES | KNOWLEDGE_TABLES | RULE_VALIDATION_TABLES | INTENT_TABLES | VERIFICATION_TABLES | {"research_subject_versions"})}
 
 
 @pytest.fixture

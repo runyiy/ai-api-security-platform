@@ -74,6 +74,12 @@ def record_plan_decision(
     plan = validate_persisted_plan_integrity(db, execution_plan_id)
     from app.services.research_intent_gate import reject_plan
     reject_plan(db, plan, PlanIntegrityError)
+    return _append_exact_decision(db, plan, decision)
+
+
+def _append_exact_decision(db, plan, decision):
+    if decision not in {"approved", "revoked"}:
+        raise PlanIntegrityError("Approval decision is invalid.")
     record = ExecutionPlanApprovalRecord(
         execution_plan_id=plan.id,
         digest_version=plan.digest_version,
@@ -93,7 +99,12 @@ def is_plan_approved(db: Session, execution_plan_id: int) -> bool:
     from app.services.research_intent_gate import new_plan
     if new_plan(db, plan):
         return False
-    latest = db.scalar(
+    latest = _latest_exact_decision(db, plan)
+    return latest is not None and latest.decision == "approved"
+
+
+def _latest_exact_decision(db, plan):
+    return db.scalar(
         select(ExecutionPlanApprovalRecord)
         .where(
             ExecutionPlanApprovalRecord.execution_plan_id == plan.id,
@@ -103,7 +114,6 @@ def is_plan_approved(db: Session, execution_plan_id: int) -> bool:
         .order_by(ExecutionPlanApprovalRecord.id.desc())
         .limit(1)
     )
-    return latest is not None and latest.decision == "approved"
 
 
 def _load_plan_snapshot(

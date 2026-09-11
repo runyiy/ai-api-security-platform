@@ -24,7 +24,7 @@ TABLE='research_observation_records'
 
 def test_fresh_schema_and_empty_downgrade(monkeypatch):
     config=Config('alembic.ini');scripts=ScriptDirectory.from_config(config)
-    assert scripts.get_heads()==[REVISION] and scripts.get_revision(REVISION).down_revision==PARENT
+    assert scripts.get_heads()==['6a94cbd3f825'] and scripts.get_revision(REVISION).down_revision==PARENT
     name='intent_lifecycle_'+uuid4().hex
     with engine.begin() as db:db.execute(text(f'CREATE SCHEMA "{name}"'))
     url=make_url(settings.database_url).update_query_dict({'options':f'-csearch_path={name}'})
@@ -56,7 +56,7 @@ def test_populated_upgrade_preserves_history_and_defaults_existing_records(subje
             # Inspect the previous representation without importing a second model.
             rows=list(db.execute(text('SELECT * FROM research_observation_records ORDER BY id')).mappings())
         assert rows==[{k:v for k,v in r.items() if k!='hold_generation'} for r in before[TABLE]]
-        command.upgrade(config,REVISION)
+        command.upgrade(config,'head')
         assert snapshot()==before
         with SessionLocal() as db:
             row=db.get(ObservationRecord,subject_pair[0]['observation'])
@@ -78,4 +78,4 @@ def test_committed_hold_provenance_cannot_be_downgraded(subject_pair):
     with pytest.raises(RuntimeError,match='observation_lifecycle_populated_downgrade_blocked'):
         command.downgrade(Config('alembic.ini'),PARENT)
     assert snapshot()==before
-    with engine.connect() as db:assert MigrationContext.configure(db).get_current_revision()==REVISION
+    with engine.connect() as db:assert MigrationContext.configure(db).get_current_revision()=='6a94cbd3f825'

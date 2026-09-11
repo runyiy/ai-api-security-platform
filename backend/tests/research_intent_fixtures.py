@@ -29,7 +29,7 @@ def conversion(g,**changes):
     value.update(changes);return value
 
 
-def future_proof(db,context,snapshot,purpose,clock):
+def future_proof(db,context,snapshot,purpose,clock,*,manifest=None):
     # No runtime producer/registration. Explicit future-qualified test envelope;
     # never evidence obtained from a deployment or a caller-provided passed flag.
     health=[]

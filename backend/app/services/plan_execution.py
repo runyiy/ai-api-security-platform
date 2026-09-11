@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from app.auth.context import (
     AuthenticationContextError,
@@ -97,6 +97,19 @@ class PlanExecutionService:
         )
 
     def execute(self, *, execution_plan_id: int) -> TestRun:
+        return self._execute(execution_plan_id=execution_plan_id)
+
+    def _execute_research(self, research) -> TestRun:
+        from app.services.research_verification_dispatch import Dispatch
+        if type(research) is not Dispatch or research.bind is not self.db.get_bind():
+            raise PlanExecutionError("Typed research dispatch is unavailable.")
+        return self._execute(execution_plan_id=research.plan_id, research=research)
+
+    def _execute(self, *, execution_plan_id: int, research=None) -> TestRun:
+        if research is not None:
+            from app.services.research_verification_dispatch import Dispatch
+            if type(research) is not Dispatch or research.bind is not self.db.get_bind() or research.plan_id != execution_plan_id:
+                raise PlanExecutionError("Typed research dispatch is unavailable.")
         if self.db.get(ExecutionPlan, execution_plan_id) is None:
             raise PlanExecutionNotFoundError("ExecutionPlan not found.")
         try:
@@ -105,7 +118,10 @@ class PlanExecutionService:
             raise PlanExecutionError("ExecutionPlan integrity validation failed.") from exc
 
         from app.services.research_intent_gate import reject_plan
-        reject_plan(self.db, plan, PlanExecutionError)
+        if research is None:
+            reject_plan(self.db, plan, PlanExecutionError)
+        else:
+            research.validate(self.db)
 
         actions = list(
             self.db.scalars(
@@ -155,7 +171,10 @@ class PlanExecutionService:
 
         target = self.db.get(Target, plan.target_id)
         revision = self.db.get(AuthorizationRevision, plan.authorization_revision_id)
-        actor = self.db.get(TestIdentity, plan.actor_identity_id)
+        actor = (self.db.scalar(select(TestIdentity).options(load_only(
+            TestIdentity.id, TestIdentity.name, TestIdentity.auth_type, TestIdentity.is_active,
+            TestIdentity.target_id, raiseload=True)).where(TestIdentity.id == plan.actor_identity_id))
+            if research is not None else self.db.get(TestIdentity, plan.actor_identity_id))
         test_case = self.db.get(TestCase, action.test_case_id)
         resource = self.db.get(Resource, action.resource_id)
         endpoint = (
@@ -209,7 +228,12 @@ class PlanExecutionService:
 
         approval_satisfied = False
         if revision.require_human_execution_approval:
-            approval_satisfied = is_plan_approved(self.db, plan.id)
+            if research is None:
+                approval_satisfied = is_plan_approved(self.db, plan.id)
+            else:
+                from app.services.execution_plan_approval import _latest_exact_decision
+                decision = _latest_exact_decision(self.db, plan)
+                approval_satisfied = decision is not None and decision.decision == "approved"
             if not approval_satisfied:
                 self._raise_preflight_blocked(
                     target_id=target.id,
@@ -226,10 +250,14 @@ class PlanExecutionService:
             if actor.auth_type == "bearer":
                 if plan.credential_binding_id is None:
                     raise BearerCredentialError("Bearer credential is unavailable.")
-                bearer_token = BearerCredentialService(db=self.db).resolve_binding(
-                    identity=actor,
-                    credential_binding_id=plan.credential_binding_id,
-                )
+                credentials = BearerCredentialService(db=self.db)
+                if research is None:
+                    bearer_token = credentials.resolve_binding(
+                        identity=actor, credential_binding_id=plan.credential_binding_id)
+                else:
+                    bearer_token = credentials.resolve_exact(identity=actor,
+                        credential_binding_id=plan.credential_binding_id,
+                        credential_version_id=research.credential_version_id)
             elif plan.credential_binding_id is not None:
                 raise AuthenticationContextError(
                     "Anonymous identity cannot use a credential binding."
@@ -483,11 +511,13 @@ class PlanExecutionService:
                         code="authorization_revision_changed",
                         reason="Target authorization revision changed before execution.",
                     )
-                if approval_satisfied and not is_plan_approved(fresh_db, plan_id):
+                if approval_satisfied and research is None and not is_plan_approved(fresh_db, plan_id):
                     raise ExecutionBlockedError(
                         code="execution_plan_approval_changed",
                         reason="ExecutionPlan approval changed before execution.",
                     )
+                if research is not None:
+                    fresh_target, fresh_revision, fresh_scopes = research.validate(fresh_db)
                 fresh_db.expunge_all()
                 return fresh_target, fresh_revision, fresh_scopes
 
@@ -519,6 +549,12 @@ class PlanExecutionService:
                     reason="ExecutionPlan progress coordination failed.",
                 ) from exc
 
+        if research is not None:
+            research.before_network = before_network
+            research.claim_service = self.claim_service
+            # Renewed handles have the same fencing generation. The late gate
+            # checks ownership again while holding the short sending locks.
+            research.claim_handle = claim_handle
         try:
             result = self.executor.execute(
                 target=target,
@@ -530,6 +566,8 @@ class PlanExecutionService:
                 refresh_authorization=refresh_authorization,
                 policy_decision_observer=observer,
                 before_network=before_network,
+                **({"request_boundary": research, "requested_rate_limit": research.rate}
+                   if research is not None else {}),
             )
         except ExecutionBlockedError as exc:
             test_case.status = "blocked"
@@ -556,6 +594,7 @@ class PlanExecutionService:
                 action_id=action_id,
                 outcome="failed",
                 error_message=str(exc),
+                **({"research": research} if research is not None else {}),
             )
         else:
             return self._finish(
@@ -568,8 +607,9 @@ class PlanExecutionService:
                 action_id=action_id,
                 outcome="succeeded",
                 response_status=result.status_code,
-                response_body=decode_response_body(result.body),
+                response_body=None if research is not None else decode_response_body(result.body),
                 duration_ms=result.duration_ms,
+                **({"research": research} if research is not None else {}),
             )
         finally:
             self._release_claim(
@@ -754,6 +794,7 @@ class PlanExecutionService:
         response_body: str | None = None,
         duration_ms: int | None = None,
         error_message: str | None = None,
+        research=None,
     ) -> TestRun:
         self._assert_result_writer(
             claim_handle=claim_handle,
@@ -796,6 +837,8 @@ class PlanExecutionService:
                 ),
             )
             test_case.status = "completed" if outcome == "succeeded" else "failed"
+            if research is not None:
+                research.persist_result(self.db, run)
             self.db.commit()
             return run
         except IntegrityError as exc:

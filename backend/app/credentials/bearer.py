@@ -191,6 +191,39 @@ class BearerCredentialService:
                 "Bearer credential is unavailable."
             ) from None
 
+    def resolve_exact(
+        self, *, identity: TestIdentity, credential_binding_id: int,
+        credential_version_id: int,
+    ) -> SecretStr:
+        """Resolve only the pinned current version; never substitute a newer token.
+
+        The typed dispatcher holds identity/binding locks through qualification.
+        This method independently checks ownership/activity and version metadata
+        before loading exactly one encrypted envelope.
+        """
+        if (not identity.is_active or identity.auth_type != 'bearer'
+                or type(credential_version_id) is not int or credential_version_id <= 0):
+            raise BearerCredentialError('Bearer credential is unavailable.')
+        binding = self.db.get(CredentialBinding, credential_binding_id, populate_existing=True)
+        if (binding is None or binding.test_identity_id != identity.id
+                or binding.auth_type != 'bearer' or binding.source_type != 'stored_secret'
+                or not binding.is_active):
+            raise BearerCredentialError('Bearer credential is unavailable.')
+        latest = self.db.scalar(select(CredentialSecretVersion.id).where(
+            CredentialSecretVersion.credential_binding_id == credential_binding_id
+        ).order_by(CredentialSecretVersion.id.desc()).limit(1))
+        if latest != credential_version_id:
+            raise BearerCredentialError('Pinned bearer credential version changed.')
+        version = self.db.scalar(select(CredentialSecretVersion).where(
+            CredentialSecretVersion.id == credential_version_id,
+            CredentialSecretVersion.credential_binding_id == credential_binding_id))
+        if version is None:
+            raise BearerCredentialError('Bearer credential is unavailable.')
+        try:
+            return self._get_provider().load_secret(version)
+        except StoredSecretError:
+            raise BearerCredentialError('Bearer credential is unavailable.') from None
+
     def _matching_bindings(
         self,
         *,

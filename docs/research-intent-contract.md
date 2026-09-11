@@ -12,6 +12,12 @@
 
 采纳允许既有W1有序实现，不批准实际Target/health请求、凭据访问、私有材料或支出，也不批准其余待决ADR。W1基于main `59390a480db133db9411908af05df37dd625fc91` 实现映射确认、有限manifest与独立预算决定、不可变core/两单GET计划/link及旧入口拒绝，详见 [W1实施与实际验证](research-intent-bridge.md)。**IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**；生产W2解释/health证明入口仍明确拒绝，新purpose的审批/执行保持关闭。测试中的future-qualified envelope只是独立受控替身，不是运行时证据。§1及§8原代码/验证记录锁定原提案基点，不能倒读为本次实现事实；pair30秒实际运行/最终响应解释留在W2，未伪造执行时间。
 
+## W2 implementation continuation record
+
+The current RA-04/W2 user handoff records W1 independent review and integration through PR #144, starting main `c4d6750eb42af5556036419980a0eb312f892d78`. Standing ordered implementation authorization and the previously adopted I1–I7 remain binding; no new approval identity, signature or timestamp is inferred. The historical proposal/W1 refusal text above is preserved as history.
+
+[W2 implementation and validation](research-response-verification.md) implements the production interpretation/health provenance, finite-budget exact dispatcher, 120/300/30-second final boundaries and immutable pair/uncertainty evidence. The dedicated path requires genuine platform evidence and all current authorization/approval/credential/M8 checks; legacy consumers remain closed to research semantics. Private material, public execution, providers, rule publication and W3 demonstration remain excluded. W2 is pending independent Review Project review; this continuation does not authorize deployment requests or declare RA-04 complete.
+
 ## 1. 当前代码证据 C 与缺口
 
 以下定位以本基点实际文件和调用方为准；不是沿用旧 ADR 的历史 C 标签。链接定位文件，反引号标识可直接检索。

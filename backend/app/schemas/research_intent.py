@@ -171,7 +171,7 @@ class Receipt(StrictRecord):
     eligibility_until: str
     audit_id: ID
     execution_authorized: Literal[False]
-    execution_status: Literal['w2_dependency_closed']
+    execution_status: Literal['w2_dependency_closed', 'requires_exact_dispatch']
 
 
 def output(value):

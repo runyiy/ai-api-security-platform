@@ -18,7 +18,7 @@ from tests.api.test_finding_evidence_fingerprints import old_evidence
 from tests.api.test_finding_structured_evidence import analyze
 from tests.finding_evidence_fixtures import evidence_pair  # noqa: F401
 from tests.research_observation_fixtures import TABLES, observation_context, intake_target, observation, call, NOW  # noqa: F401
-from tests.research_intake_fixtures import snapshot, KNOWLEDGE_TABLES, RULE_VALIDATION_TABLES, INTENT_TABLES
+from tests.research_intake_fixtures import VERIFICATION_TABLES, snapshot, KNOWLEDGE_TABLES, RULE_VALIDATION_TABLES, INTENT_TABLES
 from tests.services.test_research_context import create
 from tests.services.test_research_observation import accepted
 
@@ -28,13 +28,13 @@ REVISION, PARENT = "d8f0b2c4e6a8", "c7e9a1b3d5f7"
 def existing_snapshot():
     with engine.connect() as db:
         return {t.name: list(db.execute(select(t).order_by(*t.primary_key.columns)).mappings())
-                for t in Base.metadata.sorted_tables if t.name not in INTENT_TABLES | TABLES | RULE_VALIDATION_TABLES | KNOWLEDGE_TABLES | {"research_subject_versions"}}
+                for t in Base.metadata.sorted_tables if t.name not in VERIFICATION_TABLES | INTENT_TABLES | TABLES | RULE_VALIDATION_TABLES | KNOWLEDGE_TABLES | {"research_subject_versions"}}
 
 
 def test_fresh_upgrade_exact_schema_and_empty_downgrade(monkeypatch):
     config = Config("alembic.ini")
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["5f83bac2e714"] and scripts.get_revision(REVISION).down_revision == PARENT
+    assert scripts.get_heads() == ["6a94cbd3f825"] and scripts.get_revision(REVISION).down_revision == PARENT
     schema = "observation_migration_"+uuid4().hex
     with engine.begin() as db:
         db.execute(text(f'CREATE SCHEMA "{schema}"'))
@@ -113,7 +113,7 @@ def test_populated_rollback_protected_without_loss(observation_context):
         command.downgrade(Config("alembic.ini"), PARENT)
     assert snapshot() == before
     with engine.connect() as db:
-        assert MigrationContext.configure(db).get_current_revision() == "5f83bac2e714"
+        assert MigrationContext.configure(db).get_current_revision() == "6a94cbd3f825"
 
 
 def test_composite_fk_immutable_provenance_and_expiry_constraints(observation_context):

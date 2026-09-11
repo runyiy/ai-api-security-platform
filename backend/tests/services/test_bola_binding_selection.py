@@ -85,7 +85,7 @@ def no_session_work(guard, db):
 
 
 def test_signature_head_and_isolated_dependencies(selection):
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["5f83bac2e714"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["6a94cbd3f825"]
     signature = inspect.signature(selection.select_bola_binding)
     assert list(signature.parameters) == ["db", "endpoint_id", "binding_id"]
     assert all(p.default is inspect.Parameter.empty for p in signature.parameters.values())

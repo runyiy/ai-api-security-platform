@@ -1,5 +1,7 @@
 # Research Assistant v1 — 低人工参与、低 Token 的授权安全研究助手
 
+> **RA-04/W2 current implementation record:** verified clean main `c4d6750eb42af5556036419980a0eb312f892d78`; branch `codex/ra-04-w2-response-verification`. The current handoff records W1 independent review and PR #144 integration. Under adopted I1–I7, [W2 verification and exact dispatch](research-response-verification.md) implements bounded session/object/denial interpretation, genuine platform health provenance, exact pairing and versioned uncertainty. **IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**; RA-04 remains IN_PROGRESS, W3 is not started. Local synthetic tests confer no deployment/credential/data/spending approval. Issue #132 remains closed; no new milestone, push or PR. The W1 and earlier records below preserve their historical scope/status.
+
 > **RA-04/W1 当前实现记录：** 本地核验clean main及origin/main均为 `59390a480db133db9411908af05df37dd625fc91`（PR #143集成提案；main push CI通过来自用户交接，未在本包重新查询远端CI），创建 `codex/ra-04-w1-intent-bridge`。操作者/Review Project Tech Lead采纳INTENT v0.1.0、reviewed `6723cb5bfa62a10453f18f8158c25000a1997711` 的I1–I7；采纳记录见[协议](research-intent-contract.md#i1i7-后续采纳与-w1-实施记录)。[W1转换实施与验证](research-intent-bridge.md)为 **IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**，RA-04 IN_PROGRESS。新purpose的生产转换缺W2解释/健康证明时拒绝，审批/执行保持关闭；未产生部署Target/health流量、未访问operator credentials或私有材料。W2解释器/实际配对时间、W3演示未实施；不代签独立review PASS、W1验收完成或RA-04 COMPLETE。本地commit后STOP，不push/PR/merge或开始W2，等待Review Project。Issue #132保持关闭，不新增milestone。
 
 > **RA-04/W1 历史文档准备记录：** 本地核验clean `main` 为 `bedc55395d2e5abf3479026fd201430b537baff2`，从此创建 `codex/ra-04-w1-intent-contract`。用户交接确认 RA-03/W3 reviewed `91db91f59761b5683309062d9b7ac51536bfe75f` 已经 PR #142 集成、main验证 **2790 passed**；本包静态核对本地提交历史，不重跑该suite或代签RA-03 COMPLETE。操作者明确选择先准备 [INTENT协议与兼容性建议 v0.1.0](research-intent-contract.md)，属于既有RA-04/W1，**DOCUMENTATION_ONLY / PENDING_INDEPENDENT_REVIEW**；I1–I7全部 **PROPOSED / PENDING_APPROVAL**，bridge未实施，W1/RA-04未完成。仅改三份文档，验证与限制见提案§8；无数据库/网络/凭据操作。Planning Issue #132保持关闭，不创建新milestone；本地commit后STOP，等待Review Project与必要operator/Tech Lead决定，不push/PR/merge或开始另一包。以下包内禁止开始后续工作的记录保留为当时历史，不撤销当前文档准备授权。
@@ -131,7 +133,7 @@ AI 接收 typed data 并返回建议，不拥有 executor、shell、任意 fetch
 | RA-01 | 可执行的产品/评测契约及 ADR 规格 | 计划审阅后单独批准首个任务 | 冻结 oracle、阈值及必要 ADR | W1–W3 材料已审阅；DATA D1–D4 已采纳（本次交接），其余 ADR 按依赖门槛待批 |
 | RA-02 | 安全观察导入及身份/资源/预算上下文 | RA-01；数据 lifecycle 决策 | 为检索/规划提供安全输入 | W1–W3 已独立审阅/push（W3 exact SHA 见当前记录）；不代签 stage COMPLETE |
 | RA-03 | 带版本和反例的已审规则 | RA-02；知识使用资格/隔离审查 | 可重复的受限检索 | W1/K1–K4已采纳；W2经PR #141、W3经PR #142集成（交接2790 passed）；不在此代签stage COMPLETE |
-| RA-04 | 最小本地候选→计划→验证→证据演示 | RA-03；bridge/intent/evidence ADR | 可靠验证窄请求形态 | IN_PROGRESS；I1–I7已采纳，W1 bridge实施待独立review，新purpose执行关闭；W2/W3未开始 |
+| RA-04 | 最小本地候选→计划→验证→证据演示 | RA-03；bridge/intent/evidence ADR | 可靠验证窄请求形态 | IN_PROGRESS；I1–I7已采纳，W1经review/PR #144集成；W2实施待独立review，专用dispatcher严格核验生产证明；W3未开始 |
 | RA-05 | 按需、预算内的真实 AI 建议 | RA-04；AI proposal 和 provider egress ADR | fake 回归及单独获准的真实验证 | NOT_STARTED / NOT_AUTHORIZED |
 | RA-06 | CLI 启动/暂停/取消/恢复持久任务 | RA-05；编排/审批/恢复 ADR | 日常使用无需 SQL/Python | NOT_STARTED / NOT_AUTHORIZED |
 | RA-07 | 验收包、报告、反馈及实测本地发布 | RA-06；冻结评测及费用批准 | 本地 go/no-go | NOT_STARTED / NOT_AUTHORIZED |
@@ -179,7 +181,9 @@ AI 接收 typed data 并返回建议，不拥有 executor、shell、任意 fetch
 
 ### RA-04 — 独立本地计划转换和可靠权限验证
 
-- **当前W1实现范围：** I1–I7已按本次交接采纳，新增bounded mapping/manifest/budget/intent API和增量持久化；复用M12/M14及legacy single-GET persistence，使用受控TestCase类型、精确digest/link、全入口fail-closed guards。采用120/30/300秒约束，其中W1核验健康envelope/intent及更早依赖截止，30秒实际pair时间依赖W2。独立future-qualified测试可证明转换结构，生产不能提交这种替身；缺W2证据明确拒绝、不得执行。实现与验证只见[W1记录](research-intent-bridge.md)，不是端到端验收或进入W2授权。
+- **当前W2范围：** [W2实施与验证](research-response-verification.md)提供固定解释器、可信health/actual credential/send-complete证据、独立exact-plan dispatch、最终120/300/30秒与source generation核验、不可变pair和不确定性；保留M12/M14/M13及legacy拒绝。专用本地路径满足全部资格才可发送，公网/私有材料/AI/W3不在范围；等待独立review，不宣告RA-04完成。
+
+- **W1实施历史范围：** I1–I7已按本次交接采纳，新增bounded mapping/manifest/budget/intent API和增量持久化；复用M12/M14及legacy single-GET persistence，使用受控TestCase类型、精确digest/link、全入口fail-closed guards。采用120/30/300秒约束，其中W1核验健康envelope/intent及更早依赖截止，30秒实际pair时间依赖W2。独立future-qualified测试可证明转换结构，生产不能提交这种替身；缺W2证据明确拒绝、不得执行。实现与验证只见[W1记录](research-intent-bridge.md)，不是端到端验收或进入W2授权。
 
 - **W1文档准备历史范围：** 操作者选择先补齐ADR-RA-INTENT §6的reviewable协议建议；[提案v0.1.0](research-intent-contract.md)覆盖immutable digest/link、health120s/pair30s/intent300s（全为PROPOSED / PENDING_APPROVAL）、变更失效、legacy兼容/回退与验收映射。此次只准备三份文档，不是新工作包；不开放转换/执行。I1–I7由Tech Lead/操作者按检查点决定，特别是health/W2解释器和可信有限预算依赖、TestCase类型/读者分派选择；其余有序包定义不变。
 
