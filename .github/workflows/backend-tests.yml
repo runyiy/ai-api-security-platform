@@ -12,7 +12,9 @@ permissions:
   contents: read
 
 jobs:
-  pytest:
+  collection:
+    outputs:
+      full_sha256: ${{ steps.collection.outputs.full_sha256 }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -21,19 +23,19 @@ jobs:
         working-directory: backend
 
     env:
-      DATABASE_URL: postgresql+psycopg://security_app:security_app@localhost:5432/security_platform
+      DATABASE_URL: postgresql+psycopg://ci_collection:ci_collection@localhost:5432/ci_collection
 
     services:
       postgres:
         image: postgres:16
         env:
-          POSTGRES_DB: security_platform
-          POSTGRES_USER: security_app
-          POSTGRES_PASSWORD: security_app
+          POSTGRES_DB: ci_collection
+          POSTGRES_USER: ci_collection
+          POSTGRES_PASSWORD: ci_collection
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U security_app -d security_platform"
+          --health-cmd "pg_isready -U ci_collection -d ci_collection"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 5
@@ -57,5 +59,126 @@ jobs:
       - name: Apply database migrations
         run: alembic upgrade head
 
-      - name: Run backend test suite
-        run: pytest
+      - name: Verify complete disjoint collections
+        id: collection
+        run: python -m ci_shards check --output collection.json
+
+  w2:
+    needs: collection
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: backend
+
+    env:
+      DATABASE_URL: postgresql+psycopg://ci_w2:ci_w2@localhost:5432/ci_w2
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: ci_w2
+          POSTGRES_USER: ci_w2
+          POSTGRES_PASSWORD: ci_w2
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci_w2 -d ci_w2"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      - name: Install backend dependencies
+        run: python -m pip install --requirement requirements-dev.txt
+
+      - name: Apply database migrations
+        run: alembic upgrade head
+
+      - name: Run serial w2 partition
+        env:
+          EXPECTED_COLLECTION_SHA256: ${{ needs.collection.outputs.full_sha256 }}
+        run: python -m ci_shards run w2 --expected-sha256 "$EXPECTED_COLLECTION_SHA256"
+
+  remaining:
+    needs: collection
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: backend
+
+    env:
+      DATABASE_URL: postgresql+psycopg://ci_remaining:ci_remaining@localhost:5432/ci_remaining
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: ci_remaining
+          POSTGRES_USER: ci_remaining
+          POSTGRES_PASSWORD: ci_remaining
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci_remaining -d ci_remaining"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
+
+      - name: Install backend dependencies
+        run: python -m pip install --requirement requirements-dev.txt
+
+      - name: Apply database migrations
+        run: alembic upgrade head
+
+      - name: Run serial remaining partition
+        env:
+          EXPECTED_COLLECTION_SHA256: ${{ needs.collection.outputs.full_sha256 }}
+        run: python -m ci_shards run remaining --expected-sha256 "$EXPECTED_COLLECTION_SHA256"
+
+  pytest:
+    name: pytest
+    if: ${{ always() }}
+    needs: [collection, w2, remaining]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Require complete successful validation
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python backend/ci_shards.py gate
