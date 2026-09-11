@@ -1,6 +1,6 @@
 # RA-05/W2 — concrete preparation and coordination contract
 
-**v0.1.0 · DOCUMENTATION_ONLY / PENDING_INDEPENDENT_REVIEW · implementation not started**
+**v0.1.1 · DOCUMENTATION_ONLY / PENDING_INDEPENDENT_REVIEW · implementation not started**
 
 Base: `e953ee08cb32e0ba9de0f3d196e7b5e82b9fe727`; branch: `codex/ra-05-w2-implementation-contract`. Clean HEAD/local main, actual remote main, origin and branch absence were verified before branching. The user handoff records PR #151 integration of reviewed `dce6d4d4bc49a5284b427d4e428dd901be6c50c7`, with PR/exact-main CI each passing 3798 tests on their first attempts. Those runs were not rerun or independently audited for this document.
 
@@ -113,8 +113,15 @@ Notation: `Id` = 1–64 ASCII `[A-Za-z0-9_-]`; `Label` = 1–96 ASCII `[A-Za-z0-
 | `AuthorityRead` | `run:RunContext, key:ReservationKey, stage:Stage, expected_w1_digest:Hash, expected_config_revision:Id`; composite; authority stages are all W1 eligibility stages in §4 plus `complete`; preparation uses its separate record/port |
 | `AuthorityView` | `key:ReservationKey, owner_generation:Gen, snapshot_ref:Id, snapshot_digest:Hash, valid_from:Time, expires_at:Time, observed_cancel_generation:Gen`; composite; ephemeral read-only handle to exact W1 `AuthorizationSnapshot`, no success Boolean substituting for its validation |
 | `Admission` | `key:ReservationKey, admission_id:Id, owner_generation:Gen, admitted_at:Time, expires_at:Time`; composite; one current account/deployment slot, one-second or stricter start spacing |
-| `SendPermit` | `key:ReservationKey, permit_id:Id, admission_id:Id, owner_generation:Gen, guard_epoch:Id, body_digest:Hash, marker_event_id:Id, observer_epoch:Id, expires_at:Time`; composite; one use, transient, no bearer secret or raw HTTP digest |
-| `Observation` | `key_digest:Hash, call_ref:q_[0-9a-f]{32}, event_id:Id, observer_epoch:Id, sequence:positive N, owner_generation:Gen, kind:ObservationKind, permit_id:Opt[Id], body_digest:Hash, observed_at:Time, terminal:Terminal, usage:UsageView, evidence_digest:Hash`; ≤4096 bytes. No provider request ID in this fake-only version; future live correlation needs a versioned extension |
+| `AcceptanceTicket` | `ticket_id:Id, key_digest:Hash, deployment_ref:Id, authority_epoch:Id, acceptance_generation:Gen, owner_generation:Gen, body_digest:Hash, expires_at:Time`; issued before final authority qualification; one use to issue one permit, never retagged after invalidation |
+| `InvalidationContext` | `deployment_ref:Id, writer_id:Id, process_epoch:Id, deadline_at:Time, mono_deadline_ns:N, cancellation_id:Id`; trusted internal operation context, ≤30s; no invented task/call scope for existing lifecycle writers |
+| `InvalidationRequest` | `operation_id:Id, operation_digest:Hash, deployment_ref:Id, writer_id:Id, action:'INVALIDATE_DEPLOYMENT', reason:'LIFECYCLE'/'CONFIGURATION'/'CANCELLATION'/'RECOVERY', deadline_at:Time`; ≤4096 bytes; operation digest binds the exact planned mutation and dependency references, no raw content; scope is always the entire deployment |
+| `InvalidationAck` | `operation_id:Id, operation_digest:Hash, deployment_ref:Id, authority_epoch:Id, acceptance_generation:Gen, barrier_sequence:positive N, state:'CLOSED', disposition:'PENDING'/'COMMITTED'/'ROLLED_BACK'/'UNKNOWN', event_digest:Hash`; historical durable barrier receipt, not proof of zero usage or of a committed database mutation |
+| `InvalidationResolution` | `operation_id:Id, operation_digest:Hash, deployment_ref:Id, barrier_digest:Hash, database_outcome:'COMMITTED'/'ROLLED_BACK'/'UNKNOWN', transaction_evidence_ref:Opt[Id]`; terminal outcomes require independently verified transaction evidence, UNKNOWN never permits reopening |
+| `ReopenRequest` | `deployment_ref:Id, recovery_decision_id:Id, expected_authority_epoch:Id, expected_acceptance_generation:Gen, pending_set_digest:Hash, transaction_evidence_digest:Hash, qualification_digest:Hash, stream_closure_evidence_digest:Hash`; ≤4096 bytes; exact trusted evidence references, not caller assertions or permission to replay |
+| `GateAck` | `deployment_ref:Id, authority_epoch:Id, acceptance_generation:Gen, barrier_sequence:positive N, state:'OPEN', event_digest:Hash`; acknowledges only deployment gate state, never source/task permission or old permit validity |
+| `SendPermit` | `key:ReservationKey, permit_id:Id, admission_id:Id, owner_generation:Gen, guard_epoch:Id, authority_epoch:Id, acceptance_generation:Gen, ticket_id:Id, body_digest:Hash, marker_event_id:Id, observer_epoch:Id, expires_at:Time`; composite; one use, transient, no bearer secret or raw HTTP digest |
+| `Observation` | `key_digest:Hash, call_ref:q_[0-9a-f]{32}, event_id:Id, observer_epoch:Id, authority_epoch:Id, acceptance_generation:Gen, sequence:positive N, owner_generation:Gen, kind:ObservationKind, permit_id:Opt[Id], body_digest:Hash, observed_at:Time, terminal:Terminal, usage:UsageView, evidence_digest:Hash`; ≤4096 bytes. No provider request ID in this fake-only version; future live correlation needs a versioned extension |
 | `UsageView` | `state:'known'/'unknown'/'invalid', input_tokens:Opt[N], output_tokens:Opt[N], cached_input_tokens:Opt[N], cache_write_tokens:Opt[N], reasoning_tokens:Opt[N], total_tokens:Opt[N], mapping:Label`; W1 semantics, known requires I/O/C/W/total; R may be null. Unknown/invalid have all null counts; independently known partial lower bounds belong in accounting events, not invented final usage |
 | `Settlement` | `key_digest:Hash, settlement_id:Id, final_event_id:Id, revision:Gen, state:'ZERO'/'KNOWN'/'UNKNOWN'/'CONFLICT', settled_tokens:N, settled_microusd:N, held_tokens:N, held_microusd:N, refund_tokens:N, refund_microusd:N, overrun_tokens:N, overrun_microusd:N, accounting_digest:Hash`; cumulative totals plus last settlement delta's refund/overrun; no clamping known actuals |
 | `Completion` | `key_digest:Hash, completion_id:Id, outcome_code:Opt[W1Code], delivery:'not_sent'/'unknown'/'responded', usage:UsageView, settlement_ref:Opt[Id], display_state:'SUPPRESSED'/'ELIGIBLE_NOW', evaluated_at:Time, expires_at:Time`; completion records **persist only SUPPRESSED**, display eligibility is ephemeral and requalified. Failure completion may have expiry≤evaluated_at; it is evidence, never authority |
@@ -133,12 +140,17 @@ All signatures below are **new internal contracts**, not existing callable APIs.
 | `read_preparation_authority_v1(req: PreparationAuthorityRead) -> PreparationAuthorityView` | Fresh scope/lifecycle/policy and exact synthetic registry lookup before any reservation; validate completed-operation time/cancellation and every returned binding. Missing dependencies remain enumerated local missing inputs |
 | `read_authority_v1(req: AuthorityRead) -> AuthorityView` | Bounded fresh read; controller checks cancellation/deadline before and **after** completion and validates the returned full W1 snapshot at fresh wall time. Exact sources, decisions, ownership, configuration and key reference required |
 | `admit_v1(run: RunContext, reservation: Reservation) -> Admission` | Conditional on owner generation; enforce task/case/account/deployment caps and rate, persist slot, include waiting time; no G/long transaction during wait |
-| `send_guard_v1(run: RunContext, admission: Admission) -> ContextManager[SendPermit]` | Acquire G, requalify, durably mark SEND_INTENT, obtain observer acknowledgement, yield exact permit; `finally` closes/revokes permit and releases G, not budget liability |
-| `consume_write_v1(run: RunContext, permit: SendPermit, body: bytes) -> WriteAck` | Trusted fake byte-writing boundary, not model/application callback; body ≤32768 bytes, independently hash-checked against permit. Atomically consumes permit and records endpoint acceptance under §6. `WriteAck={format, permit_id:Id, event_id:Id, sequence:positive N, accepted_at:Time}` |
+| `begin_acceptance_v1(run: RunContext, admission: Admission, body_digest: Hash) -> AcceptanceTicket` | Under N1 mutex A, require OPEN and journal coverage; pin current acceptance generation **before** final database/source lookup. A ticket alone cannot write |
+| `invalidate_v1(ctx: InvalidationContext, request: InvalidationRequest) -> InvalidationAck` | Under the same A as ticket/permit issuance and endpoint acceptance: close deployment, advance generation, durably journal pending operation/barrier, revoke all older outstanding tickets/permits, then acknowledge. Missing/ambiguous acknowledgement never authorizes the database mutation |
+| `lookup_invalidation_v1(ctx: InvalidationContext, operation_id: Id, operation_digest: Hash) -> InvalidationAck` | Exact idempotent recovery lookup, no fresh invalidation ID or replay of the mutation. Unknown/absent evidence is not an acknowledgement |
+| `resolve_invalidation_v1(ctx: InvalidationContext, resolution: InvalidationResolution) -> InvalidationAck` | Journal independently verified transaction disposition; reply remains CLOSED. This port cannot reopen acceptance or restore a permit |
+| `reopen_v1(ctx: InvalidationContext, request: ReopenRequest) -> GateAck` | Explicit recovery only under G: bounded, independently verified transaction/stream/current-qualification evidence; under A compare expected closed epoch/generation and resolved pending set before durable OPEN. Lost ack prohibits caller continuation; this never restores old tickets/permits |
+| `send_guard_v1(run: RunContext, admission: Admission) -> ContextManager[SendPermit]` | Acquire G, obtain AcceptanceTicket, requalify, durably mark SEND_INTENT, then obtain a permit only if the ticket's authority epoch/generation still equals OPEN authority; yield that exact permit; `finally` closes/revokes permit and releases G, not budget liability |
+| `consume_write_v1(run: RunContext, permit: SendPermit, body: bytes) -> WriteAck` | Trusted fake byte-writing boundary, not model/application callback; body ≤32768 bytes, independently hash-checked against permit. Under A, require OPEN and exact current authority epoch/generation as well as owner/body/deadline; atomically consume permit and record endpoint acceptance under §6. `WriteAck={format, permit_id:Id, event_id:Id, sequence:positive N, accepted_at:Time}` |
 | `observe_v1(read: ReadContext, event: Observation) -> ObservationAck` | Independent observer producer appends immutable evidence; result/accounting callback cannot manufacture it. Ack exact `{format, event_id:Id, sequence:positive N, event_digest:Hash}`; lost ack gives UNKNOWN, not resend |
 | `reconcile_v1(ctx: RunContext or RecoveryContext, key: ReservationKey, observation_ids: Id[1..8]) -> Settlement` | Fetch trusted observations independently; validate exact bindings and final counts, atomic dual-scope settlement. Stale producer evidence can be consumed by recovery but cannot act as recovery owner |
 | `complete_v1(ctx: RunContext or RecoveryContext, key: ReservationKey, outcome: bounded W1 ProposalOutcome) -> Completion` | Preserve outcome usage regardless of display qualification, ensure observer/accounting disposition, persist content-free completion. Requalify display only for live call context; recovery never displays old results |
-| `cancel_v1(read: ReadContext, key: ReservationKey, decision_id: Id) -> CancelAck` | Set monotone cancellation latch first; serialize durable task-version cancellation under G; exact `{format, key_digest:Hash, cancellation_generation:Gen, state:'CANCELLED'}`. Never refund or reactivate task |
+| `cancel_v1(read: ReadContext, key: ReservationKey, decision_id: Id) -> CancelAck` | Set monotone cancellation latch first; under G execute §5.3 invalidate/ack before committing durable task-version cancellation; exact `{format, key_digest:Hash, cancellation_generation:Gen, state:'CANCELLED'}`. Never refund or reactivate task |
 
 Named tiny acknowledgement records share the metadata bounds. All operations propagate the same non-increasing absolute call deadline/cancellation ID. Use monotonic elapsed time and fresh ordered UTC for half-open intervals; any rollback/epoch mismatch fails closed. SQL statement/lock and observer wait timeouts are ≤remaining operation budget; after every wait/read/commit acknowledgement sample again. Equality with any applicable expiry or deadline rejects sending/display. Cleanup is allowed after expiry solely to close/fence/release owned resources and retain liability; if its separately bounded ≤3s cleanup cannot prove release, quarantine connection/slot and enter recovery, never declare success.
 
@@ -178,6 +190,8 @@ This independently authored example is X1's accounting projection, not an issued
     "call_ref": "q_a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
     "event_id": "synevent_4",
     "observer_epoch": "synobserver_1",
+    "authority_epoch": "synauthority_1",
+    "acceptance_generation": 7,
     "sequence": 4,
     "owner_generation": 1,
     "kind": "FINAL_USAGE",
@@ -228,7 +242,7 @@ Current [bindings](../backend/app/ai/proposals/bindings.py), [adapter](../backen
 | `before_input → input_document/validate_registry/request_body → after_input` | Call-scoped wrapper reads fresh authority. Confirm W1-computed body hash equals reserved body hash; same canonical payload, PROMPT and output_schema, no metadata injected into prompt |
 | `Coordination.admit → after_wait` | `admit_v1`; receipt expiration checked after wait, no G held; failures prior to `admitted=True` need outer W2 completion because W1 will not call record/finish |
 | `before_secret → after_secret → after_dns → after_connect → after_tls` | Same synthetic MemorySecret/Resolver/Connector boundaries and fresh authority; no Target authentication; missing budget/config/eligibility denies before secret/DNS |
-| `sending(check=final_send) → sending → before_write → write_ready → mark_started → MemoryWire.write` | Guard wrapper acquires G and durably marks/arms permit before yield; final checks remain inside G. Existing `mark_started` is merely conservative local delivery state. **Required narrow extension:** W2-bound exact MemoryWire verifies/consumes its permit after the existing write hook and immediately before buffer append; missing/revoked/expired/wrong-generation permit cannot append |
+| `sending(check=final_send) → sending → before_write → write_ready → mark_started → MemoryWire.write` | Guard wrapper acquires G, pins acceptance ticket before qualification, and durably marks/arms the same-generation permit before yield; final checks remain inside G. Existing `mark_started` is merely conservative local delivery state. **Required narrow extension:** W2-bound exact MemoryWire verifies/consumes its permit after the existing write hook and immediately before buffer append; missing/revoked/expired/wrong-generation permit cannot append |
 | `after_send → reads(after_read time-only) → exchange finally close → project_usage → output validation → before_consume → before_return` | Release G after first write; preserve bounded reads/close. Independently observe final usage, including rejected/incomplete output; no SQL transaction during response wait |
 | `record(stripped outcome) → finish → final_return` | `record` reconciles trustworthy evidence, never records display authority; `finish` releases admission only on proven closed/fenced sender, retaining unknown liabilities. `final_return` can still fail and preserves already-known usage |
 | Outer `complete_v1` after `propose_once` returns | Records content-free disposition even if no W1 callbacks ran; validates current source/config/cancellation/time again before ephemeral display. Accounting remains accessible after expiry, with no stale source reconstruction. Re-reading completion never resends or grants display permission |
@@ -247,6 +261,7 @@ Assess the adopted PostgreSQL recommendation as the fake-validation budget autho
 | --- | --- |
 | `budget_policy` / `budget_balance` | Unique `(account_ref, policy_id, policy_version)` and task-scoped counterpart; immutable caps/rate/currency/manifest digest, exact project/account ownership; no null cap admission. Balance stores settled S, held U and allocated call/time slots; H=B−S−U is signed derived data |
 | `call_core` / `reservation` | Unique full ReservationKey and `(task_id,case_id,question_id)`; attempt=1, no reparent/reuse; unique reservation ID. At most two allocated calls/case and one unfinished case reservation. Freeze W1 digest, body/payload hashes, config/rate, source/decision/projection binding manifest and expiry atomically with reserve |
+| `acceptance_barrier` / `invalidation_operation` (independent N1 journal) | Deployment gate plus authority epoch/generation and unique `(deployment_ref,operation_id)`/operation digest; monotone journal sequence, pending/committed/rolled-back/unknown disposition. Durable closure is required before the matching DB mutation; ≤64 pending operations. A database copy is diagnostic, not acceptance authority |
 | `admission` / `send_marker` | Unique unfinished account and deployment slot, exact call+generation; one marker/call, one permit/marker. Owner changes use compare-and-swap expected generation; no automatic takeover at ADMITTED or later |
 | `observation_copy` / `event` | Unique `(observer_epoch,sequence)` and `event_id`; identical duplicate is no-op, conflicting bytes append separate bounded conflict evidence. This database copy is not the independent observer |
 | `settlement` / `posting` | Unique `(call,final_event_id,revision)` and `(settlement_id,scope_kind,dimension)`; one token and one cost posting for each of task/account, committed with settlement and reserve removal. Final totals bind rate/mapping; later correction requires explicit recovery decision and signed delta, never overwrites previous entries |
@@ -270,33 +285,63 @@ S5 explicitly permits resolution of an IN_DOUBT marker after independent zero pr
 
 ### 5.2 G and actual writer inventory
 
-D proposes deployment-wide session advisory **G `(73105,2)`**, disjoint from the current knowledge transaction key `(73103,2)` and intent dispatcher `(73104,context)`. Its breadth makes cross-context shared-publication changes serial with provider first writes. It is not a substitute for current row/phantom locks. Inventory scope is the dependencies read by this concrete synthetic-only path, with conditional extensions called out below; it is not a claim that all repository/outbound writers have been audited.
+D proposes deployment-wide session advisory **G `(73105,2)`**, disjoint from the current knowledge transaction key `(73103,2)` and intent dispatcher `(73104,context)`. G normally serializes cross-context shared-publication changes with provider first writes, but session loss removes that exclusion. N1's mandatory acceptance barrier (§5.3) provides the invalidation/acceptance ordering even then; G is not that barrier or a substitute for current row/phantom locks. Inventory scope is the dependencies read by this concrete synthetic-only path, with conditional extensions called out below; it is not a claim that all repository/outbound writers have been audited.
+
+**Every active writer row below must execute the §5.3 barrier/ack protocol before any eligibility-changing commit**, including implicit invalidation from a read, correction, recovery or internal service commit. Paths capable of marking unavailable during a read close the barrier at outer entry, before their database locks. An unexpected eligibility mutation discovered under database locks requires rollback of that transaction before starting the barrier protocol; never call A while retaining those locks. Pure audit-only work may omit the barrier only when it changes no qualification dependency. If that classification is uncertain, invalidate the deployment; no dependency-specific exception is inferred. Conditional integrations must join the same protocol before inclusion.
 
 | Writer / current code path | Current locks/transaction owner | Required integration before W2 qualification |
 | --- | --- | --- |
-| [Context](../backend/app/services/research_context.py) `create_context/correct_context/close_context` | Context row FOR UPDATE for corrections/close; association uniqueness for create, metadata share locks; routes own outer transaction | G before insertion or context lock; close+new-context association transfer both participate. Hold through outer commit/rollback |
+| [Context](../backend/app/services/research_context.py) `create_context/correct_context/close_context` | Context row FOR UPDATE for corrections/close; association uniqueness for create, metadata share locks; routes own outer transaction | G before insertion or context lock; close+new-context association transfer both participate. Hold through outer commit/rollback; barrier before close/transfer/correction takes effect |
 | [Observation](../backend/app/services/research_observation.py) `prepare/accept/lifecycle/revoke_preparation/maintain` | `_locked` context FOR UPDATE, nested savepoints, association/Target share locks where used; lifecycle includes hold/release/delete/quarantine; maintain changes recovery token/purges | G before context lock; include correction via accept and all recovery/audit rotation. No observation body is provider input, but context recovery and immutable unavailability still constrain use |
 | Observation `read` / [subject](../backend/app/services/research_subject.py) `record/read` | Context lock, metadata share locks; reads can audit or record unavailable state | G at outer transaction entry where mutating/auditing; no late acquisition inside nested service. Subject changes are included conservatively, but subject data never affects model selection |
 | [Knowledge](../backend/app/services/research_knowledge.py) `record/decide/rotate_audit/retrieve` | `_locked`: catalog advisory xact lock then context FOR UPDATE; retrieve additionally SHARE-locks assertion/revision/scope tables | G **before catalog**, including read paths that audit; decide includes review/reuse/publish/withdraw/disable. Keep public retrieval's fact locks intact |
 | [W3](../backend/app/services/research_rule_validation.py) `validate_rule/submit_feedback/read_validation/read_feedback/review_feedback/invalidate_pending` | Catalog→context via knowledge; nested `review_feedback→decide→invalidate_pending`; append-only proofs/reviews | One outer G scope, nested calls borrow explicit guard token; include disable/lineage invalidation, no nested session-lock count leak |
 | [Targets](../backend/app/api/routes/targets.py) network-mode/profile/revision updates; [revisions](../backend/app/services/authorization_revision.py) `create_revision/transition_revision`; [scopes](../backend/app/api/routes/scopes.py) creation | Target FOR UPDATE; revision transitions profile→ordered revisions; Scope insert takes table row-exclusive lock; some services commit internally | G before **any** existing lock/transaction for these mutations because context `_target`/readiness qualification can change. Wrap internal commit as well as route-owned transaction; no G acquisition from inside a locked profile/Target |
 | [Authorization profile routes](../backend/app/api/routes/authorization_profiles.py) update/delete; context/Target creation and enrollment | Profile update FOR UPDATE; create/delete and enrollment have their existing transaction/uniqueness locks | G before mutations that change any selected Target binding/lifecycle. Enrollment has its own origin lock; order G first. Unrelated asset DNS/provider-free analysis is not granted egress or forced into W2 |
-| New W2 configuration, decision/projection/source-certificate registry, budget policy, cancellation and recovery writers | **No implementation exists**; W1 Configuration/Registry are frozen values, not mutable storage authority | Mandatory G on every replacement/revoke/disable/version/owner/retention change; fixed current version pointers plus immutable history. Key rotation means version references only; no secret storage/credential reads added |
+| New W2 configuration, decision/projection/source-certificate registry, budget policy, cancellation and recovery writers | **No implementation exists**; W1 Configuration/Registry are frozen values, not mutable storage authority | Mandatory G on every replacement/revoke/disable/version/owner/retention change; §5.3 barrier also applies without a successor admission; fixed current version pointers plus immutable history. Key rotation means version references only; no secret storage/credential reads added |
 | Conditional local fact/credential integrations, **excluded from this v1 provider path** | `review_resource_access_assertion` locks source assertion; observed derivation locks TestRun; fact inserts need phantom protection; bearer update identity→binding | If a later design adds subject/fact/credential dependencies, enumerate these and Resource/Endpoint/binding/identity writers before allowing them: G first plus existing table/row locks. Current synthetic-only seam does not use them as selection inputs or claim G protects them already |
 
-Required order for a W2 operation: **G → catalog `(73103,2)` if needed → context IDs ascending → existing association/Target metadata locks → short budget account→task→call locks**. No operation holds budget row locks while acquiring catalog/context/Target locks. Final-send qualification and marker posting can be separate short transactions while G remains held. Legacy internal orders remain inside G; selected Target/profile services must not call back into catalog/context while holding their existing locks. Read-only W2 reconciliation uses account→task→call without G when it only appends evidence/settlement; cancellation/ownership/policy changes take G first. Nested services receive an explicit borrowed guard token, never blindly reenter session advisory locks. Route `with db.begin()` boundaries matter: acquiring G inside a savepoint and releasing before the route commits would be incorrect.
+Required database lock order for a W2 operation: **G → catalog `(73103,2)` if needed → context IDs ascending → existing association/Target metadata locks → short budget account→task→call locks**. Before those database locks, an invalidator performs **G → A(close/journal/ack) → release A → existing database order**; the sender obtains its ticket in the same position. A is never held over a SQL transaction or database wait, and database locks are never held while requesting A. Final permit issuance/acceptance occurs only after short SQL transactions have ended. No operation holds budget row locks while acquiring catalog/context/Target locks. Final-send qualification and marker posting can be separate short transactions while G remains held. Legacy internal orders remain inside G; selected Target/profile services must not call back into catalog/context while holding their existing locks. Read-only W2 reconciliation uses account→task→call without G when it only appends evidence/settlement; cancellation/ownership/policy changes take G first. Nested services receive an explicit borrowed guard token, never blindly reenter session advisory locks. Route `with db.begin()` boundaries matter: acquiring G inside a savepoint and releasing before the route commits would be incorrect.
 
-Admission/rate waiting, secret resolution, DNS/TLS and response reads hold neither G nor SQL transaction. G covers bounded final qualification, durable marker/observer acknowledgement and **first write only**; no SQL transaction spans the write. Use a dedicated, non-pooled-back-until-unlocked G connection; on exception roll back any open short transaction, revoke/fence permit, release G once, and close/discard a suspect connection. A lost/ambiguous unlock cannot be treated as a reusable pooled connection. Lock/statement timeout, cancellation or expiry after lookup prevents write; failed cleanup pauses admission. Cancellation latch is checked after lookup even when its durable writer is waiting for G. Durable cancellation winning G blocks marking; cancellation after marking retains uncertainty until zero/final proof. No transaction spans operator recovery.
+Admission/rate waiting, secret resolution, DNS/TLS and response reads hold neither G nor SQL transaction. G covers bounded final qualification, durable marker/observer acknowledgement and **first write only**; no SQL transaction spans the write. Use a dedicated, non-pooled-back-until-unlocked G connection; on exception roll back any open short transaction, revoke/fence permit, release G once, and close/discard a suspect connection. A lost/ambiguous unlock cannot be treated as a reusable pooled connection. Lock/statement timeout, cancellation or expiry after lookup prevents write; failed cleanup pauses admission. Cancellation latch is checked after lookup even when its durable writer is waiting for G. Durable cancellation winning G blocks marking; cancellation after marking retains uncertainty until zero/final proof. No transaction spans operator recovery. Eligibility-changing writers cannot commit first and revoke later: §5.3 applies even if the prior sender's G connection disappeared.
 
-**Connection-loss limit:** release of a PostgreSQL session lock does not stop an already-paused process or socket. A new owner cannot be admitted merely because G/lease disappeared. Fake fencing requires N1's independent permit authority to revoke the old epoch and prove old stream closure before a new admission. The write boundary must reject resumed stale work; result-generation checks alone fail T8. Without that proof the slot and liability remain held. Live socket fencing and durable failure-domain behavior remain unproved.
+**Connection-loss limit:** release of G does not stop a paused process or socket. A lifecycle writer that subsequently obtains G must close and durably acknowledge the independent acceptance barrier **before** making its invalidation effective; it cannot rely on a later admission/takeover. The endpoint rejects the old acceptance generation even when owner generation and permit expiry are unchanged. A new owner additionally needs old-stream fencing/closure proof before freeing admission. An extra database read or result-generation comparison does not close the acceptance race. Without proof, admission and liability stay held; live socket fencing remains unproved.
+
+### 5.3 Invalidation and endpoint acceptance — N1 correction
+
+**Shared serialization point:** the independent fake permit authority owns one deployment-wide mutex **A**, an `OPEN/CLOSED/RECOVERY_REQUIRED` gate, an authority restart epoch and a monotone acceptance generation. Ticket issuance, permit issuance, invalidation closure and simulated endpoint acceptance all serialize under A. Acceptance includes the final gate/generation/permit/body/deadline check **and** acceptance recording in one critical section; it is not a database precheck followed by an unguarded write. No writer may bypass this authority and still report that provider-relevant invalidation completed.
+
+**Affected set:** invalidate **every outstanding ticket and unconsumed permit for the deployment**, not a caller-supplied list, just the active admission, or only the invalidated source's direct references. This intentionally conservative superset covers source/ancestor/publication withdrawal, context close/transfer/hold, configuration/key-reference replacement, cancellation and every other inventory dependency, across accounts/tasks. Every ticket/permit carries deployment, authority epoch and acceptance generation; checking these at acceptance revokes the set without enumerating or truncating a dependency index. Already consumed permits remain observed events. Stale epoch/generation rejects with CONTEXT_CHANGED; unavailable/incomplete authority returns OBSERVER_UNAVAILABLE, without inventing new W1 codes. No new permit may be issued while CLOSED, including one requested by a stale process with an unchanged owner generation. Generation overflow closes the authority and requires recovery, never wraps or reuses a generation.
+
+The required writer sequence is:
+
+1. Acquire G within the bounded operation deadline. Resolve the intended mutation's immutable ID/digest; if identifying it requires a read transaction, finish that transaction before contacting A and revalidate its expected versions in the later write transaction. The protected lifecycle state has **not** yet changed. InvalidationContext supplies trusted monotonic/UTC deadlines and cancellation; all A/IPC/journal waits are bounded by its remaining ≤30s operation budget, with fresh checks after completion. Cancellation/timeout before mutation aborts the transaction path; once a barrier might exist it stays unresolved/closed until reconciliation, not automatically undone.
+2. Call `invalidate_v1`. Under A, first deny further acceptance by setting CLOSED, advance acceptance generation, and append/fsync the operation ID/digest, barrier sequence and pending disposition **before acknowledgement**. On journal failure remain CLOSED/RECOVERY_REQUIRED. Release A. The returned exact InvalidationAck is the prerequisite for database mutation, not a success response for that mutation. Closure remains in force after A is released and even if G disappears. The linearization boundary is this closure critical section versus endpoint acceptance under A.
+3. Only with a verified durable acknowledgement for this still-pending operation, perform the original eligibility-changing transaction in the existing lock order, binding the operation ID/digest to its transaction evidence. Persist the invalidation marker/outcome with the mutation where feasible; internal-commit services must be enclosed by this protocol too. The authority stays CLOSED throughout. A database commit makes invalidation effective only **after** endpoint exclusion is established. An acknowledgement cannot be reused for another mutation or a second transaction attempt.
+4. After ending all database transactions, append COMMITTED, ROLLED_BACK or UNKNOWN disposition with `resolve_invalidation_v1`. A success response requires both a known committed mutation and a durable matching resolution acknowledgement; the gate remains CLOSED. Rollback, exception or lost acknowledgement never restores old permits. No response falsely says “withdrawn”, “cancelled”, “revoked” or “safe to continue” when completion is unresolved. Loss of acknowledgement after a known database commit reports reconciliation required, not a claim that the committed change was rolled back.
+5. Reopening is an **explicit bounded recovery operation**, not writer cleanup, a watchdog or automatic retry. Under G, independently establish terminal disposition of **all** pending writer operations and that no old writer transaction can later commit (including lost-G/connection cases); unresolved database acknowledgement keeps CLOSED. Freshly qualify current lifecycle/configuration and ownership, close/fence old streams, then under A verify the same closed generation, no unresolved operations and complete journal/witness coverage before journaling OPEN. Database transactions finish before requesting A. Old tickets/permits remain permanently unusable; new tickets are pinned before new final qualification. A marked call cannot obtain another ticket or rearm its permit, including after a proven-zero resolution; any eligible new call still needs its distinct predeclared question/reservation and all existing call limits. No source or cancelled task is re-enabled by opening the deployment gate.
+
+An identical operation ID/digest lookup returns its original barrier/disposition; conflicting content rejects and keeps the gate closed. Ack disposition is explicit: a terminal operation returns its existing outcome, never permission to execute its database mutation again. The CLOSED receipt proves the historical barrier, not current gate state; pending-operation checks and the unique database operation ID prohibit replay after later reopening. Concurrent invalidators may each close/advance the generation; their pending dispositions are separately retained. Recovery cannot reopen merely because one completed. Bound pending invalidations to **64 per deployment** as an N1 control-record capacity, separate from per-call event limits; exhaustion/journal uncertainty keeps CLOSED/RECOVERY_REQUIRED and refuses new mutation protocols without silently retiring pending operations. Barrier records contain no model/source bodies and are not fabricated per-call Usage records. Their effect on every call is derived from its bound generation; zero refunds still require that call's independent no-acceptance/closed-stream proof.
+
+| Gate transition | Required condition; never inferred from G ownership |
+| --- | --- |
+| L1 OPEN → CLOSED | A closure wins, generation advances and pending barrier is durably recorded before acknowledgement; older tickets/permits cannot accept |
+| L2 CLOSED → CLOSED | Additional invalidation advances generation/adds pending operation; a disposition or rollback records history but does not reopen |
+| L3 OPEN/CLOSED → RECOVERY_REQUIRED | Authority-detected journal/coverage uncertainty or restart; no new ticket/permit/acceptance while authority cannot prove a consistent gate. A caller-only lost reply does not prove the remote gate changed (Y3b) |
+| L4 CLOSED/RECOVERY_REQUIRED → OPEN | Explicit §5.3 recovery, complete barrier/witness coverage, every pending writer terminal/fenced, old streams closed, fresh qualification and matching closed epoch/generation; durable reopen acknowledgement required for continuation |
+| L5 OPEN/CLOSED/RECOVERY_REQUIRED → same state | Exact duplicate lookup/disposition is idempotent; it cannot replay mutation, reset generation or recreate a consumed permit |
+
+**Unavailable or ambiguous authority:** if invalidate never obtained a verified acknowledgement, the writer must not commit the eligibility-changing mutation. Return OBSERVER_UNAVAILABLE or COMMIT_UNKNOWN, retain liability, and stop new work pending exact-ID reconciliation. Independently proven endpoint shutdown establishes no future acceptance but does not itself authorize a missing-ack database mutation: recovery must first establish and durably acknowledge the closed barrier. A lost reply has two possible histories: closure happened (old permits reject), or no closure happened (an old acceptance may have won before invalidation). Do not claim zero acceptances in the second history or claim invalidation took effect. A locally received cancellation request likewise is not proof of remote fencing. If the invalidation IPC path is partitioned while acceptance remains reachable, a local stop flag cannot fence that remote endpoint; the mutation remains uncommitted/unconfirmed until the closed barrier is durably acknowledged. This availability tradeoff grants no extension of DATA retention deadlines; an operational shutdown/retention path remains a live-only design gate, not a capability proved by this fake-only protocol. If the authority process itself is unavailable, the required endpoint acceptance primitive is unavailable too: the child must not append a successful simulated send or substitute an in-process writer. Restart is CLOSED/RECOVERY_REQUIRED until durable barriers and independent witnesses reconcile; never restore an older OPEN generation. No automatic continuation follows an ambiguous barrier, database commit, resolution or reopen acknowledgement.
+
+**Acceptance first:** an endpoint acceptance that wins A is recorded once and cannot be undone by the later closure. The writer then closes the gate before committing invalidation; consumed evidence/known final usage survives, incomplete usage retains reservation, and lifecycle/cancellation suppresses subsequent display and calls. Closure does not retroactively turn acceptance into pre-send zero, refund unknown cost or authorize replay. **Invalidation first:** closure wins A, advances generation and acknowledges; every later acceptance using an old ticket/permit rejects, whether or not G, the owner generation, a lease or any admission changed.
 
 ## 6. Observer, traces and separately identified mechanism
 
-**N1 — PROPOSED, targeted decision required:** for fake-only process tests, use an independently owned parent test harness as permit authority and fake endpoint, with bounded IPC and an append-only, fsync-before-ack journal in its owned temporary directory. The adapter child process cannot mint permits, alter journal files or append endpoint acceptance records. A separate read-only test observer retains endpoint counts and journal high-water marks outside both database result/accounting callbacks. This is a concrete testing mechanism newly specified here; it is not an adopted live service, worker, Redis component, deployment or account-evidence channel. Independent review should assess this choice and the User should decide this **N1 only** if it remains material; no blanket B1–B8 approval is requested. An alternative test-only independently owned PostgreSQL observer server would add database resources and different shared-failure assumptions.
+**N1 — PROPOSED, targeted decision required:** for fake-only process tests, use an independently owned parent test harness as permit authority and fake endpoint, with bounded IPC and an append-only, fsync-before-ack journal in its owned temporary directory. The adapter child process cannot mint permits, alter journal files or append endpoint acceptance records. A separate read-only test observer retains endpoint counts and journal high-water marks outside both database result/accounting callbacks. N1 also includes the §5.3 deployment-wide generation barrier shared by every invalidating writer and endpoint acceptance, its acknowledged close-before-commit ordering, and explicit recovery before reopening. This correction remains a targeted **PROPOSED** N1 mechanism; B1–B8 stay adopted. This is a concrete testing mechanism newly specified here; it is not an adopted live service, worker, Redis component, deployment or account-evidence channel. Independent review should assess this choice and the User should decide this **N1 only** if it remains material; no blanket B1–B8 approval is requested. An alternative test-only independently owned PostgreSQL observer server would add database resources and different shared-failure assumptions.
 
-Fake journal records use Observation schema (≤4096 bytes/event, ≤64 unique events/call, last8 reserved for stop/recovery). IPC control frames ≤8192 bytes; a write frame has ≤4096 metadata bytes plus ≤32768 synthetic body bytes and length framing, total ≤40960 bytes, one in flight/call, bounded by remaining deadline. Raw body exists only in ephemeral fake endpoint memory, never the journal; HTTP headers and authentication bytes do not enter IPC. The exact MemoryWire verifies the non-secret body digest against the bound permit; the parent endpoint independently hashes and checks received body bytes before accepting them. Its acceptance is the W2 fake first-write event; the child writes list is a diagnostic mirror, not the observer. The independent endpoint records acceptance and scripted final usage from its separately authored fixture, not from W1 `code` or accounting state. Journal acknowledgement and simulated endpoint acceptance occur under the harness's permit mutex; if process/storage failure makes their relation uncertain, the surviving evidence is IN_DOUBT. A journal entry alone can overstate a send; it never proves a no-send refund. The endpoint must parse a bounded frame and check its permit/body/generation/deadline before accepting bytes as a simulated provider request. IPC submission is not provider delivery. A crash after endpoint acceptance but before child mirror append remains post-send unknown, not zero.
+Fake journal records use Observation schema (≤4096 bytes/event, ≤64 unique events/call, last8 reserved for stop/recovery). IPC control frames ≤8192 bytes; a write frame has ≤4096 metadata bytes plus ≤32768 synthetic body bytes and length framing, total ≤40960 bytes, one in flight/call, bounded by remaining deadline. Raw body exists only in ephemeral fake endpoint memory, never the journal; HTTP headers and authentication bytes do not enter IPC. The exact MemoryWire verifies the non-secret body digest against the bound permit; the parent endpoint independently hashes and checks received body bytes before accepting them. Its acceptance is the W2 fake first-write event; the child writes list is a diagnostic mirror, not the observer. The independent endpoint records acceptance and scripted final usage from its separately authored fixture, not from W1 `code` or accounting state. Journal acknowledgement and simulated endpoint acceptance occur under A, the **same** authority mutex used for lifecycle/configuration invalidation closure and ticket/permit issuance; if process/storage failure makes their relation uncertain, the surviving evidence is IN_DOUBT. A journal entry alone can overstate a send; it never proves a no-send refund. The endpoint must parse a bounded frame and check OPEN, exact authority epoch/acceptance generation, and its permit/body/owner/deadline atomically under A before accepting bytes as a simulated provider request. IPC submission is not provider delivery. A crash after endpoint acceptance but before child mirror append remains post-send unknown, not zero.
 
-N1 must have enforced process ownership/permissions, explicit immutable call+generation+body bindings, journal restart epoch, sequence continuity and bounded independently retained head/tail witnesses. The parent uses its explicitly injected trusted test clock and permit expiry; cross-process native monotonic readings are never compared. Deadline/cancellation updates and clock anomalies are independently scheduled by the harness and checked again on endpoint acceptance. Revocation and acceptance race on the same harness mutex: revoke first yields zero accepted bytes; acceptance first consumes permit irrevocably and may incur unknown usage. The adapter's old generation cannot obtain or reuse a permit after revocation even if its DB connection disappeared. A wrapper/hook that merely sets `safe=true`, or a journal in the killed adapter process, is not this mechanism. No fake port may open a provider/Target socket. Whether the claimed independence survives the chosen IPC, filesystem and process kill schedule is a **future test obligation**, not established by prose or same-host fsync.
+N1 must have enforced process ownership/permissions, explicit immutable call+generation+body bindings, journal restart epoch, sequence continuity and bounded independently retained head/tail witnesses. The parent uses its explicitly injected trusted test clock and permit expiry; cross-process native monotonic readings are never compared. Deadline/cancellation updates and clock anomalies are independently scheduled by the harness and checked again on endpoint acceptance. Every relevant writer, not only takeover/recovery, calls invalidate_v1 and must receive its durable closure acknowledgement before its database invalidation can take effect. Closure and acceptance race on A: closure first rejects subsequent affected acceptance; acceptance first consumes the permit irrevocably and may incur unknown usage. Delayed IPC delivery cannot be mistaken for the order of acknowledged closure. The adapter's old generation cannot obtain or reuse a permit after revocation even if its DB connection disappeared. A wrapper/hook that merely sets `safe=true`, or a journal in the killed adapter process, is not this mechanism. No fake port may open a provider/Target socket. Whether the claimed independence survives the chosen IPC, filesystem and process kill schedule is a **future test obligation**, not established by prose or same-host fsync.
 
 | Trace | Ordered events and required externally observable result |
 | --- | --- |
@@ -305,9 +350,147 @@ N1 must have enforced process ownership/permissions, explicit immutable call+gen
 | X3 unknown | S3/permit → endpoint accepts once → adapter killed or final usage absent → S4; U remains `(5120,22528)`, scope paused, zero replay. Lost observer acknowledgement has the same conservative disposition even if the caller thinks no write occurred |
 | X4 final cancellation | Endpoint final known usage → adapter record settles → cancellation or expiry occurs **inside** final_return authority read → W1 error/no display, usage preserved → complete stores SUPPRESSED. A 0.5s lookup within a 1s source window succeeds; expiry/deadline equality and wall/monotonic rollback reject |
 | X5 duplicate/conflict | X1 event replay with identical ID/content → no postings/change. Same ID or another final receipt with different totals → S8, append conflict and pause; prior actual stays visible; disputed reserve retained. S9 requires explicit recovery evidence/decision and posts only adjustment delta |
-| X6 stale owner | Old owner paused before write; DB session lost → no automatic slot takeover → harness revokes old permit/epoch and proves closed → explicit recovery owner → old process resumes and consume_write rejects → stale finish cannot clear new owner. Failure to prove closure holds slot, never admits second sender |
+| X6 guard-loss invalidation, no takeover | Sender passes write_ready with ticket/permit generation7 and pauses → G session ends → context-close or source-withdrawal writer acquires G → invalidate_v1 closes A gate and advances to8, durable ack → writer commits invalidation/resolution while CLOSED → same sender resumes with unchanged owner generation and unexpired permit7 → consume_write rejects. **No new admission occurs; endpoint acceptances=0**. Unknown accounting is retained until independent zero/closure proof. Separate takeover control still requires fencing before successor admission and stale finish cannot clear a successor |
 | X7 common-mode omission | Independent endpoint accepts; deliberately omit result **and** accounting events/marker projection → journal/witness set difference exposes missing call; create scoped recovery liability from trusted core/permit evidence, pause, do not invent a settled zero. Also remove observer evidence: independent endpoint witness exposes a coverage gap. If **all** independent witnesses disappear, completeness is unknowable; freeze the account and declare that limitation |
 | X8 delayed usage | X3 paused/cancelled call → trusted late final usage under RecoveryContext → S6/S7, actual posted once and U removed; task cancellation persists and old display stays suppressed. Uncorrelated provider totals or malformed/partial counts never settle |
+
+### 6.1 Guard-loss protocol traces
+
+These are independently reasoned **protocol-model expectations**, not runtime/IPC/PostgreSQL observations. Initial state: one qualified, unconsumed permit in OPEN authority generation7, owner generation1, one existing admission, reserve `(5120,22528)`, with no expiry/cancellation/clock change. Every schedule creates **zero new admissions**; owner generation stays1. `close` is the durable A barrier, `ack` its delivery, `commit` the protected database invalidation, and `resolve` the acknowledged CLOSED disposition. `accept` means an endpoint attempt, which may reject. No schedule silently performs zero settlement without independent zero proof.
+
+| Trace | Independently expected ordering and result |
+| --- | --- |
+| Y1 invalidation first | Exact blocker: write_ready → pause → lose G → close/ack → commit → stale resumption. Zero endpoint acceptances, even with unchanged owner/expiry and no successor. Gate CLOSED; retain reserve pending zero proof. |
+| Y2 acceptance first | G lost, but acceptance wins A before writer closure: one accepted event. Later close/ack/commit cannot undo it; known final usage settles normally, display remains suppressed, and replay with the consumed permit rejects. Missing usage instead retains its original liability. |
+| Y3 acknowledgement ambiguity | Y3a: durable close but lost reply → no DB mutation, stale acceptance rejects. Y3b: request never reaches A → no DB mutation and old acceptance may win; do not claim revocation/zero. Both are unresolved, retain liability and stop new work pending evidence. |
+| Y4 unavailable authority | Endpoint/authority unavailable → no closure acknowledgement, no DB mutation, no endpoint acceptance or child fallback. RECOVERY_REQUIRED on restart; no false success/automatic reopen. Control-channel-only partition is the Y3b uncertainty, not a proven zero. |
+| Y5 unchanged positive control | No invalidation/G loss; unchanged authority and unexpired permit accept exactly once, known usage settles and current final qualification allows display. The barrier design does not permanently disable valid calls. |
+
+```json
+{
+  "format": "ra-w2-barrier-traces/1",
+  "measurement_kind": "synthetic_protocol_model",
+  "runtime_fencing_tested": false,
+  "initial_acceptance_generation": 7,
+  "owner_generation": 1,
+  "new_admissions": 0,
+  "cases": [
+    {
+      "id": "Y1",
+      "schedule": [
+        "lose_g",
+        "close",
+        "ack",
+        "commit",
+        "resolve",
+        "accept"
+      ],
+      "acceptances": 0,
+      "invalidated": true,
+      "gate": "CLOSED",
+      "caller": "COMMITTED_CLOSED",
+      "held_tokens": 5120,
+      "held_microusd": 22528,
+      "settled_tokens": 0,
+      "settled_microusd": 0,
+      "display": false
+    },
+    {
+      "id": "Y2",
+      "schedule": [
+        "lose_g",
+        "accept",
+        "close",
+        "ack",
+        "commit",
+        "resolve",
+        "known_usage",
+        "accept"
+      ],
+      "acceptances": 1,
+      "invalidated": true,
+      "gate": "CLOSED",
+      "caller": "COMMITTED_CLOSED",
+      "held_tokens": 0,
+      "held_microusd": 0,
+      "settled_tokens": 2432,
+      "settled_microusd": 8704,
+      "display": false
+    },
+    {
+      "id": "Y3a",
+      "schedule": [
+        "lose_g",
+        "close",
+        "lost_ack",
+        "blocked_commit",
+        "accept"
+      ],
+      "acceptances": 0,
+      "invalidated": false,
+      "gate": "CLOSED",
+      "caller": "UNRESOLVED",
+      "held_tokens": 5120,
+      "held_microusd": 22528,
+      "settled_tokens": 0,
+      "settled_microusd": 0,
+      "display": false
+    },
+    {
+      "id": "Y3b",
+      "schedule": [
+        "lose_g",
+        "lost_request",
+        "blocked_commit",
+        "accept"
+      ],
+      "acceptances": 1,
+      "invalidated": false,
+      "gate": "OPEN",
+      "caller": "UNRESOLVED",
+      "held_tokens": 5120,
+      "held_microusd": 22528,
+      "settled_tokens": 0,
+      "settled_microusd": 0,
+      "display": false
+    },
+    {
+      "id": "Y4",
+      "schedule": [
+        "lose_g",
+        "authority_down",
+        "blocked_commit",
+        "accept"
+      ],
+      "acceptances": 0,
+      "invalidated": false,
+      "gate": "RECOVERY_REQUIRED",
+      "caller": "UNRESOLVED",
+      "held_tokens": 5120,
+      "held_microusd": 22528,
+      "settled_tokens": 0,
+      "settled_microusd": 0,
+      "display": false
+    },
+    {
+      "id": "Y5",
+      "schedule": [
+        "accept",
+        "known_usage"
+      ],
+      "acceptances": 1,
+      "invalidated": false,
+      "gate": "OPEN",
+      "caller": "IDLE",
+      "held_tokens": 0,
+      "held_microusd": 0,
+      "settled_tokens": 2432,
+      "settled_microusd": 8704,
+      "display": true
+    }
+  ]
+}
+```
 
 Recovery additionally compares reservation/marker/observer/completion sets by exact scope and process epoch; equal result/accounting sets prove no completeness. Restoring an older database starts suspended, preserves independently known deletion/expiry and unknown liabilities, and requires reconciliation with surviving observer witnesses before new work. No old prepared payload is restored from ledger metadata. Capacity exhaustion, unknown journal tail, uncorrelatable evidence or contradictory final totals stop admission; deletion/rotation cannot silently erase unresolved history. A same-host fake harness cannot prove real provider acceptance, bill correlation, hidden input-token overhead, exclusive account use, native socket fencing, physical backup completeness or independent live failure domains. Those remain live-only gates with separately approved mechanisms/data/retention and no automatic account API calls.
 
@@ -320,16 +503,24 @@ Recovery additionally compares reservation/marker/observer/completion sets by ex
 | T3 | ExactSource/ProjectionBinding/Scope, full writer inventory, requalification; foreign/stale/held/deleted/withdrawn/test-only publication and contamination checks; no private-derived selection |
 | T4 | Reservation/Settlement/postings, S1/S7/S9, X1–X3/X5; Decimal conservation, exact cap/+1, null/zero/overflow, task/account isolation and full over-cap actuals |
 | T5 | Unique keys and admission slots, S1/S2; barrier-controlled competing real PostgreSQL transactions, commit acknowledgement loss, one winner and rollback conservation |
-| T6 | AuthorityRead/RunContext/G/cancel, S3–S5, X2/X4; completed-lookup cancellation and all interval/deadline equalities; secret/write/display counters and retained usage |
+| T6 | AuthorityRead/RunContext/G/A, InvalidationRequest/Ack, S3–S5, X2/X4/X6 and Y1–Y5; completed-lookup cancellation and all interval/deadline equalities; secret/write/display counters and retained usage |
 | T7 | Permit/Observation, S3/S4, X2/X3; independent child-process kills at reserve/marker/ack/accept/usage/settlement boundaries, zero automatic replay |
-| T8 | Owner generation/guard epoch, consume_write/finish, X6; independently controlled DB-session loss and stale resumption; actual zero stale writes and no successor cleanup |
+| T8 | Owner generation plus independent acceptance generation, invalidate/consume_write/finish, X6/Y1/Y2; independently controlled DB-session loss and stale resumption; actual zero stale writes and no successor cleanup |
 | T9 | Event uniqueness, reconcile/complete, S7–S9, X5/X8; duplicate/conflicting/delayed usage, known-over-cap corrections, unchanged display eligibility and retained unknowns |
 | T10 | N1 journal/witness/endpoint, COVERAGE_GAP, X7; omit result, accounting, both, and observer; distinguish detected omission from fundamentally unavailable evidence |
-| T11 | RecoveryContext, bounded cleanup/retention, X6–X8; restore stale DB/observer, fsync/ack ambiguity, cancellation race, capacity stop, manual recovery decisions and unchanged DATA clocks |
+| T11 | RecoveryContext/InvalidationResolution, bounded CLOSED-gate recovery/retention, X6–X8/Y3/Y4; restore stale DB/observer, fsync/ack ambiguity, cancellation race, capacity stop, manual recovery decisions and unchanged DATA clocks |
 | T12 | W1 wrappers/exact MemoryWire extension/terminal hook; digest/profile/schema/legacy compatibility, fake-vs-native zero-I/O; full rendering token certificate missing/stale fails before secret/DNS. Synthetic counters cannot certify provider overhead or billing |
 
 Independent implementation review must approve the concrete B1 table/projection and B8 record/signature/call-order design, check writer coverage/lock order and resolve N1. These close design specification gaps **for review**, not runtime evidence gaps. Later tests need newly owned verified disposable PostgreSQL and independently owned fake processes; none runs for this document. No application imports, migrations, backend tests, held-out inspection or operational calls are needed for prose.
 
-Isolated standard-library validation (`env -i`, `python3 -I`) passed: **4 Markdown files / 130 local links and anchors**, two strict JSON blocks, eight necessity examples, field-set checks against **25 record definitions**, the 361-byte complete projection, key digest and Decimal conservation, nine transitions/five legal transition paths with replay exclusions, eight ordered trace entries/T1–T12 coverage, **42 static source references**, and 12 rejecting parser/schema controls. The adopted proposal body and earlier validation are preserved. `git diff --check` passed; the entire diff is this companion, the adoption append/header, and narrow ADR/roadmap updates. Checker and results are retained under `/tmp/ra05-w2-contract-docs-7njekgm8/`. These checks establish document consistency, not implemented transaction safety, process isolation, runtime schema correctness or live-provider guarantees. No application imports, backend tests, databases, provider/Target calls or credential access occurred.
+**Historical v0.1.0 validation (before the P1 correction):** isolated standard-library validation (`env -i`, `python3 -I`) passed: **4 Markdown files / 130 local links and anchors**, two strict JSON blocks, eight necessity examples, field-set checks against **25 record definitions**, the 361-byte complete projection, key digest and Decimal conservation, nine transitions/five legal transition paths with replay exclusions, eight ordered trace entries/T1–T12 coverage, **42 static source references**, and 12 rejecting parser/schema controls. The adopted proposal body and earlier validation are preserved. `git diff --check` passed; the entire diff is this companion, the adoption append/header, and narrow ADR/roadmap updates. Checker and results are retained under `/tmp/ra05-w2-contract-docs-7njekgm8/`. These checks establish document consistency, not implemented transaction safety, process isolation, runtime schema correctness or live-provider guarantees. No application imports, backend tests, databases, provider/Target calls or credential access occurred.
+
+## P1 guard-loss lifecycle correction
+
+This documentation-only fix continues reviewed `dcafd0ca0ab03cb83f6f6f210e7f47edfdc560cc` on `codex/ra-05-w2-implementation-contract`; main/base remains `e953ee08cb32e0ba9de0f3d196e7b5e82b9fe727`. Clean branch/repository identity and actual remote main were reverified. The previous v0.1.0 wording required revocation before a successor admission but missed an invalidator committing after G loss with **no successor**. Its historical validation above did not establish safety for this case.
+
+V0.1.1 binds invalidation and endpoint acceptance to N1's shared A boundary, requires durable deployment-wide closure before invalidation commit, pins tickets before qualification, and keeps uncertain acknowledgements/transactions closed or unresolved. Interfaces, writer inventory, X6, Y1–Y5 and T6/T8/T11 agree on the corrected order. B1–B8 and their recorded adoption are unchanged; the additional barrier mechanism remains explicitly proposed within targeted N1, with no invented approval.
+
+Correction validation passed using isolated standard-library scripts (`env -i`, `python3 -I`): **130 local links/anchors across four documents**, three strict JSON blocks, 32 record definitions/field-set checks, existing necessity/transition/Decimal accounting checks and 12 rejecting parsing/schema controls. The added protocol model checked **six Y trace cases, all 70 order-preserving interleavings** of ticket/qualification/issuance/acceptance versus close/ack/commit/resolution, the five gate-transition definitions, pending-writer recovery and conservative accounting. It detected both the old no-barrier counterexample and a split check/write counterexample. These checks assume the specified A critical sections and durable evidence; they do **not** prove atomic IPC, fsync, process isolation or runtime fencing. Checker/model/results remain under `/tmp/ra05-guard-loss-docs-csf9mx4o/`. `git diff --check` passed; only this document differs from the reviewed HEAD, and historical B1–B8 adoption records are unchanged. No application imports, databases, backend tests, provider/Target calls or credentials were used.
 
 Local commit then **STOP** for independent review; no push, PR, merge, branch cleanup, W2 code, W3/cache or RA-06 work.
