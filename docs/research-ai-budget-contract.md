@@ -2,7 +2,7 @@
 
 **v0.1.0 · historical proposal status: DOCUMENTATION_ONLY / PROPOSED / PENDING_APPROVAL**
 
-**Current:** B1–B8 design recommendations adopted for subsequent W2 fake-only work; see the [appended adoption record](#w2-design-adoption-record). Concrete pre-code details are [pending independent review](research-ai-w2-implementation-contract.md); no W2 implementation or operational approval is claimed.
+**Current:** B1–B8 design recommendations remain adopted; see the [appended adoption record](#w2-design-adoption-record). [Concrete pre-code v0.1.1](research-ai-w2-implementation-contract.md) was subsequently reviewed/integrated and N1 adopted; mandatory Linux/bubblewrap isolation was also adopted with four conditions. [Runtime prerequisite evidence](research-ai-w2-runtime-validation.md) is local and pending independent/hosted validation. W2 implementation remains incomplete; no operational approval is claimed.
 
 Base: `658464c5ae45f058cbb3c6a0bdd8ad3f371ad114`; branch: `codex/ra-05-w2-budget-proposal`. Repository identity, clean main/HEAD, actual remote main and branch availability were verified before branching. The user handoff records independent review of W1 `0e3b94a909ee01eba41c79a264f056665c0222ce`, integration through PR #150, and local/PR/exact-main gates passing **3798 tests**. Git confirms the main tree matches that reviewed tree. This documentation task neither reruns those gates nor invents CI run IDs or an additional approval.
 

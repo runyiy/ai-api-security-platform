@@ -2,6 +2,8 @@
 
 **v0.1.1 · DOCUMENTATION_ONLY / PENDING_INDEPENDENT_REVIEW · implementation not started**
 
+**Subsequent status:** this historical header is preserved. The User handoffs record review at `302b1e581f4e0e559a0f16f924d1ca64ea985adb`, PR #152 integration, adoption of N1 v0.1.1 and later adoption of mandatory Linux/bubblewrap isolation with four conditions. [Adoption, runtime prerequisite evidence and remaining gates](research-ai-w2-runtime-validation.md#adoption-and-scope) distinguish those decisions from the incomplete W2 implementation. B1–B8 remain adopted; no repeat design adoption is required.
+
 Base: `e953ee08cb32e0ba9de0f3d196e7b5e82b9fe727`; branch: `codex/ra-05-w2-implementation-contract`. Clean HEAD/local main, actual remote main, origin and branch absence were verified before branching. The user handoff records PR #151 integration of reviewed `dce6d4d4bc49a5284b427d4e428dd901be6c50c7`, with PR/exact-main CI each passing 3798 tests on their first attempts. Those runs were not rerun or independently audited for this document.
 
 The [W2 adoption record](research-ai-budget-contract.md#w2-design-adoption-record) governs B1–B8. This companion supplies their explicit pre-code details; it does not reopen their recommendations. **D** below means a concrete implementation detail awaiting independent review. **N1**, the separately identified fake observer mechanism in §6, is a new material choice, not a decision attributed to that adoption. There is no W2 implementation authorization until this concrete contract passes independent review and N1 is resolved. All account/credentials, data/retention/egress, spending, deployment and live-provider gates remain separate and closed.

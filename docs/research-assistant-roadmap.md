@@ -1,6 +1,8 @@
 # Research Assistant v1 — 低人工参与、低 Token 的授权安全研究助手
 
-> **RA-05/W2 current pre-code preparation:** Verified clean main/remote main `e953ee08cb32e0ba9de0f3d196e7b5e82b9fe727`; PR #151 integrated reviewed `dce6d4d4bc49a5284b427d4e428dd901be6c50c7`. Handoff records first-attempt PR/exact-main CI each passing 3798 tests; not rerun for prose. [B1–B8 adoption](research-ai-budget-contract.md#w2-design-adoption-record) governs fake-only W2. [Concrete implementation contract](research-ai-w2-implementation-contract.md) is **DOCUMENTATION_ONLY / PENDING_INDEPENDENT_REVIEW**; N1 is a separately proposed fake-observer mechanism. No W2 implementation, W3/cache, RA-06 or operational/live acceptance is claimed. Earlier proposal records are historical.
+> **RA-05/W2 subsequent adoption/runtime work:** Continue `codex/ra-05-w2-budget-coordination` from verified `cff95ddc296136ca54efbf92a5c833d65c2e26c1`. User handoffs record PR #152 integration of reviewed v0.1.1 / `302b1e581f4e0e559a0f16f924d1ca64ea985adb`, N1 adoption and subsequent mandatory Linux/bubblewrap adoption with four conditions. [Runtime prerequisite evidence](research-ai-w2-runtime-validation.md) is local and pending review/hosted validation. W2 remains incomplete; no preparation/ledger/permit-authority/writer implementation or original T1–T12 acceptance is claimed. Earlier pre-code/pending labels below are historical; B1–B8/N1 adoption is not reopened.
+
+> **RA-05/W2 historical pre-code preparation:** Verified clean main/remote main `e953ee08cb32e0ba9de0f3d196e7b5e82b9fe727`; PR #151 integrated reviewed `dce6d4d4bc49a5284b427d4e428dd901be6c50c7`. Handoff records first-attempt PR/exact-main CI each passing 3798 tests; not rerun for prose. [B1–B8 adoption](research-ai-budget-contract.md#w2-design-adoption-record) governs fake-only W2. [Concrete implementation contract](research-ai-w2-implementation-contract.md) is **DOCUMENTATION_ONLY / PENDING_INDEPENDENT_REVIEW**; N1 is a separately proposed fake-observer mechanism. No W2 implementation, W3/cache, RA-06 or operational/live acceptance is claimed. Earlier proposal records are historical.
 
 > **RA-05/W2 historical documentation preparation (2026-09-11):** Verified clean local/remote main `658464c5ae45f058cbb3c6a0bdd8ad3f371ad114`; new branch `codex/ra-05-w2-budget-proposal`. The user handoff records W1 independent review at `0e3b94a909ee01eba41c79a264f056665c0222ce`, PR #150 integration and local/PR/exact-main gates passing **3798 tests**; this task verified matching Git trees, without rerunning those gates. [W2 proposal v0.1.0](research-ai-budget-contract.md) is **DOCUMENTATION_ONLY / PROPOSED / PENDING_APPROVAL**. W1 design adoption remains effective; W2 B1–B8/TASK choices require independent review and User adoption before implementation. Real-provider acceptance and account/key/data/retention/budget approvals remain pending. W2 implementation, W3/cache and RA-06 have not started; RA-05 is not complete. Earlier package records preserve their historical status.
 
@@ -220,7 +222,7 @@ AI 接收 typed data 并返回建议，不拥有 executor、shell、任意 fetch
 
 ### RA-05 — 有硬预算约束的真实 AI 辅助
 
-- **当前W2 pre-code范围：** [具体B1表/检索投影、B8接口及事务/observer契约](research-ai-w2-implementation-contract.md)只补齐已采纳B1–B8的实施前细节；独立review及新机制N1决定待完成，不实施W2，不重开已采纳推荐。
+- **当前W2范围：** [具体B1/B8 v0.1.1](research-ai-w2-implementation-contract.md)已review并经PR #152集成；N1及其Linux/bubblewrap前提已采纳。[本地运行时前提证据](research-ai-w2-runtime-validation.md)待独立/hosted验证；W2其余实施和T1–T12验收仍未完成，不重开已采纳推荐，不宣告RA-05完成。
 
 - **W2文档准备历史范围：** [预算/可信发送观察提案 v0.1.0](research-ai-budget-contract.md)明确确定性准备、有界检索、receipt/原子预留/核销、取消与恢复及独立证据缺口。仅文档，**DOCUMENTATION_ONLY / PROPOSED / PENDING_APPROVAL**；B1–B8和适用TASK选择须独立review及User采纳后才实施。W1 fake-only已review并经PR #150集成，真实provider验收和operational批准仍待定。
 
