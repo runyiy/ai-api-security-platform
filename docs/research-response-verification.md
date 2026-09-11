@@ -98,3 +98,52 @@ Final `heads/current/check`, freeze verification and pip check were repeated suc
 ## 6. Limits of this package
 
 This is a narrow synthetic, literal-scalar, complete-object GET verifier. It does not infer membership/access truth, support arbitrary login/health endpoints, broaden request shapes, admit private materials, refresh sessions, schedule work, aggregate approvals, publish rules, call providers or generate formal reports. W3's demonstration and independent Review Project review remain outstanding. Real execution still requires the operator's separate applicable authorization; implementation/tests supply none.
+
+## 7. Observed-expiry fix after W2 review
+
+The fix continues from reviewed `38343fec604e3fce753d277c8e43078735c9d95d` without rewriting it. Observing an owned exact intent's expiry now appends the existing durable clock/expiry fence before rejecting the operation. This includes the first exact-version check, retained core UTC bounds during dependency reads, health/pair monotonic and UTC checks, dispatch/result checks and final response construction. Correcting UTC in another request cannot restore eligibility. The fence uses its independent transaction, survives savepoint/outer rollback, and never rewrites the core, plans, approvals or evidence. No schema or deadline change is required.
+
+Each retained window carries the exact consumers that depended on it. Nested health qualification preserves those dependencies through final encoding; a business-only pair expiry does not fence otherwise valid health work. The existing limits remain four intent consumers and 64 total clock constraints per request, with at most one durable fence per exact intent. Foreign/missing/digest-mismatched references cannot fence owned work. Historical evidence remains explicitly non-reusable under its existing access checks. Recovery requires fresh qualified records, intent/plans and applicable explicit decisions; M8 still prohibits resending an uncertain or completed exact plan.
+
+New regressions use actual platform dispatch and the exclusively owned synthetic loopback server. They cover 120/30/300-second expiry through service reads, W1 API reads and W2 dispatch, corrected UTC with increasing monotonic time, failed-operation rollback, final W1/approval response construction, expiry during dependency reads, original health-witness invalidation, historical-only access, ownership isolation and fresh replacement work. Existing pair rollback assertions now require the exact durable fence while preserving every other table byte-for-byte; ordinary audit/encoding failure assertions and M8 guarantees remain intact.
+
+Validation uses the repository backend virtual environment through an environment-cleared copy at `/tmp/ra04-w2-expiry.v1yFky/backend`, excluding `.env*`, `.venv` and caches. Before importing the application, independent psql checks identified database/user `ra04_expiry`, `127.0.0.1:55489`, data directory `/tmp/ra04-w2-expiry.v1yFky/data`, system identifier `7684076208504266762`, UTF8, an empty public schema and zero other clients. Application settings confirmed no operator encryption key. All database suites run serially on this newly owned instance. No operator database, credential, private material, public Target or provider is used.
+
+The runner below sets only the repository `.venv` `PATH`, `LANG=C.UTF-8` and its owned `DATABASE_URL` under `env -i`. Initial expiry probes passed **20 tests**, 1 warning, 128.31s. The broader focused run passed **336 tests**, 8 warnings, 576.50s; this preceded the final converted-core binding and shared-constraint-limit refinements. Its exact invocation was:
+
+```bash
+/tmp/ra04-w2-expiry.v1yFky/run python -m pytest -q --tb=short \
+  tests/services/test_research_verification_expiry.py tests/services/test_research_verification_clock.py \
+  tests/services/test_research_verification.py tests/api/test_research_verification.py \
+  tests/network_safety/test_verification_boundary.py tests/services/test_research_intent.py \
+  tests/services/test_research_intent_concurrency.py tests/services/test_research_intent_sources.py \
+  tests/services/test_research_intent_gates.py tests/services/test_research_intent_knowledge.py \
+  tests/api/test_research_intents.py tests/network_safety/test_postgres_controller.py \
+  tests/migrations/test_research_verification_migration.py \
+  tests/migrations/test_research_intent_migration.py tests/migrations/test_research_intent_lifecycle_migration.py
+```
+
+The final targeted rerun passed **74 tests**, 1 warning, 87.86s, on code byte-identical to the repository (450 Python files; aggregate SHA256 `ba30fc45ec61bffab578a60c86de3c0db698cff651fecde9a9225dc24058063c`):
+
+```bash
+/tmp/ra04-w2-expiry.v1yFky/run python -m pytest -q --tb=short \
+  tests/services/test_research_verification_expiry.py tests/services/test_research_verification_clock.py \
+  tests/services/test_research_intent.py::test_final_boundary_rollback_even_if_caller_commits \
+  tests/services/test_research_intent.py::test_future_conflict_deadline_is_retained \
+  tests/api/test_research_intents.py::test_api_complete_encoding_temporal_boundary \
+  tests/api/test_research_intents.py::test_api_clock_rollback_after_service_boundary_rejects \
+  tests/services/test_research_verification.py::test_health_expiry_during_body_read_never_persists_qualified_evidence
+```
+
+Final validation results (`run` denotes `/tmp/ra04-w2-expiry.v1yFky/run`):
+
+| Command / check | Actual result |
+| --- | --- |
+| `run python -m pytest -q --tb=short` | **3193 passed**, 62 warnings, 906.65s. No failures or skips. Includes W1/W2, temporal/API/M8, legacy and migration regressions. |
+| `run python -m alembic upgrade head` on the initially empty instance; migration tests above and in the full suite | Fresh/populated upgrades, legacy history preservation, empty downgrade and populated destructive-downgrade refusal passed. No migration added or modified. |
+| `run python -m alembic heads`; `current`; `check` after the full suite | Single head/current **`6a94cbd3f825`**; **No new upgrade operations detected.** |
+| `run python -m evaluation.ra01 verify` | **VERIFIED**, unchanged freeze `692c33a321cc59e9799377ed512402ac33826dec06707d494b3d5853006a231a`. Frozen content/held-out samples were not changed or used to author fixtures. |
+| `run python -m pip check` | **No broken requirements found.** Pip disabled its unavailable cache. |
+| Local source/document checks; `git diff --check` | Python validation copy matches the repository; six local documentation links resolve; diff check passed. |
+
+The final identity check matched the database/user/port/data directory/system identifier above, with zero other clients, and application settings again confirmed no operator encryption key. Executed `/usr/lib/postgresql/16/bin/pg_ctl -D /tmp/ra04-w2-expiry.v1yFky/data -m fast -w stop`; the owned server stopped and its `postmaster.pid` is absent. No unresolved validation failure remains. This fixes the reviewed expiry blocker only; it does not claim independent Review Project PASS or begin W3. The commit remains local for review.

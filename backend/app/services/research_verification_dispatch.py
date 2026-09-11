@@ -73,7 +73,9 @@ class Dispatch:
         self.credential_version_id=selected['actor']['credential_version_id']
         self.rate=manifest.body['command']['rate_millirequests_per_second']/1000
         self.approval_id=decision.id if decision and decision.decision=='approved' else None
-        if self.clock()>=end:raise c.IntentError('verification_expired')
+        if self.clock()>=end:
+            self.clock.expire()
+            raise c.IntentError('verification_expired')
         return target,revision,scopes
 
     @contextmanager
@@ -119,7 +121,9 @@ class Dispatch:
                 self.executor.network_gateway.controller.check_enabled(self.core.target_id)
                 self.send_mark=self.clock.mark()
                 at=c.timestamp(self.send_mark['at'])
-                if at>=self.deadline:raise c.IntentError('verification_expired')
+                if at>=self.deadline:
+                    self.clock.expire()
+                    raise c.IntentError('verification_expired')
                 self.attempt_id=row.id
                 yield (self.deadline-at).total_seconds()
                 self.clock()
@@ -160,7 +164,9 @@ class Dispatch:
         end=min(c.timestamp(attempt.body['eligibility_until']),self.deadline)
         if self.member.role=='health':end=min(end,c.timestamp(send['at'])+timedelta(seconds=120))
         elif self.member.role=='baseline':end=min(end,c.timestamp(complete['at'])+timedelta(seconds=30))
-        try:vc.check_mark(send,vc.Clock(self.clock.wall),end=end)
+        result_clock=vc.Clock(self.clock.wall)
+        result_clock.bind_intent(self.bind,self.project,self.context_id,self.reference.model_dump())
+        try:vc.check_mark(send,result_clock,end=end)
         except c.IntentError:self.temporal_status='clock_or_deadline_invalid'
         if self.temporal_status!='qualified':semantic={**semantic,'outcome':'inconclusive','reason':self.temporal_status}
         service.cap(db,Witness,self.context_id,4096)

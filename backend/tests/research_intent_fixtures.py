@@ -81,6 +81,8 @@ def intent_graph(subject_pair):
             members=list(db.scalars(select(IntentPlanMember).where(IntentPlanMember.intent_id.in_(ids))))
             plans=[r.plan_id for r in members];cases=[r.test_case_id for r in members]
             db.execute(delete(IntentPlanMember).where(IntentPlanMember.intent_id.in_(ids)))
+            from app.db.models.research_verification import VerificationClockFault
+            db.execute(delete(VerificationClockFault).where(VerificationClockFault.context_id==g['ctx']))
             db.execute(delete(IntentVersion).where(IntentVersion.context_id==g['ctx']))
             db.execute(delete(SafetyDecisionRecord).where(SafetyDecisionRecord.execution_plan_id.in_(plans)))
             db.execute(delete(PlanAction).where(PlanAction.execution_plan_id.in_(plans)))

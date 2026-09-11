@@ -1,4 +1,4 @@
-"""One durable clock-continuity fence per exact intent; never an approval/event claim."""
+"""One durable clock/expiry fence per exact intent; never an approval/event claim."""
 from sqlalchemy import select,text,func
 from sqlalchemy.dialects.postgresql import insert
 from app.db.models.research_context import ResearchContext

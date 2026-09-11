@@ -195,7 +195,10 @@ def test_pair_final_boundary_rolls_back(verification_graph,monkeypatch,offset,ok
         else:
             with pytest.raises(c.IntentError,match='expired'):verify.verify_pair(db,g['project'],g['ctx'],p,now=lambda:clock[0])
         db.commit()
-    if not ok:assert snapshot()==before
+    if not ok:
+        from tests.services.test_research_verification_expiry import unchanged_except_fence, faults
+        unchanged_except_fence(before)
+        assert faults(g)=={business['reference']['digest']}
 
 
 @pytest.mark.parametrize('stage',['dispatch_audit','witness_audit','response_encode'])
@@ -277,13 +280,16 @@ def test_slow_response_and_late_health_completion_are_uncertain(verification_gra
 def test_health_expiry_during_body_read_never_persists_qualified_evidence(verification_graph):
     g=verification_graph;value=prepared_health(g);at=[NOW]
     g['server']['before_response']=lambda:at.__setitem__(0,NOW+timedelta(seconds=120))
-    with pytest.raises(c.IntentError,match='expired'):send(g,value,'health',now=lambda:at[0])
+    with pytest.raises(c.IntentError,match='clock_invalidated'):send(g,value,'health',now=lambda:at[0])
     with SessionLocal() as db:
         row=db.scalar(select(VerificationWitness).where(VerificationWitness.context_id==g['ctx']))
         assert row.body['outcome']=='inconclusive' and row.body['temporal_status']=='clock_or_deadline_invalid'
         view,end=verify.history(db,g['project'],g['ctx'],verify.ref(row),now=at[0])
         assert view['reusable'] is False and view['body']==row.body
         db.commit()
+    at[0]=NOW+timedelta(seconds=1)
+    with pytest.raises(c.IntentError,match='clock_invalidated'):
+        send(g,value,'health',now=lambda:at[0])
     assert len(g['server']['requests'])==1
 
 
@@ -433,8 +439,11 @@ def test_recorded_baseline_narrows_intent_and_approval_views(verification_graph,
             result=call(fn,g,*args,now=at)
             assert result['eligibility_until']==c.stamp(NOW+timedelta(seconds=30))
         else:
-            with pytest.raises(c.IntentError,match='expired'):call(fn,g,*args,now=at)
-            assert snapshot()==before
+            from tests.services.test_research_verification_expiry import unchanged_except_fence, faults
+            code='expired' if fn is intent.read else 'clock_invalidated'
+            with pytest.raises(c.IntentError,match=code):call(fn,g,*args,now=at)
+            unchanged_except_fence(before)
+            assert faults(g)=={business['reference']['digest']}
     assert len(g['server']['requests'])==2
 
 

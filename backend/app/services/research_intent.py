@@ -152,7 +152,18 @@ def _exact(db, model, context, ref, clock, *, latest=True):
         or row.body.get('intent_id' if model is IntentVersion else 'number')!=row.number): raise s.IntentError('intent_integrity')
     if model is IntentVersion and row.body.get('expires_at')!=s.stamp(row.valid_until): raise s.IntentError('intent_integrity')
     if latest and _latest(db,model,context,ref.number).id!=row.id: raise s.IntentError('intent_dependency_changed')
-    if not row.recorded_at <= _time(clock) < row.valid_until: raise s.IntentError('intent_expired')
+    if model is IntentVersion:
+        # Bind only the owned, integrity-checked exact version, before sampling
+        # time. The independent fence survives this operation's rollback.
+        from app.services.research_verification import bind_clock
+        bind_clock(db,context,_ref(row),clock)
+    if not row.recorded_at <= _time(clock) < row.valid_until:
+        from app.services.research_verification_clock import current
+        current(clock).expire()
+        raise s.IntentError('intent_expired')
+    if model is IntentVersion:
+        from app.services.research_verification_clock import current
+        current(clock).watch_window(row.recorded_at,row.valid_until)
     return row
 
 
@@ -166,10 +177,20 @@ def _audit(db, context, code, at):
 def final_boundary(value, clock=None):
     at=_clock(clock)()
     if not s.timestamp(value['body']['recorded_at']) <= at < s.timestamp(value['eligibility_until']):
+        from app.services.research_verification_clock import current
+        current(clock).expire()
         raise s.IntentError('intent_expired')
 
 
 def _receipt(db,context,row,kind,deadlines,clock):
+    if kind=='intent':
+        # Include newly converted cores through encoding too. An uncommitted
+        # core needs no durable fence if conversion rolls back; after commit the
+        # same exact binding remains usable only until its first observed expiry.
+        from app.services.research_verification import bind_clock
+        from app.services.research_verification_clock import current
+        bind_clock(db,context,_ref(row),clock)
+        current(clock).watch_window(row.recorded_at,row.valid_until)
     deadlines=[row.valid_until,*deadlines]
     value=dict(protocol='ra-w1-receipt/1',reference=_ref(row),kind=kind,body=row.body,
         eligibility_until=s.stamp(min(deadlines)),audit_id=_audit(db,context,kind if kind!='intent' else 'intent',_time(clock)),
@@ -381,7 +402,10 @@ def _qualification(proof,snapshot,purpose,clock):
         if type(receipt['evidence_id']) is not int or receipt['evidence_id']<=0 or not re.fullmatch('[0-9a-f]{64}',receipt['digest']): raise s.IntentError('intent_health_missing')
         send,complete,verified,end=[s.timestamp(receipt[k]) for k in ('send_at','complete_at','verified_at','valid_until')]
         end=min(end,send+timedelta(seconds=120))
-        if not send<=complete<=verified<=at<end: raise s.IntentError('intent_health_expired')
+        if not send<=complete<=verified<=at<end:
+            from app.services.research_verification_clock import current
+            current(clock).expire()
+            raise s.IntentError('intent_health_expired')
         deadlines.append(end)
     if len(s.canonical(proof))>4096: raise s.IntentError('intent_response_limit')
     return deadlines
@@ -490,8 +514,6 @@ def read(db,project,context_id,kind,reference,*,now=None):
         elif kind=='manifest': row,_,deadlines=_manifest(db,context,ref,now)
         elif kind=='intent':
             row=_exact(db,IntentVersion,context,ref,now)
-            from app.services.research_verification import bind_clock
-            bind_clock(db,context,_ref(row),now)
             manifest,snapshot,deadlines=_manifest(db,context,s.Reference.model_validate(row.body['manifest']),now)
             if _selected_snapshot(snapshot,row.body['purpose'])!=row.body['snapshot'] or _budget(db,manifest,now)!=row.body['budget']: raise s.IntentError('intent_dependency_changed')
             rule,ends=_knowledge(db,context,ks.ExactRef.model_validate(row.body['knowledge']['reference']) if row.body['knowledge'] else None,snapshot,now)

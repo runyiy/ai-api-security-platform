@@ -193,6 +193,11 @@ def _current_approval(db,core,plan_id):
 
 
 def _healthy(db,context,reference,actor,expectation,clock):
+    with vc.current(clock).dependency():
+        return _healthy_dependency(db,context,reference,actor,expectation,clock)
+
+
+def _healthy_dependency(db,context,reference,actor,expectation,clock):
     row,core=witness(db,context,reference);body=row.body
     bind_clock(db,context,intent._ref(core),clock)
     if core.body['purpose'] not in ('health_baseline','health_probe') or body['outcome']!='healthy' or body['temporal_status']!='qualified':

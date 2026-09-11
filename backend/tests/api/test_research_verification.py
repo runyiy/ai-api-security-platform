@@ -113,7 +113,10 @@ def test_final_response_construction_deadline_rolls_back_pair(api,verification_g
     monkeypatch.setattr(route,'Response',construction)
     res=api.post(url(g,'pairs'),json=dict(intent=business['reference'],baseline=baseline['reference'],probe=probe['reference']))
     assert res.status_code==(200 if ok else 409)
-    if not ok:assert snapshot()==before
+    if not ok:
+        from tests.services.test_research_verification_expiry import unchanged_except_fence, faults
+        unchanged_except_fence(before)
+        assert faults(g)=={business['reference']['digest']}
     assert len(g['server']['requests'])==3
 
 
