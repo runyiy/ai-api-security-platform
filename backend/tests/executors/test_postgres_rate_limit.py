@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 import os
 import subprocess
 import sys
@@ -6,7 +7,7 @@ import time
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 
 from app.db.models.rate_reservation_state import RateReservationState
 from app.db.session import SessionLocal, engine
@@ -55,20 +56,66 @@ def test_invalid_platform_and_requested_rates_fail_closed(
 
 
 @pytest.mark.parametrize(
-    ("requested_rate", "minimum_delay"),
-    [(100.0, 0.4), (0.5, 1.8)],
+    ("requested_rate", "minimum_interval"),
+    [(100.0, 0.5), (0.5, 2.0)],
+)
+@pytest.mark.parametrize(
+    "elapsed_intervals", [0.0, 0.75, 1.25],
+    ids=["immediate", "partly-elapsed", "already-elapsed"],
 )
 def test_first_and_sequential_reservations_use_effective_minimum_rate(
-    rate_key: str, requested_rate: float, minimum_delay: float
+    rate_key: str,
+    requested_rate: float,
+    minimum_interval: float,
+    elapsed_intervals: float,
 ) -> None:
     delays: list[float] = []
     shared = limiter(sleep=delays.append)
+    interval = timedelta(seconds=minimum_interval)
 
+    # Bracket reservations with the same clock PostgreSQL uses. Independent
+    # sessions also verify that each schedule update has been committed.
+    with SessionLocal() as db:
+        first_before = db.scalar(text("SELECT clock_timestamp()"))
     shared.wait(key=rate_key, requested_requests_per_second=requested_rate)
-    shared.wait(key=rate_key, requested_requests_per_second=requested_rate)
+    with SessionLocal() as db:
+        first_after = db.scalar(text("SELECT clock_timestamp()"))
+        first_state = db.get(RateReservationState, rate_key)
+        assert first_state is not None
+        first_next = first_state.next_allowed_at
 
-    assert len(delays) == 1
-    assert minimum_delay <= delays[0] <= 2.0
+    assert delays == []
+    assert first_before + interval <= first_next <= first_after + interval
+
+    # Consume part or all of the interval without mocking database time or SQL.
+    time.sleep(minimum_interval * elapsed_intervals)
+    with SessionLocal() as db:
+        second_before = db.scalar(text("SELECT clock_timestamp()"))
+    shared.wait(key=rate_key, requested_requests_per_second=requested_rate)
+    with SessionLocal() as db:
+        second_after = db.scalar(text("SELECT clock_timestamp()"))
+        second_state = db.get(RateReservationState, rate_key)
+        assert second_state is not None
+        second_next = second_state.next_allowed_at
+
+    assert (
+        max(first_next, second_before) + interval
+        <= second_next
+        <= max(first_next, second_after) + interval
+    )
+    if first_next >= second_after:
+        assert second_next - first_next == interval
+
+    # Sleep covers only the unconsumed reservation, not the whole interval.
+    # A fully elapsed reservation needs no sleep and starts a fresh interval.
+    minimum_delay = max(0.0, (first_next - second_after).total_seconds())
+    maximum_delay = max(0.0, (first_next - second_before).total_seconds())
+    assert len(delays) <= 1
+    delay = delays[0] if delays else 0.0
+    assert minimum_delay <= delay <= maximum_delay
+    if elapsed_intervals > 1:
+        assert second_before > first_next
+        assert delays == []
 
 
 def test_reservation_is_committed_and_lock_released_before_sleep(
