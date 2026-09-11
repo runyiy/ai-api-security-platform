@@ -133,7 +133,7 @@ AI 接收 typed data 并返回建议，不拥有 executor、shell、任意 fetch
 | RA-01 | 可执行的产品/评测契约及 ADR 规格 | 计划审阅后单独批准首个任务 | 冻结 oracle、阈值及必要 ADR | W1–W3 材料已审阅；DATA D1–D4 已采纳（本次交接），其余 ADR 按依赖门槛待批 |
 | RA-02 | 安全观察导入及身份/资源/预算上下文 | RA-01；数据 lifecycle 决策 | 为检索/规划提供安全输入 | W1–W3 已独立审阅/push（W3 exact SHA 见当前记录）；不代签 stage COMPLETE |
 | RA-03 | 带版本和反例的已审规则 | RA-02；知识使用资格/隔离审查 | 可重复的受限检索 | W1/K1–K4已采纳；W2经PR #141、W3经PR #142集成（交接2790 passed）；不在此代签stage COMPLETE |
-| RA-04 | 最小本地候选→计划→验证→证据演示 | RA-03；bridge/intent/evidence ADR | 可靠验证窄请求形态 | IN_PROGRESS；I1–I7已采纳，W1经review/PR #144集成；W2实施待独立review，专用dispatcher严格核验生产证明；W3未开始 |
+| RA-04 | 最小本地候选→计划→验证→证据演示 | RA-03；bridge/intent/evidence ADR | 可靠验证窄请求形态 | IN_PROGRESS；I1–I7已采纳，W1经review/PR #144集成；W2经PR #145集成；CI分片经PR #146集成（交接PR/main 3228 passed）；W3本地演示实施待独立review |
 | RA-05 | 按需、预算内的真实 AI 建议 | RA-04；AI proposal 和 provider egress ADR | fake 回归及单独获准的真实验证 | NOT_STARTED / NOT_AUTHORIZED |
 | RA-06 | CLI 启动/暂停/取消/恢复持久任务 | RA-05；编排/审批/恢复 ADR | 日常使用无需 SQL/Python | NOT_STARTED / NOT_AUTHORIZED |
 | RA-07 | 验收包、报告、反馈及实测本地发布 | RA-06；冻结评测及费用批准 | 本地 go/no-go | NOT_STARTED / NOT_AUTHORIZED |
@@ -180,6 +180,8 @@ AI 接收 typed data 并返回建议，不拥有 executor、shell、任意 fetch
 - **退出门槛：** 受限本地案例获得已审查规则、反例和明确缺口；无匹配案例拒绝判断。下一阶段历史标记为 **RA-04 NOT_AUTHORIZED**；后续明确授权仅见本页当前W1文档准备记录，bridge依赖决定仍待批。
 
 ### RA-04 — 独立本地计划转换和可靠权限验证
+
+- **当前W3范围：** 当前交接记录W2经PR #145集成，CI分片reviewed `c2b18941b3c079eb167b2f0a2f763e1d25956b53` 经PR #146集成，PR及main均3228 tests passed。本包从核验的main `844581154700a57607987e059091c3c4de43b238` 开始既有W3：[精简本地演示与验证记录](research-local-demonstration.md)组合现有API、W1转换和W2真实dispatcher，覆盖安全拒绝、合成缺陷、合法共享、明确不确定性及兼容/安全门禁。仅自有loopback fixture、文档和验收测试，**IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**；没有新产品入口、不开始RA-05、不宣告RA-04 COMPLETE。以下W1/W2当时范围与pending文字保留历史。
 
 - **当前W2范围：** [W2实施与验证](research-response-verification.md)提供固定解释器、可信health/actual credential/send-complete证据、独立exact-plan dispatch、最终120/300/30秒与source generation核验、不可变pair和不确定性；保留M12/M14/M13及legacy拒绝。专用本地路径满足全部资格才可发送，公网/私有材料/AI/W3不在范围；等待独立review，不宣告RA-04完成。
 
