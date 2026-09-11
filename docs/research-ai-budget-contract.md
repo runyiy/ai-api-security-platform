@@ -1,6 +1,8 @@
 # RA-05/W2 — preparation, budget and observation proposal
 
-**v0.1.0 · DOCUMENTATION_ONLY / PROPOSED / PENDING_APPROVAL**
+**v0.1.0 · historical proposal status: DOCUMENTATION_ONLY / PROPOSED / PENDING_APPROVAL**
+
+**Current:** B1–B8 design recommendations adopted for subsequent W2 fake-only work; see the [appended adoption record](#w2-design-adoption-record). Concrete pre-code details are [pending independent review](research-ai-w2-implementation-contract.md); no W2 implementation or operational approval is claimed.
 
 Base: `658464c5ae45f058cbb3c6a0bdd8ad3f371ad114`; branch: `codex/ra-05-w2-budget-proposal`. Repository identity, clean main/HEAD, actual remote main and branch availability were verified before branching. The user handoff records independent review of W1 `0e3b94a909ee01eba41c79a264f056665c0222ce`, integration through PR #150, and local/PR/exact-main gates passing **3798 tests**. Git confirms the main tree matches that reviewed tree. This documentation task neither reruns those gates nor invents CI run IDs or an additional approval.
 
@@ -188,3 +190,13 @@ Validation is limited to standard-library checks of local links/anchors, bounded
 On 2026-09-11, isolated `python3 -I` with an empty ambient environment passed checks of **3 Markdown files / 97 local links and anchors**, one strict synthetic JSON example, five known-usage rows plus the unknown row, Decimal rounding/conservation and exact-cap controls, six rejecting validation controls, **8 decision items / 12 future acceptance groups**, and static W1 port signatures/callback ordering. Checker and results are retained in `/tmp/ra05-w2-docs-j618whw5/`; these are document checks, not evidence that the proposed concurrency/crash controls exist. `git diff --check` passed and the complete changed scope is these three documents. README and current CI requirements were checked: hosted full regression gates remain unchanged; no backend suite or database was needed for this prose-only change.
 
 Independent review and User adoption remain pending. After the local commit: **STOP**; no push, PR, merge, branch cleanup, W2 implementation, W3/cache or RA-06 work.
+
+## W2 design adoption record
+
+- **Exact adopted material:** this document v0.1.0 at reviewed commit `dce6d4d4bc49a5284b427d4e428dd901be6c50c7`, B1–B8 recommendations, integrated through PR #151 into the current starting main `e953ee08cb32e0ba9de0f3d196e7b5e82b9fe727`.
+- **Decision evidence:** the current user handoff records the User's explicit reply **“采纳”** to Review Project's B1–B8 adoption request. Reviewer observed the decision at **2026-09-11 20:26:02 UTC**. This is an observation time, not a claimed message timestamp, signature, identity or approval ID.
+- **Effect:** B1–B8 now govern subsequent W2 fake-only work, including their evidence and compatibility conditions. The concrete necessity table/retrieval projection and versioned B8 interfaces still require pre-code independent review; the [implementation-contract companion v0.1.0](research-ai-w2-implementation-contract.md) supplies those details and separately labels the new material N1 mechanism. It does not ask to readopt B1–B8.
+- **Limits/status:** design adoption does not approve actual provider/Target calls, account or credential access, private data, per-material egress, operational retention, spending or deployment. W2 is not implemented, RA-05 is not complete, and W3/cache/RA-06 have not started. N1 is not attributed to this adoption.
+- **Integration evidence:** handoff records PR CI and exact-main CI passing all 3798 tests on their first attempts; this documentation task verified Git identity/base and matching reviewed/main trees, not CI logs or a new backend run.
+
+The original proposal, pending decision table and §7 validation remain historical records. This appended record changes their current design status without rewriting their earlier claims or granting operational authority.
