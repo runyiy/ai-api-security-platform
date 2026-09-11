@@ -1,4 +1,4 @@
-import time
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -478,37 +478,79 @@ def test_legacy_null_runs_remain_multiple_and_duplicate_plan_run_is_rejected(
 
 def test_stale_generation_after_network_cannot_persist_result(
     approved_plan: tuple[int, int, int, int],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    plan_id, _, _, _ = approved_plan
+    plan_id, target_id, revision_id, _ = approved_plan
     claims = ExecutionPlanClaimService(bind=engine, attempt_timeout_seconds=0.1)
+    release = Mock(wraps=claims.release)
+    monkeypatch.setattr(claims, "release", release)
+    original_owner = None
+    original_generation = None
+    takeover = None
 
     class TakeoverGateway(RecordingGateway):
         def request(self, **kwargs):
+            nonlocal original_owner, original_generation, takeover
             result = super().request(**kwargs)
-            time.sleep(0.08)
-            claims.acquire(plan_id, "new-owner", lease_seconds=2)
+            # Keep the normal lease through pre-network work. Expire only the
+            # persisted lease at the fake response boundary, without sleeping
+            # or bypassing real acquisition/generation/result-fencing checks.
+            with SessionLocal() as db:
+                claim = db.get(ExecutionPlanClaim, plan_id, with_for_update=True)
+                assert claim is not None
+                database_now = db.scalar(select(func.clock_timestamp()))
+                assert claim.lease_expires_at > database_now
+                original_owner = claim.owner_id
+                original_generation = claim.fencing_generation
+                assert original_owner is not None
+                assert original_owner != "new-owner"
+                claim.lease_expires_at = database_now - timedelta(seconds=1)
+                db.commit()
+            takeover = claims.acquire(plan_id, "new-owner", lease_seconds=30)
             return result
 
+    gateway = TakeoverGateway()
     with pytest.raises(ExecutionBlockedError) as raised:
         execute(
             plan_id,
             limiter=MutatingRateLimiter(),
-            gateway=TakeoverGateway(),
+            gateway=gateway,
             claim_service=claims,
-            claim_lease_seconds=0.05,
         )
 
+    assert gateway.target_ids == [target_id]
+    assert takeover is not None
+    assert takeover.owner_id == "new-owner"
+    assert takeover.fencing_generation == original_generation + 1
     assert raised.value.code == "execution_plan_result_fencing_lost"
+    release.assert_called_once()
+    released = release.call_args.args[0]
+    assert released.owner_id == original_owner
+    assert released.fencing_generation == original_generation
     with SessionLocal() as db:
         assert db.scalar(select(TestRun).where(TestRun.execution_plan_id == plan_id)) is None
-        audit = db.scalar(
+        audit = db.scalars(
             select(SafetyDecisionRecord).where(
                 SafetyDecisionRecord.execution_plan_id == plan_id,
-                SafetyDecisionRecord.code == "execution_plan_result_fencing_lost",
+                SafetyDecisionRecord.stage == "execution",
             )
-        )
-        assert audit is not None
+        ).one()
+        assert audit.code == "execution_plan_result_fencing_lost"
         assert audit.outcome == "failed"
+        assert audit.operation == "test_execution"
+        assert audit.target_id == target_id
+        assert audit.authorization_revision_id == revision_id
+        assert audit.test_run_id is None
+        action = db.scalars(
+            select(PlanAction).where(PlanAction.execution_plan_id == plan_id)
+        ).one()
+        assert audit.plan_action_id == action.id
+        assert audit.test_case_id == action.test_case_id
+        claim = db.get(ExecutionPlanClaim, plan_id)
+        assert claim is not None
+        assert claim.owner_id == takeover.owner_id
+        assert claim.fencing_generation == takeover.fencing_generation
+        assert claim.lease_expires_at == takeover.lease_expires_at
 
 
 def test_result_fencing_coordination_failure_is_sanitized_and_writes_no_result(
