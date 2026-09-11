@@ -1,5 +1,7 @@
 # Research Assistant ADR 决策材料与 RA-02 数据契约
 
+> **RA-05/W1 design adoption and implementation:** The user handoff records “采用”, observed 2026-09-11, for reviewed provider contract v0.1.0 / `29376dda7e0ffa99fe3f1947bb2c3e83df81c228`. [Adoption record](research-ai-provider-contract.md#w1-design-adoption-and-implementation-record): P1–P6 and E1–E6 design constraints apply to fake-only W1. [Implementation evidence](research-ai-provider-implementation.md) is IMPLEMENTED / PENDING_INDEPENDENT_REVIEW. Actual account/key/data/retention/budget/egress approvals and real-provider acceptance remain pending; Target restrictions are unchanged. W2/W3 have not started. Earlier pending text is preserved as history.
+
 > **RA-05/W1 后续文档准备（2026-09-11）：** 从核验的clean main/remote main `d058cb82215c61b4c7811784abb24dc0ae069f80` 开始既有W1的 [proposal/provider契约 v0.1.0](research-ai-provider-contract.md)，补齐§7/§8，**DOCUMENTATION_ONLY / PENDING_INDEPENDENT_REVIEW**；P1–P6/E1–E6全部 **PROPOSED / PENDING_APPROVAL**。推荐不批准模型、数据、账号、支出或provider POST例外，adapter未实施，W1/RA-05未完成，W2未开始。DATA D1–D4、K1–K4、INTENT I1–I7既有采纳约束不变；下方旧C/P、pending和包内停止点保留为各基点历史。
 
 > **RA-04/W3 后续集成证据：** 用户交接确认 reviewed `167853e2a7386088b3d915e12e2c2e383fa3effe` 经PR #147集成，独立本地、PR CI `34569913522`、main CI `34570935882` 各3266 passed。本包Git核验上述main与reviewed feature tree相同，未重跑suite或重新审计CI。仅建立有界合成本地演示验收，不授予production/public/provider readiness或其余待决ADR批准。
@@ -45,8 +47,8 @@ The current W2 handoff records reviewed W1 integration in PR #144 and authorizes
 | --- | --- | --- | --- |
 | ADR-RA-DATA | 第 2–5 节的输入、隔离、资格、lifecycle 与兼容方案 | Tech Lead 批准字段/存储/迁移/兼容；操作者确认数据资格、保留期限及运维可行性。RA-02/W1 使用输入设计前确认适用部分；RA-02/W2 持久化前批准并实现全部适用控制 | **无；PENDING** |
 | ADR-RA-INTENT | 第 6 节及后续 [INTENT v0.1.0 / I1–I7](research-intent-contract.md#9-待决定表)：精确协议、health120s/pair30s/intent300s、失效与兼容建议 | Tech Lead 批准协议/模型/兼容；操作者决定时间和操作可行性、确认业务事实。RA-04/W1 依赖代码前，health/verifier及预算依赖按I6检查 | **I1–I7 ADOPTED（本次W1用户交接，见后续采纳记录）；实际请求/凭据/数据/费用未授权** |
-| ADR-RA-PROPOSAL | 第 7 节及后续 [W1契约§2/P1–P6](research-ai-provider-contract.md#2-proposal-protocol-p)：独立、无 authority 的 typed suggestion | Tech Lead 批准协议/消费边界；操作者确认解释与拒绝方式。RA-05 proposal 集成前 | **无；PENDING** |
-| ADR-RA-EGRESS | 第 8 节及后续 [W1契约§3–7/E1–E6](research-ai-provider-contract.md#3-providermodel-比较与推荐-p)：默认关闭的独立 provider transport、资格与核算 | Tech Lead 批准边界/用量解释；操作者独立批准模型、账号、数据及费用。RA-05 provider 代码前；每次真实运行前再次核验许可 | **无；PENDING** |
+| ADR-RA-PROPOSAL | 第 7 节及后续 [W1契约§2/P1–P6](research-ai-provider-contract.md#2-proposal-protocol-p)：独立、无 authority 的 typed suggestion | Tech Lead 批准协议/消费边界；操作者确认解释与拒绝方式。RA-05 proposal 集成前 | **DESIGN ADOPTED for W1 fake-only（见页首记录）；operational approvals PENDING** |
+| ADR-RA-EGRESS | 第 8 节及后续 [W1契约§3–7/E1–E6](research-ai-provider-contract.md#3-providermodel-比较与推荐-p)：默认关闭的独立 provider transport、资格与核算 | Tech Lead 批准边界/用量解释；操作者独立批准模型、账号、数据及费用。RA-05 provider 代码前；每次真实运行前再次核验许可 | **DESIGN ADOPTED for W1 fake-only（见页首记录）；operational approvals PENDING** |
 | ADR-RA-TASK | 第 9 节：PostgreSQL 任务预算/观察账本与 M8 精确计划协调分工 | Tech Lead 批准状态/事务/恢复；操作者批准硬预算与审批操作。RA-06 实施前，若更早引入审批聚合则更早 | **无；PENDING** |
 | ADR-RA-PUBLIC | 第 10 节：readiness、自有演练、第三方许可分开 | Tech Lead 批准控制和 go/no-go；操作者取得每项实际测试许可。RA-08 控制修改前；RA-08/09 各执行门槛单独审查 | **无；PENDING** |
 

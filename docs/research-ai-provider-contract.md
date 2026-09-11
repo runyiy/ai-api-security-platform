@@ -1,5 +1,7 @@
 # RA-05/W1：AI proposal protocol 与 provider/model 建议
 
+> **Current W1 status:** P1–P6 and E1–E6 design constraints are adopted for fake-only implementation; see the [adoption record](#w1-design-adoption-and-implementation-record) and [implementation evidence](research-ai-provider-implementation.md). The original proposal and validation statements below remain historical. Operational approvals and independent implementation review remain outstanding.
+
 **文档 v0.1.0 · DOCUMENTATION_ONLY / PENDING_INDEPENDENT_REVIEW**
 
 **全部本包推荐：PROPOSED / PENDING_APPROVAL · 2026-09-11**
@@ -344,3 +346,13 @@ P1–P6/E1–E6仅为既有PROPOSAL/EGRESS的本页审阅项，不是新ADR、pa
 `git diff --check`及documentation-only文件范围检查通过。未import application，未运行DB-backed测试、backend suite、migration、evaluation命令或held-out数据读取；没有依赖/应用/测试/CI变更。公开官方文档研究只发送通用API主题查询和文档GET，不发送repository/private材料到provider API；没有账户/credential inspection、付费调用、部署或Target请求。
 
 本包不批准模型/数据/费用，不签署独立Review Project PASS，不宣告W1或RA-05 COMPLETE。创建feature branch本地commit后 **STOP**；不push、PR、merge、adapter实现、RA-05/W2或任何新package。等待独立Review Project审阅exact commit以及§7的Tech Lead/operator决定。
+
+## W1 design adoption and implementation record
+
+- **Exact adopted material:** document v0.1.0 at reviewed commit `29376dda7e0ffa99fe3f1947bb2c3e83df81c228`, §7 P1–P6 and the design constraints of E1–E6, incorporated in starting main `386b08b2cca8f49a8ebeff14cc64e4a30d8b2037`.
+- **Decision evidence:** the current user handoff records the user's reply **“采用”** to Review Project's explicit adoption request for W1 fake-only implementation. Review Project carries these recommendations as implementation requirements. The decision was observed on **2026-09-11**; no exact message timestamp, additional approver, signature or approval ID is supplied or invented.
+- **Effect:** design adopted and existing W1 implementation authorized, including fixed OpenAI Responses / `gpt-5.6-terra` / low reasoning / no fallback and the protocol, data, transport, credential and usage constraints. DATA D1–D4, K1–K4 and INTENT I1–I7 remain applicable.
+- **Operational limits:** no actual account/key use, per-material egress/retention, operational budget, paid call, deployment or Target execution is approved. E5 examples remain synthetic arithmetic, not spending limits. The provider POST design exception does not broaden Target GET-only/public-blocked behavior.
+- **Implementation:** [W1 adapter and validation record](research-ai-provider-implementation.md), **IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**. Real calls remain disabled; real-provider acceptance is pending. No independent implementation PASS, W1 acceptance or RA-05 COMPLETE is claimed. W2/W3 have not started.
+
+The original §7 pending table and §9 documentation-only validation above describe the proposal's historical state. This appended record establishes subsequent design adoption without changing those historical claims or converting design adoption into operational authority.
