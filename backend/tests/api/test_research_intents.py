@@ -35,7 +35,7 @@ def test_future_qualified_conversion_api(api,intent_graph,qualified_future):
     response=api.post(url(g,'versions/1'),json=conversion(g))
     assert response.status_code==200 and response.json()['execution_authorized'] is False
     assert len(response.json()['body']['link']['members'])==2
-    assert response.json()['execution_status']=='w2_dependency_closed'
+    assert response.json()['execution_status']=='requires_exact_dispatch'
 
 
 @pytest.mark.parametrize('field,value',[('passed',True),('health',[]),('synthetic_test_only',True),('purpose','execute'),('expected_version',False),('knowledge',{'digest':'a'*64})])

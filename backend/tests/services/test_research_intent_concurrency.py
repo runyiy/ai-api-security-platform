@@ -13,8 +13,8 @@ from tests.services.test_research_subject_concurrency import wait_for_blocker
 
 def test_scope_writer_waits_for_conversion_then_invalidates(intent_graph,monkeypatch):
     g=intent_graph;approve(g);ready,release,waiting=Event(),Event(),Event();pids={}
-    def proof(*args):
-        ready.set();assert release.wait(10);return future_proof(*args)
+    def proof(*args,**kwargs):
+        ready.set();assert release.wait(10);return future_proof(*args,**kwargs)
     monkeypatch.setattr(service,'_interpretation',proof)
     def reader():
         with SessionLocal() as db:

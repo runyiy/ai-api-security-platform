@@ -56,8 +56,9 @@ def encoded(value, clock=None):
     result=s.Receipt.model_validate(value).model_dump()
     raw=s.output(result)
     if len(raw)>s.MAX_OUTPUT: raise s.IntentError('intent_response_limit',500)
+    response=Response(raw,media_type='application/json',headers=NO_STORE)
     service.final_boundary(result,clock)
-    return Response(raw,media_type='application/json',headers=NO_STORE)
+    return response
 
 
 @router.post('/mappings/{number}',openapi_extra=request_body(s.MappingInput))

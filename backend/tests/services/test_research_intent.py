@@ -112,8 +112,8 @@ def test_future_conflict_deadline_is_retained(intent_graph,qualified_future,monk
 @pytest.mark.parametrize('field',['context_id','target_id','identity_id','credential_version_id','digest','send_at','valid_until'])
 def test_forged_or_stale_future_envelope_rejected(intent_graph,monkeypatch,field):
     g=intent_graph;approve(g)
-    def wrong(*args):
-        p=future_proof(*args);r=p['health'][0]
+    def wrong(*args,**kwargs):
+        p=future_proof(*args,**kwargs);r=p['health'][0]
         if field=='digest':r[field]='NOT_RUN'
         elif field=='send_at':r[field]=s.stamp(NOW+timedelta(seconds=1))
         elif field=='valid_until':r[field]=s.stamp(NOW)
@@ -190,8 +190,8 @@ def test_storage_limit_fail_closed(intent_graph,qualified_future,monkeypatch,kin
 @pytest.mark.parametrize('offset,ok',[(-1,True),(0,False),(1,False)])
 def test_health_120_seconds_from_send_not_verification(intent_graph,monkeypatch,offset,ok):
     g=intent_graph;approve(g)
-    def proof(*args):
-        result=future_proof(*args)
+    def proof(*args,**kwargs):
+        result=future_proof(*args,**kwargs)
         result['health'][0]['send_at']=s.stamp(NOW-timedelta(seconds=120,microseconds=offset))
         return result
     monkeypatch.setattr(service,'_interpretation',proof)
@@ -234,7 +234,7 @@ def test_explicit_health_bootstrap_is_one_closed_plan(intent_graph,qualified_fut
     core=value['body'];assert core['protocol']=='ra-health-intent/1' and core['request_count']==1
     assert len(core['snapshot']['actions'])==1 and core['interpretation']['health']==[]
     assert core['link']['protocol']=='ra-health-link/1' and core['link']['members'][0]['role']=='health'
-    assert call(service.read,g,'intent',value['reference'])['execution_status']=='w2_dependency_closed'
+    assert call(service.read,g,'intent',value['reference'])['execution_status']=='requires_exact_dispatch'
     assert s.timestamp(core['expires_at'])==NOW+timedelta(seconds=duration)
     assert call(service.read,g,'intent',value['reference'],now=NOW+timedelta(seconds=duration,microseconds=-1))['reference']==value['reference']
     with pytest.raises(s.IntentError,match='expired'):

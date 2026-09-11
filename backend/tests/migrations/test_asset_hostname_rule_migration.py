@@ -22,7 +22,7 @@ def test_asset_hostname_rule_migration_schema_restrict_and_round_trip() -> None:
     config = Config("alembic.ini")
     scripts = ScriptDirectory.from_config(config)
     assert scripts.get_revision(REVISION).down_revision == PARENT
-    assert scripts.get_heads() == ["5f83bac2e714"]
+    assert scripts.get_heads() == ["6a94cbd3f825"]
     profile_id = revision_id = rule_id = None
     try:
         command.downgrade(config, PARENT)

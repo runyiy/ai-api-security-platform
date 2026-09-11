@@ -13,7 +13,7 @@ from tests.research_rule_fixtures import (  # noqa: F401
     rule_pair, knowledge_pair, subject_pair, two_intake_targets, rule, validate, feedback, review,
     NOW, REF,
 )
-from tests.research_intake_fixtures import snapshot, RULE_VALIDATION_TABLES, INTENT_TABLES
+from tests.research_intake_fixtures import VERIFICATION_TABLES, snapshot, RULE_VALIDATION_TABLES, INTENT_TABLES
 
 REVISION = 'a1c3e5f7b9d0'
 PARENT = 'f0b2d4e6a8c0'
@@ -24,13 +24,13 @@ def previous():
     # is independently checked by test_research_intent_lifecycle_migration.
     with engine.connect() as db:
         return {t.name: list(db.execute(select(*[c for c in t.columns if c.name != 'hold_generation']).order_by(*t.primary_key.columns)).mappings())
-            for t in Base.metadata.sorted_tables if t.name not in RULE_VALIDATION_TABLES | INTENT_TABLES}
+            for t in Base.metadata.sorted_tables if t.name not in VERIFICATION_TABLES | RULE_VALIDATION_TABLES | INTENT_TABLES}
 
 
 def test_fresh_additive_schema_and_safe_empty_downgrade(monkeypatch):
     config = Config('alembic.ini')
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ['5f83bac2e714']
+    assert scripts.get_heads() == ['6a94cbd3f825']
     assert scripts.get_revision(REVISION).down_revision == PARENT
     name = 'rule_validation_'+uuid4().hex
     with engine.begin() as db:db.execute(text(f'CREATE SCHEMA "{name}"'))
@@ -76,5 +76,5 @@ def test_populated_w2_and_legacy_upgrade_unchanged_and_history_downgrade_blocked
         with pytest.raises(RuntimeError, match='research_rule_validation_populated_downgrade_blocked'):
             command.downgrade(config, PARENT)
         assert snapshot() == history
-        with engine.connect() as db:assert MigrationContext.configure(db).get_current_revision() == '5f83bac2e714'
+        with engine.connect() as db:assert MigrationContext.configure(db).get_current_revision() == '6a94cbd3f825'
     finally:command.upgrade(config, 'head')

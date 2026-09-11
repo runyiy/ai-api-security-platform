@@ -53,6 +53,8 @@ class HTTPExecutionResult:
     status_code: int
     body: bytes
     duration_ms: int
+    content_type: str | None = None
+    content_encoding: str | None = None
 
 
 class PolicyEnforcedHTTPExecutor:
@@ -81,6 +83,8 @@ class PolicyEnforcedHTTPExecutor:
         ] | None = None,
         policy_decision_observer: Callable[[PolicyDecision], None] | None = None,
         before_network: Callable[[], None] | None = None,
+        request_boundary=None,
+        requested_rate_limit: float | None = None,
     ) -> HTTPExecutionResult:
         normalized_method = (
             method.strip().upper()
@@ -123,7 +127,8 @@ class PolicyEnforcedHTTPExecutor:
             self.rate_limiter.wait(
                 key=f"target:{target.id}",
                 requested_requests_per_second=(
-                    authorization_revision.max_requests_per_second
+                    min(authorization_revision.max_requests_per_second, requested_rate_limit)
+                    if requested_rate_limit is not None else authorization_revision.max_requests_per_second
                 ),
             )
         except RateLimitConfigurationError as exc:
@@ -174,7 +179,7 @@ class PolicyEnforcedHTTPExecutor:
                 ),
             )
 
-        if before_network is not None:
+        if before_network is not None and request_boundary is None:
             before_network()
 
         try:
@@ -184,8 +189,9 @@ class PolicyEnforcedHTTPExecutor:
                 method=normalized_method,
                 url=url,
                 headers=headers,
-                max_response_bytes=MAX_RESPONSE_BYTES,
+                max_response_bytes=16384 if request_boundary is not None else MAX_RESPONSE_BYTES,
                 timeout_seconds=5.0,
+                **({"request_boundary": request_boundary} if request_boundary is not None else {}),
             )
         except NetworkGatewayError as exc:
             raise HTTPExecutionError(f"{exc.code}: {exc.reason}") from exc
@@ -193,6 +199,8 @@ class PolicyEnforcedHTTPExecutor:
             status_code=result.status_code,
             body=result.body,
             duration_ms=result.duration_ms,
+            content_type=getattr(result, "content_type", None),
+            content_encoding=getattr(result, "content_encoding", None),
         )
 
     @staticmethod

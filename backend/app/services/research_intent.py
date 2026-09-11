@@ -51,7 +51,8 @@ class _Clock:
 
 
 def _clock(source):
-    return source if isinstance(source, _Clock) else _Clock(source)
+    from app.services.research_verification_clock import current
+    return source if isinstance(source, _Clock) else _Clock(current(source))
 
 
 def _json(value):
@@ -151,7 +152,18 @@ def _exact(db, model, context, ref, clock, *, latest=True):
         or row.body.get('intent_id' if model is IntentVersion else 'number')!=row.number): raise s.IntentError('intent_integrity')
     if model is IntentVersion and row.body.get('expires_at')!=s.stamp(row.valid_until): raise s.IntentError('intent_integrity')
     if latest and _latest(db,model,context,ref.number).id!=row.id: raise s.IntentError('intent_dependency_changed')
-    if not row.recorded_at <= _time(clock) < row.valid_until: raise s.IntentError('intent_expired')
+    if model is IntentVersion:
+        # Bind only the owned, integrity-checked exact version, before sampling
+        # time. The independent fence survives this operation's rollback.
+        from app.services.research_verification import bind_clock
+        bind_clock(db,context,_ref(row),clock)
+    if not row.recorded_at <= _time(clock) < row.valid_until:
+        from app.services.research_verification_clock import current
+        current(clock).expire()
+        raise s.IntentError('intent_expired')
+    if model is IntentVersion:
+        from app.services.research_verification_clock import current
+        current(clock).watch_window(row.recorded_at,row.valid_until)
     return row
 
 
@@ -165,14 +177,24 @@ def _audit(db, context, code, at):
 def final_boundary(value, clock=None):
     at=_clock(clock)()
     if not s.timestamp(value['body']['recorded_at']) <= at < s.timestamp(value['eligibility_until']):
+        from app.services.research_verification_clock import current
+        current(clock).expire()
         raise s.IntentError('intent_expired')
 
 
 def _receipt(db,context,row,kind,deadlines,clock):
+    if kind=='intent':
+        # Include newly converted cores through encoding too. An uncommitted
+        # core needs no durable fence if conversion rolls back; after commit the
+        # same exact binding remains usable only until its first observed expiry.
+        from app.services.research_verification import bind_clock
+        from app.services.research_verification_clock import current
+        bind_clock(db,context,_ref(row),clock)
+        current(clock).watch_window(row.recorded_at,row.valid_until)
     deadlines=[row.valid_until,*deadlines]
     value=dict(protocol='ra-w1-receipt/1',reference=_ref(row),kind=kind,body=row.body,
         eligibility_until=s.stamp(min(deadlines)),audit_id=_audit(db,context,kind if kind!='intent' else 'intent',_time(clock)),
-        execution_authorized=False,execution_status='w2_dependency_closed')
+        execution_authorized=False,execution_status='requires_exact_dispatch')
     if kind=='intent': value['body']={**row.body,'link':row.link,'link_digest':row.link_digest}
     value=s.Receipt.model_validate(value).model_dump()
     s.output(value)
@@ -347,16 +369,16 @@ def _budget(db,manifest,clock):
     return {'decision_id':event.id,'sequence':event.sequence,'manifest':_ref(manifest)}
 
 
-def _interpretation(db,context,snapshot,purpose,clock):
-    # W2 owns production provenance verification. No environment flag, schema
-    # override, registered provider, fixture ID or caller receipt can bypass this.
-    raise s.IntentError('intent_w2_evidence_unavailable')
+def _interpretation(db,context,snapshot,purpose,clock,*,manifest):
+    from app.services.research_verification import interpretation
+    return interpretation(db,context,snapshot,purpose,clock,manifest=manifest)
 
 
 def _qualification(proof,snapshot,purpose,clock):
     """Check W1 temporal/pinning envelope of an independently supplied W2 result.
 
-    The only production producer above refuses; tests monkeypatch it explicitly.
+    The production producer verifies exact W2 platform evidence; W1 regression
+    tests can still monkeypatch a controlled future envelope locally.
     This function neither interprets responses nor declares caller evidence true.
     """
     if type(proof) is not dict or set(proof)!={'interpreter','health'}:
@@ -380,7 +402,10 @@ def _qualification(proof,snapshot,purpose,clock):
         if type(receipt['evidence_id']) is not int or receipt['evidence_id']<=0 or not re.fullmatch('[0-9a-f]{64}',receipt['digest']): raise s.IntentError('intent_health_missing')
         send,complete,verified,end=[s.timestamp(receipt[k]) for k in ('send_at','complete_at','verified_at','valid_until')]
         end=min(end,send+timedelta(seconds=120))
-        if not send<=complete<=verified<=at<end: raise s.IntentError('intent_health_expired')
+        if not send<=complete<=verified<=at<end:
+            from app.services.research_verification_clock import current
+            current(clock).expire()
+            raise s.IntentError('intent_health_expired')
         deadlines.append(end)
     if len(s.canonical(proof))>4096: raise s.IntentError('intent_response_limit')
     return deadlines
@@ -435,7 +460,7 @@ def convert(db,project,context_id,number,payload,*,now=None):
         budget=_budget(db,manifest,now)
         if p.purpose!='business' and p.knowledge is not None: raise s.IntentError('intent_invalid',422)
         rule,ends=_knowledge(db,context,p.knowledge,snapshot,now);deadlines.extend(ends)
-        proof=_interpretation(db,context,snapshot,p.purpose,now)
+        proof=_interpretation(db,context,snapshot,p.purpose,now,manifest=manifest)
         deadlines.extend(_qualification(proof,snapshot,p.purpose,now))
         actions=snapshot['actions'][:2] if p.purpose=='business' else [a for a in snapshot['actions'] if a['role']==p.purpose]
         if not actions: raise s.IntentError('intent_health_missing')
@@ -494,7 +519,7 @@ def read(db,project,context_id,kind,reference,*,now=None):
             rule,ends=_knowledge(db,context,ks.ExactRef.model_validate(row.body['knowledge']['reference']) if row.body['knowledge'] else None,snapshot,now)
             if rule!=row.body['knowledge']: raise s.IntentError('intent_dependency_changed')
             deadlines.extend(ends)
-            proof=_interpretation(db,context,snapshot,row.body['purpose'],now)
+            proof=_interpretation(db,context,snapshot,row.body['purpose'],now,manifest=manifest)
             if proof!=row.body['interpretation']: raise s.IntentError('intent_dependency_changed')
             deadlines.extend(_qualification(proof,snapshot,row.body['purpose'],now))
             if s.digest(row.link['protocol'],row.link)!=row.link_digest or row.link['intent_digest']!=row.digest: raise s.IntentError('intent_integrity')
@@ -519,5 +544,7 @@ def read(db,project,context_id,kind,reference,*,now=None):
                 if (member.plan_id!=entry['plan_id'] or member.role!=entry['role'] or member.action_id!=entry['action_id']
                     or member.test_case_id!=entry['test_case_id'] or plan.plan_digest!=entry['plan_digest']
                     or plan.policy_context.get('research_intent',{}).get('intent_digest')!=row.digest): raise s.IntentError('intent_integrity')
+            from app.services.research_verification import business_boundary
+            deadlines.extend(business_boundary(db,context,row,now))
         else: raise s.IntentError('intent_invalid',422)
         return _receipt(db,context,row,kind,deadlines,now)

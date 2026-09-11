@@ -89,3 +89,8 @@ __all__ = [
 ]
 
 from app.db.models.research_intent import IntentMapping, IntentManifest, IntentBudgetDecision, IntentVersion, IntentPlanMember, IntentAudit
+
+from app.db.models.research_verification import (
+    VerificationContract, VerificationHealthSelection, VerificationAttempt,
+    VerificationWitness, VerificationPair, VerificationAudit, VerificationClockFault,
+)

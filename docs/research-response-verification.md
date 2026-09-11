@@ -1,0 +1,149 @@
+# RA-04/W2 — exact session, response and pair evidence
+
+Implementation record, protocol version 1. Starting base: `c4d6750eb42af5556036419980a0eb312f892d78`; branch `codex/ra-04-w2-response-verification`. The current user handoff records W1 independent review and PR #144 integration, and authorizes this ordered W2 package under adopted INTENT I1–I7. This record does not confer execution/data/spending permission, claim independent W2 PASS, or complete RA-04/W3.
+
+## 1. Local operations and authority
+
+[INTENT §§2–7](research-intent-contract.md#2-不可变结构与摘要-p), [W1 lifecycle provenance](research-intent-bridge.md) and the existing [security model](security-model.md) remain the contracts. There is no generic renderer or new scheduling/approval framework.
+
+The [verification route](../backend/app/api/routes/research_verification.py) adds bounded POST operations under `/api/research-projects/{project}/contexts/{context_id}/verification`:
+
+| Operation | Meaning |
+| --- | --- |
+| `contracts/{number}` | Independent human confirmation of literal object/identity expectations for every exact manifest role, with version and synthetic review reference. One immutable confirmation per manifest; corrections require a new manifest/contract. |
+| `health-selections` | Explicit selection of exact eligible platform health witnesses for each business bearer role. No “passed” flag, imported observation, fixture ID or old TestRun can supply a witness. |
+| `plan-decisions` | Separate existing exact-plan approved/revoked decisions, after current typed core/link validation. Maximum 16 decisions per intent, with per-plan sequence checks. Budget approval does not approve a plan. |
+| `execute` | One selected, exact single-GET plan. The dedicated dispatcher revalidates production evidence; W1's controlled test producer cannot open it. |
+| `pairs` | Append-once exact baseline/probe evidence; retries converge only on the same references. A failed semantic baseline permits an inconclusive baseline-only record and blocks the probe. |
+| `read/execution` | Current eligible execution evidence; metadata/time checks run again through final encoding. |
+| `history/plan` | Recover a canonical execution witness by exact intent and member plan when the failed response never delivered a witness reference. No latest lookup or resend; absent canonical evidence remains unavailable. Same non-reusable history and current permission checks. |
+| `history/execution`, `history/pair` | Minimized immutable history under current project/data/permission access. Always `historical_not_revalidated`, `reusable=false`; no eligibility or execution capability is issued. |
+
+These operations use the existing trusted local management boundary. Input media/encoding, duplicate keys, shape/byte bounds, foreign references and unexpected fields fail closed. Responses are `no-store`, with fixed rejection codes. W1 receipts now say `requires_exact_dispatch`; creation still returns `execution_authorized=false`. Legacy creation/approval/execution/analysis/report/advisory/observed-assertion paths continue rejecting research records, including stripped markers with durable links. No new Finding is confirmed or fed to legacy reporting.
+
+A normal explicit sequence is: mappings and independently selected facts → finite manifest → human budget decision → independent interpretation confirmation → separate health intent/plan and applicable approval → explicit health execution → explicit health selection → business intent with two plans → each applicable exact-plan approval → baseline execution → dependent probe → pair verification. Anonymous roles have no health receipt or credential. There is no hidden health refresh or resend.
+
+## 2. Deterministic interpretation and provenance
+
+[The fixed interpreter](../backend/app/services/research_response_semantics.py) uses `ra-response-scalar/1` and a domain-separated immutable definition digest. The independently confirmed literal keys are distinct from `authenticated` and `error`; identity markers are bounded synthetic scalar values. Object expectations must equal the exact independently confirmed Resource-to-slot value. The interpreter never executes response/database text or accepts expected labels from the response itself.
+
+Only a complete strict JSON object with the selected string object marker qualifies a business 200. A bearer health 200 additionally requires the independently confirmed identity marker and strict `authenticated=true`. A business denial requires 403, `error="access_denied"`, the exact object, and bearer identity/authentication markers where applicable. Arrays, duplicate/unknown fields, login HTML, ambiguous authentication, wrong objects/identities, redirects, malformed/truncated/encoded bodies and instructions remain inconclusive. Equal hashes/lengths do not establish access truth. Independent `allowed` plus readable object is allowed even for shared/non-owner; `denied` plus readable object is only a suspected violation, regardless of ownership.
+
+Immutable witnesses bind the exact intent digest/link, manifest, role, plan/action/run, dispatch attempt, fencing generation, approval at dispatch, credential version, interpreter definition and actual send/complete/verification clock samples. Consumers check canonical TestRun and M8 provenance; no latest-baseline lookup or version substitution is allowed. Raw response bytes are used transiently and discarded; new TestRun bodies are null, with only bounded response hash/length/status and fixed semantic reasons in the new witness. This does not alter old bodies or M13 null/fingerprint semantics.
+
+## 3. Dispatch, budgets and time
+
+The [dispatcher](../backend/app/services/research_verification_dispatch.py) uses the existing plan execution, policy, credential, AuthenticationContext, rate limiter, network gateway and M8 services. New-purpose execution is limited to `private_local`; public execution remains closed. Two business plans remain separate single GETs with the same revision and exact role/link. Baseline failure or insufficient object proof prevents probe dispatch.
+
+A session advisory permit bounds each context to one active dispatch (stronger than manifest concurrency one), without a transaction over rate/network waits. W1 assigns each manifest purpose to one immutable intent at conversion. An immutable attempt also uniquely consumes each manifest role and plan, within the already reviewed ≤4-role manifest. If a socket write fails after possible transmission and that attempt transaction rolls back, the original intent still owns the slot and M8 still forbids retrying its uncertain plan; another intent cannot reuse that budget. The shared per-Target limiter uses the narrower manifest/revision/platform rate. Canonical retries do not send again; a new health request requires a fresh manifest and explicit budget/plan decisions.
+
+After admission, DNS, connection and TLS, the gateway's first HTTP write invokes the final gate. M8 first records its durable network boundary; then current catalog/context/Target/identity/binding and relevant set locks protect exact dependency, approval, cancellation, fencing, network-stop and policy checks through the short GET header write. No database transaction spans connection setup or response reading. A failure after the M8 marker conservatively retains possible transmission, even when the owned test server counted zero bytes. Missing canonical results remain `network_started`; a subsequent M8 recovery check classifies this as `in_doubt` and refuses a resend, retaining the original durable marker. Canonical result plus witness/audit are atomic; post-network persistence failure does not pretend to roll back the request.
+
+Credential resolution loads only the pinned current stored version via `resolve_exact` and AuthenticationContext. The late gate checks that the binding/version is still the same; rotation, including unchanged token bytes with a new version ID, requires new dependent work. W1 observation `hold_generation`, exact fact sets and future eligibility boundaries remain pinned. Recovery from a hold does not revive the old manifest/intent.
+
+UTC and same-boot monotonic samples independently enforce half-open 120-second health (from actual send), 300-second intent, and 30-second baseline-complete-to-probe/final pair consumption windows, narrowed by all earlier dependencies. Same-host Linux boot provenance is recorded; another boot/clock domain cannot reuse evidence. The fallback domain is process-local. There is no cross-host clock synchronization facility or grace period. Backward samples, impossible ordering and elapsed deadlines fail closed. Detected clock discontinuity independently appends a durable fence for each affected exact intent (at most four per consumer, one per intent); recovery cannot revive it. The bounded writer selects an existing owned intent and uses a soft exact reference to avoid re-acquiring locks held by the failing consumer. This safety fence survives rollback of the failed operation, like M8 progress; ordinary audit/encoding failures do not create it. No original core, approval or evidence is rewritten, and historical evidence remains non-reusable. New intent/plans and applicable decisions are required after clock recovery; health and manifest/contract records must also be renewed when their qualification or consumed budget prevents reuse. Absolute response reading is bounded to at most five seconds and the earlier eligibility deadline, rather than resetting a five-second allowance on each read. A recorded baseline also narrows subsequent intent reads and approval views to B; health/pair consumers and probe dispatch recheck each applicable current exact-plan approval. Dependent plan row locks coordinate approval/cancellation with final consumption; a completed baseline cannot be cancelled under the existing M8 rule. Local evidence savepoints and the final API encoding transaction check deadlines again; encoding failure rolls back response audit/new local evidence, while already committed network truth remains.
+
+## 4. Persistence, limits and rollback
+
+Migration `6a94cbd3f825` adds seven tables: verification contracts, explicit health selections, dispatch attempts, execution witnesses, exact pair evidence, audit and clock-continuity fences. It preserves old records/migrations, uses RESTRICT/composite context references, role/plan/pair uniqueness and immutable UPDATE triggers. No backfill, approval seed, private-material admission or M13 reinterpretation occurs.
+
+Existing W1 limits remain: input/core 32768 bytes, output 65536, depth 8/nodes 8192, ≤8 observation refs, ≤256 relevant assertions/Scopes and ≤1024 versions per context. Additional limits are ≤4 expectation roles, 32-character literal keys, 16-digit object values, 64-character synthetic identity markers; interpreter input 16384 bytes/depth 4/nodes 256; witness/attempt/pair/selection bodies 4096 persisted bytes; history output 8192; ≤1024 contracts/selections/pairs/clock fences and ≤4096 attempts/witnesses/audit per context, 64 request-local clock constraints, 16 exact-plan decisions per intent. Capacity errors roll back the operation; no pruning drops dependencies or rewrites history.
+
+Empty W2 tables may downgrade to the W1 compatibility binary, which rejects new-purpose execution. Populated W2 downgrade locks all seven tables and refuses destructive loss. Going further back remains subject to W1's marker/history/hold safeguards. Reverting directly to an unaware old binary is unsafe: stop execution, preserve evidence and inspect M8 before any separately authorized rollback. Neither dropped references nor deleted evidence are a rollback method.
+
+## 5. Validation record
+
+Validation runs in Ubuntu WSL with the repository backend virtual environment, using an environment-cleared copy without `.env` under `/tmp/ra04-w2.ip2LBS/backend`. The newly initialized owned PostgreSQL instance was independently checked using psql before application imports: database/user `ra04_w2`, `127.0.0.1:55483`, data directory `/tmp/ra04-w2.ip2LBS/data`, UTF8, owned mode0700, empty public schema and no other clients. Application settings then confirmed the operator encryption key was absent. Network tests use an exclusively bound random-port loopback server with request counters and per-test random encrypted credentials; no deployed Target/provider/public requests occur.
+
+A second newly owned PostgreSQL instance hosted a separate full run: database/user `ra04_w2_final`, `127.0.0.1:55487`, data directory `/tmp/ra04-w2-final.rscZNJ/data`, system identifier `7684047694727131147`. Before application import, psql verified UTF8, an empty schema and no other clients; the directory was owned mode0700 and application settings confirmed no encryption key. The final history-recovery API/full validation uses a fresh `ra04_w2_history` database under that same owned instance and role, with an environment-cleared copy in `/tmp/ra04-w2-history.q0211j/backend`. Before its application imports, psql independently verified the exact database/user/port/data-directory/system identifier, UTF8, empty schema and no other database clients; settings again confirmed no encryption key. The final complete rerun, including the additional uncertain-socket regression, uses the original isolated `ra04_w2` database after fixture cleanup and resynchronization. Its 449 Python source files (app/tests/Alembic/evaluation) are byte-identical to the repository; production app files are also identical to the history-run copy. Final aggregate source SHA256: `21cc4119aaa1712e7d00028cbb990fafe77c811d67e9871e89536d7bbbc7a9ec`. All runners use only `PATH` pointing to the repository `.venv`, `LANG=C.UTF-8` and their own `DATABASE_URL` under `env -i`, from copies excluding `.env*` and `.venv`.
+
+Executed commands use these owned runners (`run python ...` below); logs remain outside the repository in the owned directories above:
+
+| Check | Actual result |
+| --- | --- |
+| W1/W2 core focused schema/service/API, temporal, source/gate/concurrency and migration tests (before additive history lookup) | **368 passed**, 8 warnings, 956.81s. |
+| `python -m pytest -xq --tb=short tests/api/test_research_verification.py` on final code | **26 passed**, 1 warning, 138.00s; recovery of unreturned uncertain/canonical evidence, exact references and encoding rollback included. |
+| Core full `python -m pytest -q --tb=short` before the additive history lookup | **3158 passed**, 62 warnings, 1583.44s. |
+| Final `python -m pytest -q --tb=short` including the additional uncertain-socket regression | **3164 passed**, 62 warnings, 1219.31s; final complete suite on the exclusively used original PostgreSQL instance. |
+| `python -m pytest -xq --tb=short tests/services/test_research_verification.py::test_uncertain_socket_write_cannot_reuse_plan_or_manifest_budget` | **1 passed**, 5.80s; owned server received exactly one request, the attempt rolled back, M8 blocked retry and W1 blocked a second intent using the same manifest. No production budget change was needed. |
+| `python -m pytest -xq --tb=short tests/services/test_research_verification.py::test_probe_requires_current_baseline_decision_after_wait tests/services/test_research_verification.py::test_recorded_baseline_narrows_intent_and_approval_views tests/services/test_research_verification.py::test_real_health_baseline_probe_and_exact_pair` | **6 passed**, 82.94s; actual platform provenance, baseline approval revocation before/after connection, exact B boundary for intent/approval views. |
+| Clock discontinuity/W1 rollback/clock/migration focused run | **39 passed**, 34.70s; durable fences, no clock-recovery revival, historical-only recovery, fresh/populated/empty/refused downgrade. |
+| `python -m alembic upgrade head`, `heads`, `current`, `check` | Fresh upgrades and populated compatibility/downgrade tests passed. Single head/current **`6a94cbd3f825`**; **No new upgrade operations detected.** Empty W2 downgrade succeeded; populated destructive downgrade was refused. |
+| `python -m evaluation.ra01 verify` | **VERIFIED**, freeze `692c33a321cc59e9799377ed512402ac33826dec06707d494b3d5853006a231a`; original approval status unchanged. |
+| `python -m pip check` | **No broken requirements found.** Pip disabled an unavailable cache; no dependency changes. |
+| Temporary local documentation checker; `git diff --check` | **122 local links / 20 anchors passed**; no external fetch. Diff check passed. |
+
+Exact broad focused and final full invocations (each runner supplies only its independently verified owned database):
+
+```bash
+/tmp/ra04-w2.ip2LBS/run python -m pytest -q --tb=short \
+  tests/schemas/test_research_verification.py tests/services/test_research_response_semantics.py \
+  tests/services/test_research_verification_clock.py tests/services/test_research_verification.py \
+  tests/api/test_research_verification.py tests/network_safety/test_verification_boundary.py \
+  tests/migrations/test_research_verification_migration.py tests/schemas/test_research_intent.py \
+  tests/services/test_research_intent.py tests/services/test_research_intent_concurrency.py \
+  tests/services/test_research_intent_sources.py tests/services/test_research_intent_gates.py \
+  tests/services/test_research_intent_knowledge.py tests/api/test_research_intents.py \
+  tests/migrations/test_research_intent_migration.py tests/migrations/test_research_intent_lifecycle_migration.py
+/tmp/ra04-w2-history.q0211j/run python -m pytest -q --tb=short
+/tmp/ra04-w2.ip2LBS/run python -m pytest -q --tb=short
+```
+
+The final full suite includes all W1 source hold/release/expiry and legacy bypass tests; credential, M8, execution/approval, M12/M14, knowledge and M13 regressions; and fresh/populated migration compatibility, legacy plan/run/evidence/review/report preservation, immutable records, safe empty downgrade and populated destructive-downgrade refusal. Dedicated W2 tests use real platform execution/M8 provenance with owned synthetic HTTP counters, plus controlled clocks and injected dependency changes. They cover wrong identities/objects, ambiguous denial, malformed/truncated/extra instruction fields, owner-denied/shared-allowed, exact references, delays/rotation/source recovery/approval/cancellation/fencing, no automatic resend, limits and service/API serialization rollback.
+
+Development results are not final passes: the first full run had **4 failed / 3143 passed** (old W1 receipt status expectations; historical `w2_dependency_closed` remains readable while current receipts use `requires_exact_dispatch`). The next full run had **1 failed / 3153 passed**, 1443.74s; a concurrent focused run likewise had **1 failed / 300 passed**, 802.07s: a new B−1µs approval test held UTC fixed while monotonic time advanced during encoding, correctly expiring; the test now controls both clocks at the exact consumption instant. New baseline-dependency probes initially had **1 failed / 1 passed** twice: cancellation of an already canonical baseline is prohibited by M8, and rejection after M8's marker returns the conservative persistence/in-doubt error. Tests retain the zero-request/no-witness assertions and explicitly check that durable marker. The intermediate history-copy full run had **1 failed / 3162 passed**, 62 warnings, 1475.06s: `test_permit_is_held_without_transaction_across_request` observed two advisory locks because another owned database on the same PostgreSQL instance was concurrently testing dispatch. Its query counts that namespace across databases. The final complete run uses the separate original instance exclusively; the existing M8 assertion is unchanged. Its isolated rerun (`python -m pytest -q --tb=short tests/network_safety/test_postgres_controller.py::test_permit_is_held_without_transaction_across_request`) passed **1 test**, 1.66s. The new uncertain-socket probe initially failed its attempted second-intent setup because W1 already rejects it with `intent_manifest_consumed`; the retained regression explicitly asserts that protection and M8 no-resend. Earlier focused development failures concerned expected exception types/M8 phase and real network work within one microsecond; they did not justify weakening production deadlines or legacy M8 assertions. Frozen evaluation definitions/held-out data remain unchanged and were not inspected to author these fixtures.
+
+Final `heads/current/check`, freeze verification and pip check were repeated successfully on the final copy after the complete suite. Both instances were re-identified before shutdown, with no other clients and no ambient encryption key. The original server system identifier was `7684032169805045771`; the second remained `7684047694727131147`. Executed `/usr/lib/postgresql/16/bin/pg_ctl -D /tmp/ra04-w2.ip2LBS/data -m fast -w stop` and the same command for `/tmp/ra04-w2-final.rscZNJ/data`; both `postmaster.pid` files are absent. Only task-owned instances were stopped. Final source/link/diff checks passed. No unresolved validation failure remains; independent Review Project review is still required.
+
+## 6. Limits of this package
+
+This is a narrow synthetic, literal-scalar, complete-object GET verifier. It does not infer membership/access truth, support arbitrary login/health endpoints, broaden request shapes, admit private materials, refresh sessions, schedule work, aggregate approvals, publish rules, call providers or generate formal reports. W3's demonstration and independent Review Project review remain outstanding. Real execution still requires the operator's separate applicable authorization; implementation/tests supply none.
+
+## 7. Observed-expiry fix after W2 review
+
+The fix continues from reviewed `38343fec604e3fce753d277c8e43078735c9d95d` without rewriting it. Observing an owned exact intent's expiry now appends the existing durable clock/expiry fence before rejecting the operation. This includes the first exact-version check, retained core UTC bounds during dependency reads, health/pair monotonic and UTC checks, dispatch/result checks and final response construction. Correcting UTC in another request cannot restore eligibility. The fence uses its independent transaction, survives savepoint/outer rollback, and never rewrites the core, plans, approvals or evidence. No schema or deadline change is required.
+
+Each retained window carries the exact consumers that depended on it. Nested health qualification preserves those dependencies through final encoding; a business-only pair expiry does not fence otherwise valid health work. The existing limits remain four intent consumers and 64 total clock constraints per request, with at most one durable fence per exact intent. Foreign/missing/digest-mismatched references cannot fence owned work. Historical evidence remains explicitly non-reusable under its existing access checks. Recovery requires fresh qualified records, intent/plans and applicable explicit decisions; M8 still prohibits resending an uncertain or completed exact plan.
+
+New regressions use actual platform dispatch and the exclusively owned synthetic loopback server. They cover 120/30/300-second expiry through service reads, W1 API reads and W2 dispatch, corrected UTC with increasing monotonic time, failed-operation rollback, final W1/approval response construction, expiry during dependency reads, original health-witness invalidation, historical-only access, ownership isolation and fresh replacement work. Existing pair rollback assertions now require the exact durable fence while preserving every other table byte-for-byte; ordinary audit/encoding failure assertions and M8 guarantees remain intact.
+
+Validation uses the repository backend virtual environment through an environment-cleared copy at `/tmp/ra04-w2-expiry.v1yFky/backend`, excluding `.env*`, `.venv` and caches. Before importing the application, independent psql checks identified database/user `ra04_expiry`, `127.0.0.1:55489`, data directory `/tmp/ra04-w2-expiry.v1yFky/data`, system identifier `7684076208504266762`, UTF8, an empty public schema and zero other clients. Application settings confirmed no operator encryption key. All database suites run serially on this newly owned instance. No operator database, credential, private material, public Target or provider is used.
+
+The runner below sets only the repository `.venv` `PATH`, `LANG=C.UTF-8` and its owned `DATABASE_URL` under `env -i`. Initial expiry probes passed **20 tests**, 1 warning, 128.31s. The broader focused run passed **336 tests**, 8 warnings, 576.50s; this preceded the final converted-core binding and shared-constraint-limit refinements. Its exact invocation was:
+
+```bash
+/tmp/ra04-w2-expiry.v1yFky/run python -m pytest -q --tb=short \
+  tests/services/test_research_verification_expiry.py tests/services/test_research_verification_clock.py \
+  tests/services/test_research_verification.py tests/api/test_research_verification.py \
+  tests/network_safety/test_verification_boundary.py tests/services/test_research_intent.py \
+  tests/services/test_research_intent_concurrency.py tests/services/test_research_intent_sources.py \
+  tests/services/test_research_intent_gates.py tests/services/test_research_intent_knowledge.py \
+  tests/api/test_research_intents.py tests/network_safety/test_postgres_controller.py \
+  tests/migrations/test_research_verification_migration.py \
+  tests/migrations/test_research_intent_migration.py tests/migrations/test_research_intent_lifecycle_migration.py
+```
+
+The final targeted rerun passed **74 tests**, 1 warning, 87.86s, on code byte-identical to the repository (450 Python files; aggregate SHA256 `ba30fc45ec61bffab578a60c86de3c0db698cff651fecde9a9225dc24058063c`):
+
+```bash
+/tmp/ra04-w2-expiry.v1yFky/run python -m pytest -q --tb=short \
+  tests/services/test_research_verification_expiry.py tests/services/test_research_verification_clock.py \
+  tests/services/test_research_intent.py::test_final_boundary_rollback_even_if_caller_commits \
+  tests/services/test_research_intent.py::test_future_conflict_deadline_is_retained \
+  tests/api/test_research_intents.py::test_api_complete_encoding_temporal_boundary \
+  tests/api/test_research_intents.py::test_api_clock_rollback_after_service_boundary_rejects \
+  tests/services/test_research_verification.py::test_health_expiry_during_body_read_never_persists_qualified_evidence
+```
+
+Final validation results (`run` denotes `/tmp/ra04-w2-expiry.v1yFky/run`):
+
+| Command / check | Actual result |
+| --- | --- |
+| `run python -m pytest -q --tb=short` | **3193 passed**, 62 warnings, 906.65s. No failures or skips. Includes W1/W2, temporal/API/M8, legacy and migration regressions. |
+| `run python -m alembic upgrade head` on the initially empty instance; migration tests above and in the full suite | Fresh/populated upgrades, legacy history preservation, empty downgrade and populated destructive-downgrade refusal passed. No migration added or modified. |
+| `run python -m alembic heads`; `current`; `check` after the full suite | Single head/current **`6a94cbd3f825`**; **No new upgrade operations detected.** |
+| `run python -m evaluation.ra01 verify` | **VERIFIED**, unchanged freeze `692c33a321cc59e9799377ed512402ac33826dec06707d494b3d5853006a231a`. Frozen content/held-out samples were not changed or used to author fixtures. |
+| `run python -m pip check` | **No broken requirements found.** Pip disabled its unavailable cache. |
+| Local source/document checks; `git diff --check` | Python validation copy matches the repository; six local documentation links resolve; diff check passed. |
+
+The final identity check matched the database/user/port/data directory/system identifier above, with zero other clients, and application settings again confirmed no operator encryption key. Executed `/usr/lib/postgresql/16/bin/pg_ctl -D /tmp/ra04-w2-expiry.v1yFky/data -m fast -w stop`; the owned server stopped and its `postmaster.pid` is absent. No unresolved validation failure remains. This fixes the reviewed expiry blocker only; it does not claim independent Review Project PASS or begin W3. The commit remains local for review.
