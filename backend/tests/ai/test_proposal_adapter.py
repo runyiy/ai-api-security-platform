@@ -867,3 +867,100 @@ def test_authority_cannot_alias_bool_to_integer_version(harness, field):
     h.authority.snapshot = replace(h.authority.snapshot,registry=reg)
     assert h.run().code == 'CONTEXT_CHANGED'
     zero_io(h)
+
+
+AUTHORITY_LATENCY_STAGES = (
+    'before_input', 'before_secret', 'write_ready', 'after_send',
+    'before_consume', 'final_return',
+)
+
+
+def short_validity_receipt(h, scope):
+    expiry = NOW + timedelta(seconds=1)
+    if scope == 'source':
+        sources = list(h.prepared.registry.sources)
+        sources[0] = replace(sources[0], expires_at=expiry)
+        h.prepared = replace(h.prepared, registry=replace(h.prepared.registry, sources=tuple(sources)))
+    elif scope == 'registry':
+        h.prepared = replace(h.prepared, registry=replace(h.prepared.registry, expires_at=expiry))
+    elif scope == 'authorization':
+        h.authority.snapshot = replace(h.authority.snapshot, expires_at=expiry)
+    h.authority.snapshot = replace(h.authority.snapshot, registry=h.prepared.registry)
+    receipt = h.receipt()  # Bind the final registry, including its validity window.
+    return replace(receipt, expires_at=expiry) if scope == 'receipt' else receipt
+
+
+def use_proposal_refusal(h, refusal):
+    if refusal:
+        value = {'protocol': OUTPUT_VERSION, 'request_ref': Q, 'status': 'refusal',
+                 'suggestions': [], 'refusal_code': 'SAFETY_REFUSAL'}
+        h.wire.response = response(canonical(envelope(value)))
+
+
+def assert_failed_authority_boundary(h, result, stage, code):
+    assert result.code == code and result.display == () and result.refusal_code is None
+    before_secret = stage in ('before_input', 'before_secret')
+    sent = stage in ('after_send', 'before_consume', 'final_return')
+    assert (h.secret.calls, h.resolver.calls, h.connector.calls) == (int(not before_secret),) * 3
+    assert len(h.wire.writes) == int(sent)
+    if stage == 'after_send':
+        assert result.delivery == 'unknown' and result.usage.state == 'unknown'
+        assert result.usage.total_tokens is None
+    else:
+        assert result.delivery == ('responded' if sent else 'not_sent')
+        assert result.usage.state == 'known' and result.usage.total_tokens == (3600 if sent else 0)
+    if h.coordination.records:
+        assert h.coordination.records[0].usage == result.usage
+    assert h.authority.stages.count(stage) == 1  # No repeated lookup to mask its latency.
+
+
+@pytest.mark.parametrize('stage', AUTHORITY_LATENCY_STAGES)
+@pytest.mark.parametrize('scope', ['source', 'registry', 'authorization', 'receipt'])
+@pytest.mark.parametrize('latency', [0.5, 1.0])
+@pytest.mark.parametrize('refusal', [False, True])
+def test_authority_lookup_latency_uses_completed_lookup_expiry(harness, stage, scope, latency, refusal):
+    h = harness
+    receipt = short_validity_receipt(h, scope)
+    use_proposal_refusal(h, refusal)
+    h.authority.hook = lambda current: h.clock.advance(latency) if current == stage else None
+    result = h.run(receipt=receipt)
+    if latency == 1.0:
+        assert_failed_authority_boundary(h, result, stage, 'SOURCE_UNAVAILABLE')
+    else:
+        assert result.code == ('PROVIDER_REFUSAL' if refusal else None)
+        assert result.refusal_code == ('SAFETY_REFUSAL' if refusal else None)
+        assert len(result.display) == int(not refusal)
+        assert result.delivery == 'responded' and result.usage.total_tokens == 3600
+        assert (h.secret.calls, h.resolver.calls, h.connector.calls, len(h.wire.writes)) == (1, 1, 1, 1)
+        assert h.authority.stages.count(stage) == 1
+
+
+@pytest.mark.parametrize('stage', AUTHORITY_LATENCY_STAGES)
+@pytest.mark.parametrize('event,code', [
+    ('deadline_equal', 'PROVIDER_TIMEOUT'), ('cancelled', 'CANCELLED'),
+    ('wall_rollback', 'CONTEXT_CHANGED'), ('mono_rollback', 'CONTEXT_CHANGED'),
+])
+@pytest.mark.parametrize('refusal', [False, True])
+def test_authority_lookup_completion_checks_time_and_cancellation(harness, stage, event, code, refusal):
+    h = harness
+    use_proposal_refusal(h, refusal)
+    cancelled = False
+    h.adapter.cancelled = lambda: cancelled
+
+    def during_lookup(current):
+        nonlocal cancelled
+        if current != stage:
+            return
+        if event == 'deadline_equal':
+            h.clock.advance(30)
+        elif event == 'cancelled':
+            cancelled = True
+        elif event == 'wall_rollback':
+            h.clock.wall_offset -= 0.25
+        else:
+            h.clock.advance(-0.25)
+            h.clock.wall_offset += 0.25  # Isolate monotonic rollback from wall time.
+
+    h.authority.hook = during_lookup
+    result = h.run()
+    assert_failed_authority_boundary(h, result, stage, code)

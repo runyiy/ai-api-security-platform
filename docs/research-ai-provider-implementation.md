@@ -2,6 +2,8 @@
 
 **IMPLEMENTED / PENDING_INDEPENDENT_REVIEW · 2026-09-11**
 
+**Current correction:** independent review of `1a3e01c976c6606779abedf3071d3530a5667814` identified an authority-read timing gap despite its passing tests. The [P1 correction and validation record](#authority-read-timing-correction-p1) below supersedes its timing-coverage claim. Earlier results remain historical evidence, not acceptance of this correction.
+
 Base: `386b08b2cca8f49a8ebeff14cc64e4a30d8b2037`; branch: `codex/ra-05-w1-provider-adapter`. Local HEAD/main, clean tree, origin `https://github.com/runyiy/ai-api-security-platform.git`, remote main and absence of the suggested branch were checked before branching. A read-only GitHub check also found no open PRs and confirmed main CI `34582003149` completed successfully at this base. No remote writes were performed.
 
 The [adoption record](research-ai-provider-contract.md#w1-design-adoption-and-implementation-record) records the user's adoption of reviewed v0.1.0 / `29376dda7e0ffa99fe3f1947bb2c3e83df81c228`: P1–P6 and E1–E6 design constraints apply to **W1 fake-only implementation**. Actual account/key use, per-material egress/retention, operational budgets, paid calls and deployment remain unapproved. The synthetic receipt quantities are validation values, not spending approval. This record does not sign independent review, W1 acceptance or RA-05 completion, and does not start W2/W3.
@@ -86,3 +88,34 @@ Data directories are `<owned root>/<database>/data`. Final identity checks match
 Live enablement remains blocked on independently reviewed native I/O/secret storage and account-specific policy, actual per-data retention/egress approval, operator budgets, proven total input-token upper bounds including provider overhead, W2 durable receipts/shared coordination/observer/reconciliation and their concurrency/lifecycle evidence. The output cap alone does not establish a complete spend cap. No operational decision is inferred from design adoption, fake receipts or passing local tests.
 
 After local commit, stop for independent Review Project review. No push, PR, merge, branch cleanup or W2/W3 work is authorized by this record.
+
+## Authority-read timing correction (P1)
+
+This focused correction continues clean, unpushed branch `codex/ra-05-w1-provider-adapter` from reviewed HEAD `1a3e01c976c6606779abedf3071d3530a5667814`. Repository origin and actual remote main were reverified; main remains the task base `386b08b2cca8f49a8ebeff14cc64e4a30d8b2037`. Scope is the adapter boundary, appended synthetic regressions and this validation record. Protocol/profile, transport, lifecycle coordination, all existing tests, CI gates and operational restrictions remain unchanged.
+
+Previously `_Boundary.check()` passed a wall time sampled before `Authority.current()` into interval validation. Time or cancellation consumed during the lookup could therefore allow an expired first write or final display/refusal. The corrected boundary checks time/cancellation before the lookup, performs **one** lookup, then samples fresh ordered monotonic/wall time and cancellation after it completes. It applies the absolute deadline and validates the returned snapshot's source, registry, authorization and receipt intervals using that completed-lookup time. It does not issue another authority lookup with another stale timestamp.
+
+The same boundary path runs before input/secret access, at first write and at consumption/final return. The existing first-write coordination guard still encloses its final qualification and bounded write; no new lock/transaction spans network waiting. Expiry equality, deadline equality, clock rollback or cancellation suppress display and validated refusal detail. Pre-send rejection reports proven zero usage and performs no write; rejection immediately after sending preserves unknown delivery/usage; final rejection preserves already-known usage and its independent accounting observation.
+
+**Deterministic failure detection:** 144 new parameter cases schedule changes *inside* `Authority.current()` at `before_input`, `before_secret`, `write_ready`, `after_send`, `before_consume` and `final_return`. They cover all four expiry scopes, an exact one-second expiry, a valid 0.5-second lookup, exact 30-second deadline, separate monotonic/wall rollback and cancellation, for both suggestions and protocol refusals. Assertions inspect actual memory secret/DNS/connect/write counters, lookup counts, display/refusal detail, delivery and usage. Existing fail-on-call guards still independently reject real sockets, Target calls and prohibited side effects. There are no sleeps, retries, skips or weakened assertions.
+
+Before changing production code, the new cases ran against the reviewed adapter in a newly owned, independently verified PostgreSQL environment: **56 failed / 88 passed / 388 deselected**, the expected regression-detection result. The 48 within-window positive controls passed. That server was reverified and stopped. Artifacts remain under `/tmp/ra05-authority-red-l9aui91l/`; this deliberate failure is not counted as passing validation.
+
+Corrected-code validation uses fresh environment-cleared `.env*`-excluded copies and newly owned PostgreSQL servers under `/tmp/ra05-authority-fix-2eplzue9/`, with the same independent identity/empty-schema/no-unrelated-client checks before application imports, migrations or pytest. Full regression is required for the corrected security boundary. Each complete shard remains serial on its own server; existing full-suite synthetic loopback fixtures stay confined to their owned resources. No real provider or operator/public Target is contacted.
+
+| Correction check | Result |
+| --- | --- |
+| W1 module | **532 passed**, including all 388 existing cases and 144 additions; pytest 10.15s. |
+| Affected AI/security regressions | `pytest tests/ai tests/network_safety tests/auth tests/credentials -q --tb=short`: **701 passed**, 27.41s; two existing collection warnings. |
+| Collection/completeness | **3798 total = 3654 prior + 144 new**, **117 w2 / 3681 remaining**, intersection **0**. All prior node IDs remain in the same order. Ordered full-list SHA256: `8bd7162bd0f2e9be4928987f150a68d0455bf946fc615b526677d7280e9fbf84`; both execution shards must match it. |
+| Existing w2 shard | **117 passed**, 3681 assigned elsewhere/deselected, 62 existing warnings; pytest **837.63s**, process wall **841.168s**. This partition name does not mean RA-05/W2 implementation. |
+| Remaining local shard | **3681 passed**, 117 assigned elsewhere/deselected, 62 existing warnings; pytest **1252.42s**, process wall **1257.251s**. Together the shards pass all **3798** tests. |
+| Aggregate/dependencies | The unchanged aggregate CLI exits **0** with the actual successful local collection/shard results; `pip check` passes. |
+| Documentation/scope | **107** local links/anchors across the four related documents pass, as do JSON and whitespace checks. Only the adapter, appended tests and this record differ from the reviewed HEAD; the existing test file is an exact preserved prefix, and validated source hashes match all three copies. `git diff --check` passes. |
+| Owned-resource cleanup | Final database identities were independently reverified with zero unrelated clients. All three final servers and the earlier regression-detection server are stopped, with absent postmaster PID files. Only owned resources were stopped; logs and identity/source/collection records are retained. |
+
+Final database/user identities are `ra05_test` on loopback port **35257**, system identifier `7684338873715265548`; `ra05_w2` on **46589**, identifier `7684339170508308661`; and `ra05_remaining` on **51985**, identifier `7684339186036117716`. Data directories are `<correction root>/<database>/data`. The earlier regression-detection server was `ra05_test` on **54423**, identifier `7684338648645877772`, under its separately recorded owned root.
+
+**Timing limitation:** the local remaining-shard process took approximately **21 minutes**, exceeding the hosted workflow's unchanged 20-minute job budget on this local machine. No test or workflow timeout was extended, no test was retried, and no cause is inferred from this single run. Passing local assertions and the aggregate CLI do not establish hosted timing/gate acceptance. Hosted PR/main validation remains pending; no push or workflow was triggered.
+
+The correction remains **PENDING_INDEPENDENT_REVIEW**. Live enablement and all operational/W2 dependencies listed above remain pending. No provider/Target authorization, spending approval, W1 acceptance or W2/W3 implementation follows from this fix.

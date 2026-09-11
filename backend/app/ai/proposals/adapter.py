@@ -101,8 +101,9 @@ def request_body(doc):
 
 
 class _Boundary:
-    def __init__(self, clock, cancelled, validate):
-        self.clock, self.cancelled, self.validate = clock, cancelled, validate
+    def __init__(self, clock, cancelled, lookup, validate):
+        self.clock, self.cancelled = clock, cancelled
+        self.lookup, self.validate = lookup, validate
         self.last_mono = self.start = self.monotonic()
         self.last_wall = clock.utcnow()
         require(type(self.last_wall) is datetime and self.last_wall.tzinfo is not None
@@ -119,15 +120,24 @@ class _Boundary:
         require(now < self.start + 30, 'PROVIDER_TIMEOUT')
         return min(cap, self.start + 30 - now)
 
-    def check(self, stage, eligibility=True):
+    def _check_time(self):
         now, wall = self.monotonic(), self.clock.utcnow()
         require(type(wall) is datetime and wall.tzinfo is not None and wall.utcoffset() is not None, 'CONTEXT_CHANGED')
         require(now >= self.last_mono and wall >= self.last_wall, 'CONTEXT_CHANGED')
         self.last_mono, self.last_wall = now, wall
-        self.remaining()
+        require(now < self.start + 30, 'PROVIDER_TIMEOUT')
         require(self.cancelled() is False, 'CANCELLED')
+        return wall
+
+    def check(self, stage, eligibility=True):
+        self._check_time()
         if eligibility:
-            self.validate(stage, wall)
+            snapshot = self.lookup(stage)
+            # Authority reads can wait. Qualify the returned snapshot against
+            # completed-lookup time, deadline and cancellation, without another
+            # lookup or releasing the caller's existing first-write guard.
+            wall = self._check_time()
+            self.validate(snapshot, wall)
 
 
 class ProposalProvider(Protocol):
@@ -173,8 +183,10 @@ class OpenAIProposalAdapter:
                     and receipt.reserved_tokens >= 5120 and receipt.reserved_cost_microusd >= 22528,
                     'BUDGET_UNAVAILABLE')
 
-            def validate(stage, now):
-                snapshot = self.authority.current(prepared.registry.project_ref, prepared.registry.context_ref, stage)
+            def lookup(stage):
+                return self.authority.current(prepared.registry.project_ref, prepared.registry.context_ref, stage)
+
+            def validate(snapshot, now):
                 require(type(snapshot) is AuthorizationSnapshot and snapshot.state == 'active', 'CONFIG_UNAPPROVED')
                 require(type(snapshot.config) is Configuration, 'CONTEXT_CHANGED')
                 snapshot.config.validate()
@@ -193,7 +205,7 @@ class OpenAIProposalAdapter:
                     interval(source.valid_from, source.expires_at, now)
                     require(source.state == 'active', 'SOURCE_UNAVAILABLE')
 
-            boundary = _Boundary(self.clock, self.cancelled, validate)
+            boundary = _Boundary(self.clock, self.cancelled, lookup, validate)
             boundary.check('before_input')
             doc = input_document(prepared.payload)
             validate_registry(prepared, doc, boundary.last_wall)
