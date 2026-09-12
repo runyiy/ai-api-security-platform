@@ -11,6 +11,8 @@ import json
 import os
 from pathlib import Path
 import re
+import runpy
+import stat
 import subprocess
 import sys
 import tarfile
@@ -25,6 +27,8 @@ EXPECTED = {'bwrap': '/usr/bin/bwrap', 'unpriv_bwrap': 'unpriv_bwrap'}
 PARSER = ['/usr/sbin/apparmor_parser', '--config-file', '/dev/null', '--skip-cache',
           '--base', str(POLICY), '--jobs=0']
 ENV = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8'}
+STATE = Path('/run/n1-bwrap-policy-identity')
+BINARY = runpy.run_path(str(Path(__file__).with_name('n1_policy_binary.py')))
 
 
 class PolicyError(RuntimeError):
@@ -160,10 +164,62 @@ def attachment_may_match(pattern, target='/usr/bin/bwrap'):
     return False
 
 
+def revision(security=SECURITY):
+    # This is a pollable notification file, not a regular read-to-EOF file.
+    fd = os.open(security / 'policy/revision', os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        value = os.read(fd, 128).decode().strip()
+    finally:
+        os.close(fd)
+    require(value.isdecimal(), 'POLICY_REVISION_UNAVAILABLE')
+    return value
+
+
+def binary_identity(data):
+    try:
+        return BINARY['parse'](data)
+    except (ValueError, IndexError, OverflowError):
+        raise PolicyError('N1_APPARMOR_BINARY_EVIDENCE_UNRESOLVED') from None
+
+
+def loaded_entry(directory, name, entry, cache, security):
+    # Kernel per-profile symlinks link to the COMPLETE original load blob, not
+    # necessarily a single profile or the current source file on disk.
+    paths = {field: (directory / field).resolve(strict=True)
+             for field in ('raw_data', 'raw_sha256', 'raw_abi')}
+    raw = paths['raw_data']
+    raw_root = (security / 'policy/raw_data').resolve(strict=True)
+    require(raw.is_relative_to(raw_root) and raw.name == 'raw_data'
+            and paths['raw_sha256'] == raw.parent / 'sha256'
+            and paths['raw_abi'] == raw.parent / 'abi', 'RAW_POLICY_LINK_IDENTITY')
+    if raw not in cache:
+        remaining = 64 * 1024 * 1024 - cache['bytes']
+        require(remaining > 0, 'INVENTORY_BYTE_LIMIT')
+        data = read(raw, min(BINARY['MAX_BLOB'], remaining))
+        cache['bytes'] += len(data)
+        require(cache['bytes'] <= 64 * 1024 * 1024, 'INVENTORY_BYTE_LIMIT')
+        digest = hashlib.sha256(data).hexdigest()
+        require(read(paths['raw_sha256'], 128).decode().strip() == digest, 'RAW_POLICY_HASH_MISMATCH')
+        records = binary_identity(data)
+        abi = int(read(paths['raw_abi'], 32).decode().strip())
+        # The kernel exports the LAST header's ABI for a complete load blob;
+        # individual segments retain their own versions in their profile hash.
+        require(list(records.values())[-1]['abi'] == abi, 'RAW_POLICY_ABI_MISMATCH')
+        cache[raw] = records
+    record = cache[raw].get(name)
+    require(record is not None, 'LOADED_PROFILE_MISSING_FROM_BLOB')
+    require(read(directory / 'sha256', 128).decode().strip() == record['sha256'],
+            'LOADED_PROFILE_HASH_MISMATCH')
+    require(all(record[key] == entry[key] for key in ('attach', 'mode')), 'LOADED_PROFILE_EXPORT_MISMATCH')
+    return record
+
+
 def snapshot(security=SECURITY):
     root = security / 'policy/profiles'
     require(root.is_dir(), 'POLICY_INVENTORY_UNAVAILABLE')
+    original_revision = revision(security)
     result = {}
+    cache, failures, unknowns = {'bytes': 0}, [], []
     pending = [(root, '')]
     while pending:
         parent, prefix = pending.pop()
@@ -171,23 +227,48 @@ def snapshot(security=SECURITY):
             require(directory.is_dir() and not directory.is_symlink(), 'POLICY_INVENTORY_LAYOUT')
             name = prefix + read(directory / 'name', 4096).decode().strip()
             require(name not in result and len(result) < 4096, 'POLICY_INVENTORY_AMBIGUOUS')
-            result[name] = {'attach': read(directory / 'attach', 4096).decode().strip(),
-                            'mode': read(directory / 'mode', 128).decode().strip()}
+            entry = {}
+            try:
+                entry['attach'] = read(directory / 'attach', 4096).decode().strip()
+                entry['mode'] = read(directory / 'mode', 128).decode().strip()
+                result[name] = loaded_entry(directory, name, entry, cache, security)
+                status = {'name': name[:256], 'result': 'resolved',
+                          'matches': result[name]['matches'], 'sha256': result[name]['sha256'],
+                          'raw_sha256': result[name]['raw_sha256']}
+            except (PolicyError, OSError, ValueError) as error:
+                result[name] = entry
+                status = {'name': name[:256], 'result': str(error) if isinstance(error, PolicyError)
+                          else 'N1_APPARMOR_EVIDENCE_UNAVAILABLE'}
+                failures.append(status)
+            if entry.get('attach') == '<unknown>':
+                unknowns.append(status)
             children = directory / 'profiles'
             if children.exists():
                 pending.append((children, name + '//'))
+    # Report every unknown in this bounded inventory, even if another entry is
+    # unresolved or conflicting. No application names receive exceptions.
+    emit('unknown_attachments', unknowns)
+    emit('inventory', {'profiles': len(result), 'raw_bytes': cache['bytes'],
+                       'revision': original_revision, 'failures': failures})
+    require(revision(security) == original_revision, 'POLICY_CHANGED_DURING_INVENTORY')
+    require(not failures, 'POLICY_INVENTORY_UNRESOLVED')
     return result
 
 
 def check_conflicts(inventory, policy=POLICY):
+    conflicts = []
     for name, entry in inventory.items():
         name_conflict = any(part in EXPECTED for part in name.split('//'))
-        attachment_conflict = any(attachment_may_match(entry['attach'], path)
-                                  for path in ('/usr/bin/bwrap', '/bin/bwrap'))
+        if entry['attach'] == '<unknown>':
+            require('sha256' in entry and 'matches' in entry, 'ATTACHMENT_UNRESOLVED')
+            attachment_conflict = bool(entry['matches'])
+        else:
+            attachment_conflict = bool(entry.get('matches')) or any(
+                attachment_may_match(entry['attach'], path) for path in ('/usr/bin/bwrap', '/bin/bwrap'))
         if name_conflict or attachment_conflict:
             emit('conflicting_profile', {'name': name[:256], 'attach': entry['attach'][:256]})
-        require(not name_conflict, 'PROFILE_NAME_CONFLICT')
-        require(not attachment_conflict, 'ATTACHMENT_CONFLICT')
+            conflicts.append('PROFILE_NAME_CONFLICT' if name_conflict else 'ATTACHMENT_CONFLICT')
+    require(not conflicts, ','.join(conflicts))
     for name in ('bwrap-userns-restrict', 'bwrap', 'usr.bin.bwrap', 'unpriv_bwrap',
                  'local/bwrap-userns-restrict', 'local/unpriv_bwrap',
                  'disable/bwrap-userns-restrict', 'force-complain/bwrap-userns-restrict'):
@@ -214,37 +295,67 @@ def hosted_only():
     require(Path('/usr/bin/bwrap').resolve() == Path('/usr/bin/bwrap'), 'EXECUTABLE_ATTACHMENT')
 
 
-def verify_loaded(inventory):
-    for name, attachment in EXPECTED.items():
-        require(inventory.get(name) == {'attach': attachment, 'mode': 'enforce'},
+def verify_loaded(inventory, compiled):
+    require(set(compiled) == set(EXPECTED), 'COMPILED_PROFILE_NAMES')
+    for name in EXPECTED:
+        require(compiled[name]['mode'] == 'enforce' and inventory.get(name) == compiled[name],
                 'LOADED_POLICY_IDENTITY')
     emit('loaded_profiles', {name: inventory[name] for name in EXPECTED})
 
 
-def load(path):
+def load(path, state=STATE):
     hosted_only()
     profile = profile_bytes(path)
     original_controls = global_restrictions()
+    original_revision = revision()
     before = snapshot()
     check_conflicts(before)
     # Offline compilation first; load only these bytes with add semantics, never
     # replace or activate a policy directory. No files are installed into /etc.
-    run([*PARSER, '--skip-kernel-load'], data=profile)
+    compiled = run([*PARSER, '--stdout'], data=profile)
+    identity = binary_identity(compiled)
+    require(set(identity) == set(EXPECTED) and all(entry['mode'] == 'enforce' for entry in identity.values()),
+            'COMPILED_POLICY_IDENTITY')
+    require(identity['bwrap']['matches'] == ['/usr/bin/bwrap']
+            and identity['unpriv_bwrap']['matches'] == [], 'COMPILED_ATTACHMENTS')
     require(snapshot() == before, 'POLICY_CHANGED_BEFORE_LOAD')
     check_conflicts(before)
-    run([*PARSER, '--add'], data=profile)
+    require(revision() == original_revision, 'POLICY_CHANGED_BEFORE_LOAD')
+    # Exclusive root-owned state survives only for this ephemeral job. A later
+    # verification must use this actual compilation and full unrelated baseline.
+    state.mkdir(mode=0o700)
+    run([*PARSER, '--binary', '--add'], data=compiled)
+    loaded_revision = revision()
     after = snapshot()
-    verify_loaded(after)
+    verify_loaded(after, identity)
     require({name: entry for name, entry in after.items() if name not in EXPECTED} == before,
             'UNRELATED_POLICY_CHANGED')
     require(global_restrictions() == original_controls, 'GLOBAL_RESTRICTIONS_CHANGED')
-    emit('loaded_profile_sha256', PROFILE_SHA256)
+    require(revision() == loaded_revision, 'POLICY_CHANGED_AFTER_LOAD')
+    evidence = {'source_sha256': PROFILE_SHA256, 'compiled': identity, 'before': before,
+                'controls': original_controls, 'revision': loaded_revision,
+                'compiler_sha256': hashlib.sha256(read(PARSER[0], 8 * 1024 * 1024)).hexdigest(),
+                'compiler_version': run([PARSER[0], '--version']).decode().strip()}
+    with (state / 'identity.json').open('x') as output:
+        json.dump(evidence, output)
+    emit('loaded_policy_identity', {key: value for key, value in evidence.items() if key != 'before'})
 
 
-def verify():
+def verify(state=STATE):
     hosted_only()
-    global_restrictions()
-    verify_loaded(snapshot())
+    for path in (state, state / 'identity.json'):
+        info = path.lstat()
+        require(not stat.S_ISLNK(info.st_mode) and info.st_uid == 0
+                and info.st_mode & 0o022 == 0, 'SAVED_IDENTITY_OWNERSHIP')
+    evidence = json.loads(read(state / 'identity.json', 4 * 1024 * 1024))
+    require(evidence['source_sha256'] == PROFILE_SHA256, 'SAVED_SOURCE_IDENTITY')
+    require(revision() == evidence['revision'], 'POLICY_REVISION_DRIFT')
+    after = snapshot()
+    verify_loaded(after, evidence['compiled'])
+    require({name: entry for name, entry in after.items() if name not in EXPECTED} == evidence['before'],
+            'UNRELATED_POLICY_CHANGED')
+    require(global_restrictions() == evidence['controls'], 'GLOBAL_RESTRICTIONS_CHANGED')
+    require(revision() == evidence['revision'], 'POLICY_REVISION_DRIFT')
 
 
 def main():
@@ -263,7 +374,7 @@ def main():
             run([*PARSER, '--skip-kernel-load', '--kernel-features', str(POLICY / 'abi/4.0')],
                 data=profile_bytes(args.path))
             emit('offline_syntax', 'passed; no kernel policy loaded')
-    except (PolicyError, OSError, ValueError, tarfile.TarError) as error:
+    except (PolicyError, OSError, ValueError, KeyError, TypeError, tarfile.TarError) as error:
         message = str(error) if isinstance(error, PolicyError) else 'N1_APPARMOR_EVIDENCE_UNAVAILABLE'
         print('::error::' + message, file=sys.stderr)
         return 1
