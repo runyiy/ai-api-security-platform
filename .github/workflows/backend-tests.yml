@@ -187,6 +187,16 @@ jobs:
           import sys
           import tempfile
           import textwrap
+          import time
+
+          def diagnose(started):
+              # Best-effort read-only evidence must never replace the probe error.
+              try:
+                  import runpy
+                  diagnostics = runpy.run_path('../.github/scripts/n1_runtime_diagnostics.py')
+                  diagnostics['report'](started, time.time())
+              except Exception:
+                  print('N1_DIAGNOSTIC unavailable; original capability failure retained', file=sys.stderr)
 
           sys.path.insert(0, str(Path.cwd()))
           from tests.ai.n1_sandbox import Sandbox
@@ -221,14 +231,17 @@ jobs:
                       raise RuntimeError('N1_READ_ONLY_CODE_REQUIRED')
                   print('N1_CAPABILITY_OK')
               '''))
+              started = time.time()
               try:
                   result = subprocess.run(Sandbox(code, database, call).command('child.py'),
                                           stdin=subprocess.DEVNULL, capture_output=True, text=True,
                                           close_fds=True, env={'PATH': '/usr/bin:/bin'}, timeout=10)
               except subprocess.TimeoutExpired:
+                  diagnose(started)
                   sys.exit('::error::N1_CAPABILITY_TIMEOUT: required sandbox did not complete within 10 seconds')
               if result.returncode != 0 or result.stdout.strip() != 'N1_CAPABILITY_OK':
                   print(result.stderr[:4096], file=sys.stderr)
+                  diagnose(started)
                   sys.exit('::error::N1_CAPABILITY_FAILED: required sandbox profile unavailable; inspect the diagnostic above; host security controls must remain enabled')
               print('N1_CAPABILITY_OK: isolated user/PID/network/IPC/UTS/mount namespaces, zero capabilities, no-new-privileges, denied nested user namespaces, private writable tmp and read-only code')
           PY
