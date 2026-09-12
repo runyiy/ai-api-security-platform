@@ -43,6 +43,8 @@ TestRun → Analyzer → Finding → AI Analysis → Human Review → Report
 
 AI is outside the execution trust boundary.
 
+The local RA-05/W2 candidate adds an explicitly constructed synthetic proposal path. Its sandboxed child has only a bounded call socket; the trusted parent owns PostgreSQL accounting, the fsync journal, endpoint witness and deployment-wide permit authority. Lifecycle writers obtain durable closure before their mutation commits, and uncertain delivery/usage retains liability and pauses admission. Reopening requires explicit evidence-based recovery. See the [implementation and runtime acceptance map](research-ai-w2-runtime-validation.md#w2-implementation-and-acceptance). No public route, native provider transport, Target authority, private-data egress or live budget/token-bound claim follows from this fake-only path.
+
 The trusted operator boundary and target-testing authorization boundary are separate. Control of the deployment does not authorize testing a Target.
 
 ## 3. Core Security Invariants

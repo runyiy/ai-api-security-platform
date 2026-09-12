@@ -31,6 +31,8 @@ class MemoryWire:
     reads: int = 0
     closed: bool = False
     offset: int = 0
+    w2_bound: bool = False
+    permit_port: object = field(default=None, repr=False)
 
     def start_tls(self, context, hostname, timeout):
         self.hook('tls')
@@ -45,6 +47,10 @@ class MemoryWire:
     def write(self, data, timeout):
         self.hook('write')
         require(not self.closed, 'TRANSPORT_DENIED')
+        if self.w2_bound:
+            from app.ai.w2.w1_bridge import MemoryPermitPort
+            require(type(self.permit_port) is MemoryPermitPort, 'CONFIG_UNAPPROVED')
+            self.permit_port.write(data, timeout)
         self.writes.append(data)
 
     def read(self, maximum, timeout):
@@ -58,6 +64,10 @@ class MemoryWire:
 
     def close(self):
         self.closed = True
+        if self.w2_bound:
+            from app.ai.w2.w1_bridge import MemoryPermitPort
+            require(type(self.permit_port) is MemoryPermitPort, 'CONFIG_UNAPPROVED')
+            self.permit_port.close()
 
 
 
@@ -136,6 +146,13 @@ class ProviderTransport:
         require((self.url, self.method, self.proxy) == (URL, METHOD, None), 'TRANSPORT_DENIED')
         require(type(self.resolver) is MemoryResolver and type(self.connector) is MemoryConnector
                 and type(self.connector.wire) is MemoryWire and type(self.secret) is MemorySecret, 'CONFIG_UNAPPROVED')
+        wire = self.connector.wire
+        require(type(wire.w2_bound) is bool, 'CONFIG_UNAPPROVED')
+        if wire.w2_bound:
+            from app.ai.w2.w1_bridge import MemoryPermitPort
+            require(type(wire.permit_port) is MemoryPermitPort, 'CONFIG_UNAPPROVED')
+        else:
+            require(wire.permit_port is None, 'CONFIG_UNAPPROVED')
 
     def exchange(self, body, config, boundary, before_send, mark_started):
         self.qualify()

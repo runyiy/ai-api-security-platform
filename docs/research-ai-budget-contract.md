@@ -1,6 +1,6 @@
 # RA-05/W2 — preparation, budget and observation proposal
 
-**v0.1.0 design adopted (B1–B8); broader W2 implementation incomplete.** The [adoption record](#w2-design-adoption-record) fixes the reviewed material, provenance and limits. The [concrete v0.1.1 contract](research-ai-w2-implementation-contract.md) was reviewed/integrated through PR #152; N1, mandatory Linux/bubblewrap and the narrowly scoped CI AppArmor policy were subsequently adopted. The [N1 runtime prerequisite](research-ai-w2-runtime-validation.md) passed PR/exact-main integration gates through PR #153. Preparation, accounting, W1 coordination, permit authority and lifecycle/recovery implementation remain outstanding.
+**v0.1.0 design adopted (B1–B8); local fake-only implementation awaiting independent review.** The [adoption record](#w2-design-adoption-record) and [concrete v0.1.1 contract](research-ai-w2-implementation-contract.md) retain design authority. N1, mandatory Linux/bubblewrap and the narrowly scoped CI AppArmor policy are adopted; PR #153 integrated the runtime prerequisite. The subsequent [W2 implementation and local acceptance record](research-ai-w2-runtime-validation.md#w2-implementation-and-acceptance) maps preparation, retrieval, accounting, call-scoped W1 coordination, independent permit/observation authority, lifecycle invalidation and explicit recovery. These fake results do not establish live token bounds, billing or operational permission.
 
 This document retains the B1–B8 recommendations and T1–T12 acceptance obligations adopted from reviewed `dce6d4d4bc49a5284b427d4e428dd901be6c50c7`. “Proposed” below describes their original design presentation, not a reopened adoption request or an implemented guarantee. Concrete refinements are in the companion contract; operational account/key, material/retention/egress, total budgets, spending, deployment, real-provider and Target permissions remain separate. Broader ADR-RA-TASK/RA-06 choices are not approved by this bounded adoption.
 
@@ -72,7 +72,7 @@ These port obligations are **adopted B8 design**, refined by the reviewed compan
 
 ## 4. Atomic boundaries and recovery — B3/B4/B6
 
-**Adopted B3 design, not implemented authority:** use PostgreSQL as the reservation/settlement authority, with unique keys and short transactions, plus an independently durable send observer. An in-memory implementation is useful only for fake tests. Two PostgreSQL tables updated by the same callback are not independent evidence of real events.
+**Adopted B3 design:** use PostgreSQL as the reservation/settlement authority, with unique keys and short transactions, plus an independently durable send observer. An in-memory implementation is useful only for fake tests. Two PostgreSQL tables updated by the same callback are not independent evidence of real events.
 
 Proposed final-send protocol:
 
@@ -191,4 +191,4 @@ The original proposal's documentation validation checked local links/anchors, st
 - **Limits/status:** design adoption does not approve actual provider/Target calls, account or credential access, private data, per-material egress, operational retention, spending or deployment. Only the N1 runtime prerequisite is integrated; broader W2 and RA-05 are not complete, and W3/cache/RA-06 have not started. N1 is not attributed to this adoption.
 - **Integration evidence:** handoff records PR CI and exact-main CI passing all 3798 tests on their first attempts; the original adoption task verified Git identity/base and matching reviewed/main trees, not CI logs or a new backend run.
 
-The original proposal and its historical validation remain available at the adopted commit. This maintained copy distinguishes adopted design from outstanding implementation and operational permission; no readoption is requested.
+The original proposal and its historical validation remain available at the adopted commit. This maintained copy distinguishes adopted design, the local implementation evidence linked above, and outstanding operational permission; no readoption is requested.

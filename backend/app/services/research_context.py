@@ -23,6 +23,8 @@ class ResearchContextError(Exception):
         super().__init__(code)
 
 
+from app.ai.w2.lifecycle import writer as w2_lifecycle_writer
+
 def _clean(db):
     if db.new or db.dirty or db.deleted:
         raise ResearchContextError("intake_session_not_clean")
@@ -146,6 +148,7 @@ def _append(db, context, intake, number, reference, now):
     return row
 
 
+@w2_lifecycle_writer
 def create_context(db: Session, payload, *, now=None):
     payload = _validate(ResearchContextCreate, payload)
     now = _now(now)
@@ -166,6 +169,7 @@ def create_context(db: Session, payload, *, now=None):
         raise ResearchContextError() from None
 
 
+@w2_lifecycle_writer
 def correct_context(db: Session, project_number, context_id, payload, *, now=None):
     payload = _validate(ResearchContextCorrection, payload)
     now = _now(now)
@@ -185,6 +189,7 @@ def correct_context(db: Session, project_number, context_id, payload, *, now=Non
         return _readiness(db, context, row, now)
 
 
+@w2_lifecycle_writer
 def close_context(db: Session, project_number, context_id, payload, *, now=None):
     payload = _validate(ResearchContextClose, payload)
     now = _now(now)

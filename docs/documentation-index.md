@@ -6,7 +6,7 @@
 
 1. [Architecture decisions](architecture-decisions.md) 与 [security model](security-model.md)是规范优先项；冲突需明确架构决定，不能靠改 roadmap 措辞解决。
 2. DATA、knowledge、INTENT、provider、B1–B8/N1 等按精确采纳记录和条件生效。设计采纳不证明代码实现、运行效果或 operational permission。
-3. [Research Assistant roadmap](research-assistant-roadmap.md#5-固定阶段与依赖)是当前阶段进度入口；[N1 runtime validation](research-ai-w2-runtime-validation.md#hosted-gate-and-remaining-work)是 PR #153 增量的当前证据入口。完整 W2 preparation/accounting/permit/lifecycle/recovery 未完成，W3/RA-06 未开始。
+3. [Research Assistant roadmap](research-assistant-roadmap.md#5-固定阶段与依赖)是当前阶段进度入口；[W2 runtime validation](research-ai-w2-runtime-validation.md#w2-implementation-and-acceptance)记录后续 fake-only 本地实现、T/X/Y 证据与独立审查状态，并保留 PR #153 前提增量的 hosted 历史。当前本地工作尚未 push/PR；W3/RA-06 未开始。
 4. 各实现/验收文档保留相应接口、限制和 exact-base 证据。旧 pending 状态、包内授权/停止句与临时验证明细只描述当时快照，不重新打开已采纳事项或阻止后来明确授权的工作；安全、权限、验收条件不因此退休。
 
 “本地检查通过”“独立审阅接受”“PR CI 成功”“exact-main CI 成功”“验收组完成”“阶段裁决”和“操作许可”分别记录。代码/schema 中的 PASS 或 passed 名称保持原契约语义；文档不把它们提升为其他结论。实施方本地 commit → DO NOT PUSH → STOP，Reviewer 负责独立审阅与远端集成；本目录不发布或替代本地 canonical Review 规则。Issue 是可选跟踪载体，已授权范围内不要求重复逐包授权；范围扩大、未决决定和实际运行/数据/费用许可仍独立。
@@ -22,11 +22,11 @@
 | D03 | [bola-matrix-preview-api.md](bola-matrix-preview-api.md) | M14 只读 preview API、示例与错误 | 现有 API 使用契约；不授予执行许可 | R, D01, D05, D13, D14 |
 | D04 | [level3-roadmap.md](level3-roadmap.md) | Level 3 里程碑与公网门槛 | 规划/历史索引；受两份规范约束 | R, D05, D13, D14 |
 | D05 | [m14-offline-matrix-acceptance.md](m14-offline-matrix-acceptance.md) | M14 验收证据、兼容限制与独立 TEST runbook | 历史验收 + 有效隔离操作说明 | R, D01, D03, D11, D12, D13, D14, D15, D19, D21, D24 |
-| D06 | [research-ai-budget-contract.md](research-ai-budget-contract.md) | B1–B8 预算/观察设计、算术与 T1–T12 | 已采纳设计；完整 W2 尚未实现 | D09, D10, D11, D14 |
+| D06 | [research-ai-budget-contract.md](research-ai-budget-contract.md) | B1–B8 预算/观察设计、算术与 T1–T12 | 已采纳设计；fake-only 本地实现待独立审查 | D09, D10, D11, D14 |
 | D07 | [research-ai-provider-contract.md](research-ai-provider-contract.md) | P1–P6/E1–E6 协议、provider 快照、权限与 usage | fake-only 已采纳设计；价格/模型资料为有日期的历史快照 | D06, D08, D09, D11, D14 |
 | D08 | [research-ai-provider-implementation.md](research-ai-provider-implementation.md) | W1 adapter 与 timing 修正证据 | PR #150 已集成；live acceptance/operational permissions 未完成 | D06, D07, D09, D11, D14 |
-| D09 | [research-ai-w2-implementation-contract.md](research-ai-w2-implementation-contract.md) | Q 表、严格 records/interfaces、G/A、X/Y 与 acceptance 映射 | v0.1.1 已审设计，N1 已采纳；协议实现与验收未完成 | D06, D10, D11, D14 |
-| D10 | [research-ai-w2-runtime-validation.md](research-ai-w2-runtime-validation.md) | N1/Linux/AppArmor 条件、实现、PR/main 与失败证据 | PR #153 运行时前提已验收；不证明完整 W2 | D06, D09, D11, D14 |
+| D09 | [research-ai-w2-implementation-contract.md](research-ai-w2-implementation-contract.md) | Q 表、严格 records/interfaces、G/A、X/Y 与 acceptance 映射 | v0.1.1 已审设计，N1 已采纳；本地协议实现与证据待独立审查 | D06, D10, D11, D14 |
+| D10 | [research-ai-w2-runtime-validation.md](research-ai-w2-runtime-validation.md) | W2 fake-only 实现、T/X/Y 本地证据及 N1/Linux/AppArmor 历史 | 本地候选待独立审查；PR #153 的前提 CI 不替代新实现验收 | D06, D09, D11, D14 |
 | D11 | [research-assistant-adr-decisions.md](research-assistant-adr-decisions.md) | DATA 原始契约、六项决策理由与采纳登记 | 已采纳/未决按明确条目区分；C 为历史源码，P 不自动表示待批准 | D06, D07, D09, D14, D15, D16, D17, D18, D21, D24 |
 | D12 | [research-assistant-evaluation.md](research-assistant-evaluation.md) | 冻结评测、oracle、分母、预算和输出约束 | 评测契约；批准与产品效果仍须独立证据 | D07, D11, D14, D18, D19 |
 | D13 | [research-assistant-product-contract.md](research-assistant-product-contract.md) | 产品输入/输出、人责、调用图和支持矩阵 | 产品规格 + exact-base 能力快照；不放宽安全规范 | D07, D11, D12, D14, D16, D17, D18, D19, D21 |

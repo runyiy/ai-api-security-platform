@@ -118,7 +118,12 @@ class _Boundary:
         now = self.monotonic()
         require(now >= self.last_mono, 'CONTEXT_CHANGED')
         require(now < self.start + 30, 'PROVIDER_TIMEOUT')
-        return min(cap, self.start + 30 - now)
+        remaining = min(cap, self.start + 30 - now)
+        # A call-scoped W2 clock carries the original absolute allowance through
+        # W1 entry. Standalone W1 clocks retain the existing thirty-second cap.
+        if hasattr(self.clock, 'remaining'):
+            remaining = min(remaining, self.clock.remaining(cap))
+        return remaining
 
     def _check_time(self):
         now, wall = self.monotonic(), self.clock.utcnow()
@@ -152,11 +157,12 @@ class OpenAIProposalAdapter:
     never model parameters. W1 supplies no live implementations of these ports.
     """
     def __init__(self, *, transport=None, authority=None, coordination=None,
-                 clock=None, cancelled=lambda: False):
+                 clock=None, cancelled=lambda: False, terminal_observer=None):
         self.transport = transport if transport is not None else ProviderTransport()
         self.authority, self.coordination = authority, coordination
         self.clock = clock if clock is not None else SystemClock()
         self.cancelled = cancelled
+        self.terminal_observer = terminal_observer
 
     def propose_once(self, *, prepared, config=None, receipt=None):
         sent, admitted = False, False
@@ -167,6 +173,11 @@ class OpenAIProposalAdapter:
             config.validate()
             require(type(self.transport) is ProviderTransport, 'PROVIDER_DISABLED')
             self.transport.qualify()
+            if self.transport.connector.wire.w2_bound:
+                from app.ai.w2.w1_bridge import TerminalObservationPort
+                require(type(self.terminal_observer) is TerminalObservationPort, 'CONFIG_UNAPPROVED')
+            else:
+                require(self.terminal_observer is None, 'CONFIG_UNAPPROVED')
             require(self.authority is not None, 'CONFIG_UNAPPROVED')
             require(self.coordination is not None and type(receipt) is ReservationReceipt, 'BUDGET_UNAVAILABLE')
             require(type(prepared) is PreparedProposal, 'DATA_INELIGIBLE')
@@ -230,6 +241,9 @@ class OpenAIProposalAdapter:
             envelope = bounded_json(raw, maximum=65536, depth=16, nodes=8192)
             terminal = envelope.get('status') in ('completed', 'incomplete', 'failed', 'cancelled')
             usage = project_usage(envelope.get('usage'), terminal)
+            if self.terminal_observer is not None:
+                terminal_code = envelope.get('status', 'unknown').upper() if terminal else 'UNKNOWN'
+                self.terminal_observer.observe(terminal_code, usage)
             require(set(envelope) <= frozenset('''id object created_at status error incomplete_details
                 instructions max_output_tokens model output parallel_tool_calls previous_response_id
                 reasoning store temperature text tool_choice tools top_p truncation usage user metadata

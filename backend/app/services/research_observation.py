@@ -28,6 +28,8 @@ BOOT_TOKEN = str(uuid.uuid4())
 DAYS90 = timedelta(days=90)
 
 
+from app.ai.w2.lifecycle import writer as w2_lifecycle_writer
+
 def _locked(db, project, context_id):
     if type(project) is not int or not 1 <= project <= 1000000 or type(context_id) is not int or not 1 <= context_id <= 2147483647:
         raise ObservationError()
@@ -205,6 +207,7 @@ def _payload(db, row):
     return value
 
 
+@w2_lifecycle_writer
 def prepare(db, project, context_id, payload, *, now=None):
     payload = validate(PreparationInput, payload)
     context = _locked(db, project, context_id)
@@ -234,6 +237,7 @@ def prepare(db, project, context_id, payload, *, now=None):
         raise ObservationError() from None
 
 
+@w2_lifecycle_writer
 def accept(db, project, context_id, preparation_ref, raw, *, corrects_id=None, now=None):
     if corrects_id is not None and (type(corrects_id) is not int or not 1 <= corrects_id <= 2147483647):
         raise ObservationError()
@@ -289,6 +293,7 @@ def accept(db, project, context_id, preparation_ref, raw, *, corrects_id=None, n
         raise ObservationError() from None
 
 
+@w2_lifecycle_writer
 def read(db, project, context_id, observation_id, *, review=None, now=None):
     clock = now
     reviewed = validate(ReviewInput, review) if review is not None else None
@@ -318,6 +323,7 @@ def read(db, project, context_id, observation_id, *, review=None, now=None):
         return result
 
 
+@w2_lifecycle_writer
 def lifecycle(db, project, context_id, observation_id, action, payload, *, now=None):
     clock = now
     p = validate(HoldInput if action == "hold" else ReviewInput, payload)
@@ -359,6 +365,7 @@ def lifecycle(db, project, context_id, observation_id, action, payload, *, now=N
         return _receipt(row, _state(row, now))
 
 
+@w2_lifecycle_writer
 def revoke_preparation(db, project, context_id, ref, payload, *, now=None):
     p = validate(ReviewInput, payload)
     context = _locked(db, project, context_id)
@@ -370,6 +377,7 @@ def revoke_preparation(db, project, context_id, ref, payload, *, now=None):
         return {"status": "unavailable"}
 
 
+@w2_lifecycle_writer
 def maintain(db, project, context_id, payload, *, now=None):
     """Explicit bounded recovery/cleanup, never a worker or a backup assertion.
 

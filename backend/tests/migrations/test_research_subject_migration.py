@@ -10,6 +10,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from app.core.config import settings
 from app.db.base import Base
+from tests.research_intake_fixtures import AI_BUDGET_TABLES
 from app.db.session import SessionLocal, engine
 from app.db.models.research_subject import ResearchSubjectVersion
 from app.db.models import SecurityReport
@@ -31,12 +32,12 @@ def existing():
     # is independently checked by test_research_intent_lifecycle_migration.
     with engine.connect() as db:
         return {t.name:list(db.execute(select(*[c for c in t.columns if c.name != 'hold_generation']).order_by(*t.primary_key.columns)).mappings())
-                for t in Base.metadata.sorted_tables if t.name not in VERIFICATION_TABLES | INTENT_TABLES | RULE_VALIDATION_TABLES | KNOWLEDGE_TABLES | {TABLE}}
+                for t in Base.metadata.sorted_tables if t.name not in AI_BUDGET_TABLES | VERIFICATION_TABLES | INTENT_TABLES | RULE_VALIDATION_TABLES | KNOWLEDGE_TABLES | {TABLE}}
 
 
 def test_fresh_exact_schema_and_empty_rollback(monkeypatch):
     config=Config("alembic.ini");scripts=ScriptDirectory.from_config(config)
-    assert scripts.get_heads()==["6a94cbd3f825"] and scripts.get_revision(REVISION).down_revision==PARENT
+    assert scripts.get_heads()==["7ba5dce4a936"] and scripts.get_revision(REVISION).down_revision==PARENT
     schema="subject_migration_"+uuid4().hex
     with engine.begin() as db:db.execute(text(f'CREATE SCHEMA "{schema}"'))
     url=make_url(settings.database_url).update_query_dict({"options":f"-csearch_path={schema}"})
@@ -94,7 +95,7 @@ def test_populated_rollback_and_cross_context_fk_protected(subject_pair):
     with pytest.raises(RuntimeError,match="research_subject_populated_downgrade_blocked"):
         command.downgrade(Config("alembic.ini"),PARENT)
     assert snapshot()==before
-    with engine.connect() as db:assert MigrationContext.configure(db).get_current_revision()=="6a94cbd3f825"
+    with engine.connect() as db:assert MigrationContext.configure(db).get_current_revision()=="7ba5dce4a936"
     with SessionLocal() as db:
         row=db.scalar(select(ResearchSubjectVersion).where(ResearchSubjectVersion.context_id==a["ctx"]))
         for values in ({"target_id":b["target"]},{"context_version":2},{"provenance":"observed_baseline"},{"proposal_number":0},{"proposal":{"x":"x"*16384}}):

@@ -21,6 +21,8 @@ from app.services.resource_access_resolution import resolve_resource_access, Res
 from app.services.bola_binding_selection import select_bola_binding, BOLABindingSelectionError
 
 
+from app.ai.w2.lifecycle import writer as w2_lifecycle_writer
+
 def _context(db, project, context_id):
     try:
         return observation._locked(db, project, context_id)
@@ -180,6 +182,7 @@ def _result(row, latest, now, *, proposal=None, facts=None, gaps=None):
         "execution_preparation_allowed": False, "execution_authorized": False}
 
 
+@w2_lifecycle_writer
 def record(db, project, context_id, number, payload, *, correction=False, now=None):
     _number(number)
     data = validate(SubjectCorrection if correction else SubjectInput, payload)
@@ -212,6 +215,7 @@ def record(db, project, context_id, number, payload, *, correction=False, now=No
         raise SubjectError() from None
 
 
+@w2_lifecycle_writer
 def read(db, project, context_id, number, *, version=None, now=None):
     _number(number)
     if version is not None:

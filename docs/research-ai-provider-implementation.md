@@ -26,6 +26,8 @@ Exact reviewed projections and current independent qualification are the content
 
 ## Lifecycle, scheduling and W2 interfaces
 
+The later [local W2 candidate](research-ai-w2-runtime-validation.md#w2-implementation-and-acceptance) supplies persistent coordination and the independent fake permit/observation boundary. It adds only an exact MemoryWire permit port and a terminal usage projection hook; this W1 record retains its historical scope and test snapshots.
+
 The trusted `Authority.current(project, context, stage)` port must return current independently qualified state, not a stale snapshot supplied by a model or HTTP caller. The adapter checks it before input, after input construction, after admission/wait, after secret resolution/DNS/connect/TLS, within the sending critical section after the final peer check, before consumption/return and after observer work. It compares the full exact registry/configuration and independently checks half-open validity, source activity and clock order. Close/transfer, hold/delete/quarantine/revocation, publication/source versions, and configuration/key rotation invalidate the call. Post-send invalidation cannot erase already incurred usage.
 
 The `Coordination` protocol is an obligation for later W2, **not a new ledger or scheduler implementation**:

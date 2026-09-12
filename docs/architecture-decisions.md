@@ -2,6 +2,8 @@
 
 This document records the approved architecture constraints for the Level 3 product. It is normative together with `security-model.md`. The roadmap must be interpreted through these constraints.
 
+The adopted RA-05 B1–B8, concrete v0.1.1 and N1 decisions now have a [local fake-only implementation candidate and acceptance record](research-ai-w2-runtime-validation.md#w2-implementation-and-acceptance). Independent implementation review remains pending. This implements the existing bounded design; it adds no live provider/Target permission, cache or RA-06 orchestration decision, and does not broaden the adopted CI-only AppArmor policy.
+
 ## Product and deployment boundary
 
 Version 1 is a single-operator, self-hosted/local product. It is not a multi-tenant SaaS, so tenant, workspace, organization-membership, and platform-user RBAC foundations are intentionally deferred.

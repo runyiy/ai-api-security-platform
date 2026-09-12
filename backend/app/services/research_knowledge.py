@@ -16,6 +16,8 @@ from app.services.resource_access_resolution import MAX_ASSERTIONS_SCANNED
 
 # A bounded catalog mutex, always before W1 context locks; not a task scheduler.
 # Transactional advisory key is specific to this new domain.
+from app.ai.w2.lifecycle import writer as w2_lifecycle_writer
+
 def _locked(db, project, context_id):
     intake._clean(db)
     db.execute(text('SELECT pg_advisory_xact_lock(73103, 2)'))
@@ -79,6 +81,7 @@ def _sources(db, context, content, target_id, clock):
     return deadlines
 
 
+@w2_lifecycle_writer
 def record(db, project, context_id, payload, *, now=None):
     data = s.validate(s.RecordInput, payload)
     context = _locked(db, project, context_id)
@@ -113,6 +116,7 @@ def record(db, project, context_id, payload, *, now=None):
         raise s.KnowledgeError() from None
 
 
+@w2_lifecycle_writer
 def decide(db, project, context_id, payload, *, now=None):
     data = s.validate(s.DecisionInput, payload)
     context = _locked(db, project, context_id)
@@ -170,6 +174,7 @@ def decide(db, project, context_id, payload, *, now=None):
         return result
 
 
+@w2_lifecycle_writer
 def rotate_audit(db, project, context_id, payload, *, now=None):
     data = s.validate(s.AuditInput, payload)
     context = _locked(db, project, context_id)
@@ -331,6 +336,7 @@ def _context_deadlines(db, context, value, readiness):
     return deadlines
 
 
+@w2_lifecycle_writer
 def retrieve(db, project, context_id, payload, *, now=None):
     query = s.validate(s.QueryInput, payload, s.MAX_QUERY)
     context = _locked(db, project, context_id)

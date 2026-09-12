@@ -14,6 +14,7 @@ from app.db.models.execution_plan_progress import ExecutionPlanProgress
 from app.db.models.execution_plan_cancellation import ExecutionPlanCancellation
 from app.schemas import research_intent as c, research_verification as s
 from app.services import research_intent as intent
+from app.ai.w2.lifecycle import writer
 from app.services import research_response_semantics as semantics
 from app.services import research_verification_clock as vc
 
@@ -98,6 +99,7 @@ def _expectations(values,snapshot):
     return parsed
 
 
+@writer
 def confirm(db,project,context_id,number,payload,*,now=None):
     clock=vc.current(now);p=c.validate(s.ConfirmInput,payload);context=intent._locked(db,project,context_id)
     with db.begin_nested():
@@ -226,6 +228,7 @@ def _healthy_dependency(db,context,reference,actor,expectation,clock):
     return proof,end
 
 
+@writer
 def select_health(db,project,context_id,payload,*,now=None):
     clock=vc.current(now);p=c.validate(s.HealthSelectionInput,payload);context=intent._locked(db,project,context_id)
     with db.begin_nested():
@@ -287,6 +290,7 @@ def bind_clock(db,context,reference,clock):
     check(db,context.id,reference)
 
 
+@writer
 def current_intent(db,project,context_id,reference,clock):
     context=intent._locked(db,project,context_id)
     bind_clock(db,context,reference,clock)
@@ -301,6 +305,7 @@ def current_intent(db,project,context_id,reference,clock):
     return context,row,manifest,contract,min(ends)
 
 
+@writer
 def verify_pair(db,project,context_id,payload,*,now=None):
     clock=vc.current(now);p=c.validate(s.PairInput,payload)
     context=intent._locked(db,project,context_id)
@@ -353,6 +358,7 @@ def _member(db,core,plan_id):
     return member
 
 
+@writer
 def approve(db,project,context_id,payload,*,now=None):
     from app.db.models.execution_plan import ExecutionPlan
     from app.db.models.execution_plan_approval_record import ExecutionPlanApprovalRecord
@@ -384,6 +390,7 @@ def approve(db,project,context_id,payload,*,now=None):
         return value
 
 
+@writer
 def read_execution(db,project,context_id,reference,*,now=None):
     clock=vc.current(now);context=intent._locked(db,project,context_id)
     with db.begin_nested():

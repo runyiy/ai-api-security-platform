@@ -109,6 +109,8 @@ MAX_ASSET_CANDIDATE_DNS_VALIDATION_PAGE_SIZE = 100
 MAX_ASSET_ENROLLMENT_DECISION_PAGE_SIZE = 100
 
 
+from app.ai.w2.lifecycle import writer as w2_lifecycle_writer
+
 def get_asset_candidate_dns_resolver() -> AssetCandidateDNSResolver:
     return DnspythonAssetCandidateDNSResolver()
 
@@ -142,6 +144,7 @@ def get_profile_or_404(
     response_model=AuthorizationProfileRead,
     status_code=status.HTTP_201_CREATED,
 )
+@w2_lifecycle_writer
 def create_authorization_profile(
     payload: AuthorizationProfileCreate,
     db: Session = Depends(get_db),
@@ -190,6 +193,7 @@ def get_authorization_profile(
     "/{profile_id}",
     response_model=AuthorizationProfileRead,
 )
+@w2_lifecycle_writer
 def update_authorization_profile(
     profile_id: int,
     payload: AuthorizationProfileUpdate,
@@ -241,6 +245,7 @@ def update_authorization_profile(
     "/{profile_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
+@w2_lifecycle_writer
 def delete_authorization_profile(
     profile_id: int,
     db: Session = Depends(get_db),
@@ -273,6 +278,7 @@ def delete_authorization_profile(
     response_model=AuthorizationRevisionRead,
     status_code=status.HTTP_201_CREATED,
 )
+@w2_lifecycle_writer
 def create_authorization_revision(
     profile_id: int,
     db: Session = Depends(get_db),
@@ -319,6 +325,7 @@ def get_authorization_revision(
     return revision
 
 
+@w2_lifecycle_writer
 def apply_revision_transition(
     profile_id: int,
     revision_id: int,
@@ -337,6 +344,7 @@ def apply_revision_transition(
     "/{profile_id}/revisions/{revision_id}/activate",
     response_model=AuthorizationRevisionRead,
 )
+@w2_lifecycle_writer
 def activate_authorization_revision(
     profile_id: int,
     revision_id: int,
@@ -349,6 +357,7 @@ def activate_authorization_revision(
     "/{profile_id}/revisions/{revision_id}/revoke",
     response_model=AuthorizationRevisionRead,
 )
+@w2_lifecycle_writer
 def revoke_authorization_revision(
     profile_id: int,
     revision_id: int,
@@ -818,6 +827,7 @@ def get_revision_asset_enrollment_decision(
     response_model=TargetRead,
     status_code=status.HTTP_201_CREATED,
 )
+@w2_lifecycle_writer
 def create_target_from_revision_asset_enrollment_decision(
     profile_id: int,
     revision_id: int,

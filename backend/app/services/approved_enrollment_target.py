@@ -51,6 +51,8 @@ _DNS_NETWORK_MODES = {
 }
 
 
+from app.ai.w2.lifecycle import writer as w2_lifecycle_writer
+
 def canonical_enrollment_origin(
     *, scheme: str, hostname: str, port: int | None
 ) -> str:
@@ -70,6 +72,7 @@ def _equivalent_origin_representations(
     return tuple(sorted(variants))
 
 
+@w2_lifecycle_writer
 def create_target_from_approved_enrollment(
     db: Session,
     *,

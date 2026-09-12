@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.db.base import Base
 from app.db.session import engine,SessionLocal
 from app.db.models.research_verification import VerificationContract
-from tests.research_intake_fixtures import VERIFICATION_TABLES,snapshot
+from tests.research_intake_fixtures import VERIFICATION_TABLES,AI_BUDGET_TABLES,snapshot
 from tests.research_intent_fixtures import intent_graph,subject_pair,two_intake_targets,call,NOW,REF
 from tests.finding_evidence_fixtures import evidence_pair
 from tests.api.test_finding_evidence_fingerprints import old_evidence
@@ -21,17 +21,18 @@ from app.services import research_verification as verify
 
 REVISION='6a94cbd3f825'
 PARENT='5f83bac2e714'
+HEAD='7ba5dce4a936'
 
 
 def previous():
     with engine.connect() as db:
         return {t.name:list(db.execute(select(t).order_by(*t.primary_key.columns)).mappings())
-            for t in Base.metadata.sorted_tables if t.name not in VERIFICATION_TABLES}
+            for t in Base.metadata.sorted_tables if t.name not in AI_BUDGET_TABLES | VERIFICATION_TABLES}
 
 
 def test_fresh_additive_schema_and_empty_downgrade(monkeypatch):
     config=Config('alembic.ini');scripts=ScriptDirectory.from_config(config)
-    assert scripts.get_heads()==[REVISION] and scripts.get_revision(REVISION).down_revision==PARENT
+    assert scripts.get_heads()==[HEAD] and scripts.get_revision(REVISION).down_revision==PARENT
     name='verification_'+uuid4().hex
     with engine.begin() as db:db.execute(text(f'CREATE SCHEMA "{name}"'))
     url=make_url(settings.database_url).update_query_dict({'options':f'-csearch_path={name}'})
@@ -47,6 +48,7 @@ def test_fresh_additive_schema_and_empty_downgrade(monkeypatch):
                 assert column.type.compile(dialect=engine.dialect)==cols[column.name]['type'].compile(dialect=engine.dialect)
                 assert column.nullable==cols[column.name]['nullable']
             assert all(f['options']=={'ondelete':'RESTRICT'} for f in inspector.get_foreign_keys(table))
+        command.upgrade(config,HEAD)
         command.check(config)
         command.downgrade(config,PARENT);assert set(inspect(isolated).get_table_names())==before
         command.upgrade(config,REVISION)
@@ -85,7 +87,7 @@ def test_immutable_record_and_populated_downgrade(intent_graph):
             db.rollback()
         with pytest.raises(RuntimeError,match='verification_populated_downgrade_blocked'):command.downgrade(Config('alembic.ini'),PARENT)
         assert snapshot()==before
-        with engine.connect() as db:assert MigrationContext.configure(db).get_current_revision()==REVISION
+        with engine.connect() as db:assert MigrationContext.configure(db).get_current_revision()==HEAD
     finally:
         from sqlalchemy import delete
         from app.db.models.research_verification import VerificationAudit
