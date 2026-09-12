@@ -1,70 +1,53 @@
 # Research Assistant ADR 决策材料与 RA-02 数据契约
 
-> **RA-05/W2 subsequent adoption/runtime evidence:** Concrete v0.1.1 was reviewed at `302b1e581f4e0e559a0f16f924d1ca64ea985adb` and integrated through PR #152. User “采纳” adopts N1 v0.1.1 and subsequently mandatory Linux/bubblewrap isolation under its four conditions. [Adoption and local prerequisite evidence](research-ai-w2-runtime-validation.md) preserve B1–B8 and all operational restrictions. W2 is incomplete; hosted compatibility and original protocol/ledger/writer acceptance remain pending. The earlier pre-code/pending labels below are historical.
+**当前决策登记：设计采纳、实现证据和 operational permission 分开。** DATA D1–D4、K1–K4、INTENT I1–I7、W1 P1–P6/E1–E6、W2 B1–B8 与后续 N1/Linux/bubblewrap/限定 CI AppArmor 决定均以各自精确采纳记录为准。N1 运行时前提已由 [PR #153](https://github.com/runyiy/ai-api-security-platform/pull/153) 集成并通过 PR/exact-main gate；[完整证据与未完成范围](research-ai-w2-runtime-validation.md)。W2 preparation/accounting/permit authority/lifecycle/recovery、broader TASK 和 operational permission 仍未完成。
 
-> **RA-05/W2 historical adopted design / pre-code record:** User “采纳” adopts B1–B8 of reviewed v0.1.0 / `dce6d4d4bc49a5284b427d4e428dd901be6c50c7`; Reviewer observation **2026-09-11 20:26:02 UTC** is not a message timestamp/signature. [Adoption and limits](research-ai-budget-contract.md#w2-design-adoption-record); [concrete B1/B8 companion](research-ai-w2-implementation-contract.md) is **DOCUMENTATION_ONLY / PENDING_INDEPENDENT_REVIEW**, from verified main `e953ee08cb32e0ba9de0f3d196e7b5e82b9fe727`. B1–B8 are not reopened; new material N1 is separately proposed. No W2 code or operational approval follows; historical records below retain their original status.
-
-> **RA-05/W2 historical proposal (2026-09-11):** [W2 budget/send-observation contract v0.1.0](research-ai-budget-contract.md) is **DOCUMENTATION_ONLY / PROPOSED / PENDING_APPROVAL**, from verified main `658464c5ae45f058cbb3c6a0bdd8ad3f371ad114`. The user handoff records reviewed W1 `0e3b94a909ee01eba41c79a264f056665c0222ce`, PR #150 integration and all required local/PR/exact-main gates passing 3798 tests; Git trees match, gates were not rerun for prose. W1 P1–P6/E1–E6 design adoption stands. W2 B1–B8, including PostgreSQL/transaction/observer/recovery choices, remain proposed and need independent review plus User adoption before implementation. Operational approvals and real-provider acceptance remain pending; no W2 implementation, W3/cache or RA-06 authorization. Earlier records below are historical.
-
-> **RA-05/W1 historical design adoption and implementation:** The user handoff records “采用”, observed 2026-09-11, for reviewed provider contract v0.1.0 / `29376dda7e0ffa99fe3f1947bb2c3e83df81c228`. [Adoption record](research-ai-provider-contract.md#w1-design-adoption-and-implementation-record): P1–P6 and E1–E6 design constraints apply to fake-only W1. [Implementation evidence](research-ai-provider-implementation.md) is IMPLEMENTED / PENDING_INDEPENDENT_REVIEW. Actual account/key/data/retention/budget/egress approvals and real-provider acceptance remain pending; Target restrictions are unchanged. W2/W3 have not started. Earlier pending text is preserved as history.
-
-> **RA-05/W1 后续文档准备（2026-09-11）：** 从核验的clean main/remote main `d058cb82215c61b4c7811784abb24dc0ae069f80` 开始既有W1的 [proposal/provider契约 v0.1.0](research-ai-provider-contract.md)，补齐§7/§8，**DOCUMENTATION_ONLY / PENDING_INDEPENDENT_REVIEW**；P1–P6/E1–E6全部 **PROPOSED / PENDING_APPROVAL**。推荐不批准模型、数据、账号、支出或provider POST例外，adapter未实施，W1/RA-05未完成，W2未开始。DATA D1–D4、K1–K4、INTENT I1–I7既有采纳约束不变；下方旧C/P、pending和包内停止点保留为各基点历史。
-
-> **RA-04/W3 后续集成证据：** 用户交接确认 reviewed `167853e2a7386088b3d915e12e2c2e383fa3effe` 经PR #147集成，独立本地、PR CI `34569913522`、main CI `34570935882` 各3266 passed。本包Git核验上述main与reviewed feature tree相同，未重跑suite或重新审计CI。仅建立有界合成本地演示验收，不授予production/public/provider readiness或其余待决ADR批准。
-
-> **后续状态：** 下方 v0.1.0 的 proposed / pending 登记保留为 W3 原始历史。DATA D1–D4 的后续采纳证据见本节；其余五项 ADR 不受影响。
-
-> **RA-04/W1 后续 INTENT 提案（documentation only）：** [INTENT 协议 v0.1.0](research-intent-contract.md)基于本地核验的 `bedc55395d2e5abf3479026fd201430b537baff2`，补齐 §6 的 session-health 来源/时间、pair/revision、凭据变化、immutable linkage 与 legacy 回退建议。I1–I7 全部 **PROPOSED / PENDING_APPROVAL**，文档 **PENDING_INDEPENDENT_REVIEW**；操作者选择先准备建议，不等于采纳建议或批准 bridge 实施。下方 v0.1.0/RA-01/W3 的原始登记及 DATA 后续采纳历史保留，不重解释其当时状态。
+本页保留 DATA 原始契约、决策理由、替代方案及 exact-base 引用。**C** 表示原 RA-01/W3 基点的代码事实；**P** 保留原推荐标识，采纳状态由第 1 节和精确后续记录决定，不再等于“全部未批准”。未采纳的产品/架构选择不因本次清理变成批准。规范 [architecture decisions](architecture-decisions.md) / [security model](security-model.md)继续优先；[文档目录](documentation-index.md)和 [roadmap](research-assistant-roadmap.md)提供状态导航。
 
 ## INTENT 后续采纳记录（RA-04/W1）
 
 - **精确材料：** [INTENT v0.1.0](research-intent-contract.md)，reviewed commit `6723cb5bfa62a10453f18f8158c25000a1997711`，I1–I7。
-- **决定来源：** 本次用户W1 implementation handoff明确说明操作者采纳I1–I7，Review Project Tech Lead采用这些推荐作为实现约束；不附造身份、签名或批准时间。原pending/提案段落作为历史保留。
+- **决定来源：** W1 implementation handoff明确说明操作者采纳I1–I7，Review Project Tech Lead采用这些推荐作为实现约束；不附造身份、签名或批准时间。原提案状态只属于采纳前历史。
 - **适用边界：** 仅批准既有W1有序实现；未授权Target/health请求、operator credential访问、私有数据或费用。其他ADR不受影响；I6规定的W2解释/可信健康证明依赖未实现时，新purpose执行继续关闭，不能以fixture、NOT_RUN或operator claim替代。
-- **实现状态：** [bounded bridge实施记录](research-intent-bridge.md)，IMPLEMENTED / PENDING_INDEPENDENT_REVIEW；W2/W3和RA-04 COMPLETE不在本次声明范围。
+- **实现证据：** [bounded bridge](research-intent-bridge.md)经 PR #144、[W2 verifier](research-response-verification.md)经 PR #145、[本地 W3 演示](research-local-demonstration.md)经 PR #147 集成；仅有界合成验收，不授予 operational permission。
 
 ## INTENT W2 continuation record
 
-The current W2 handoff records reviewed W1 integration in PR #144 and authorizes the existing next package from main `c4d6750eb42af5556036419980a0eb312f892d78`. Adopted I1–I7 continue to constrain the [W2 verifier and dedicated dispatcher](research-response-verification.md). Historical W1-only/pending text remains historical; no approval signature or time is invented. The implementation replaces W1's unavailable production interpreter only with exact platform provenance, independent expectations and bounded current qualification. Legacy execution/analysis remain closed to new semantics. Actual Target requests, operator credentials/private data, provider costs, public execution and all other pending ADRs receive no new authorization. Independent W2 review and W3 remain outstanding.
+INTENT W2 的 [verifier 和 dedicated dispatcher](research-response-verification.md)遵守已采纳 I1–I7，只用 exact platform provenance、独立预期和当前有界资格替换 W1 原来未提供的解释器。Legacy 执行/分析继续拒绝新语义；实际 Target 请求、operator credentials、私有数据、provider 费用和公网许可仍独立。PR #145 / #147 已提供后续集成；W1 当时的未实现/停止点不再是当前依赖状态。
 
 ## DATA 后续决定记录（RA-02/W1）
 
 - **被采纳的确切材料：** 本文 **v0.1.0**，reviewed commit [`dcdb50fd36c098173c2580389577bb59558c0982`](https://github.com/runyiy/ai-api-security-platform/blob/dcdb50fd36c098173c2580389577bb59558c0982/docs/research-assistant-adr-decisions.md)，ADR-RA-DATA 的 **D1–D4 推荐方案**。
-- **决定来源：** 本次用户交接明确记录：操作者在 Review Project 的决定请求下回复 **“采纳”**；Tech Lead 在同一交接中采用这些推荐作为 RA-02/W1 的设计约束。Codex 仅转录交接事实，不补造批准人签名、账号或未提供的消息链接。
+- **决定来源：** RA-02/W1 用户交接明确记录：操作者在 Review Project 的决定请求下回复 **“采纳”**；Tech Lead 在该交接中采用这些推荐作为 RA-02/W1 的设计约束。Codex 仅转录交接事实，不补造批准人签名、账号或未提供的消息链接。
 - **观察时间：** `2026-09-10T00:56:57Z`，是确认被观察到的时间，**不是声称精确的消息发送时间**。
 - **效力：** DATA D1–D4 从待决定转为本包适用的已采纳设计约束；准入前仍须实现适用控制。W1 只接收受限 synthetic context 元数据，拒绝私有/敏感资料；observation parser/payload lifecycle 留在 RA-02/W2。新执行源数据、旧 TestRun/M13 的边界依 D4 保持。
 - **没有扩大的批准：** 不批准 INTENT / PROPOSAL / EGRESS / TASK / PUBLIC，不批准真实私有数据使用、Target 执行、provider 调用或支出，不签署 W1 reviewer-PASS 或 RA-02 COMPLETE。
 - **实现与证据：** [RA-02/W1 intake 使用说明](research-intake-context.md)。原 W3 的 P/C 描述仍指其 exact base，不能倒读为本包代码事实；原“无批准”表格是采纳之前的历史。
 
-**文档 v0.1.0 · RA-01/W3 · IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**
-**全部新架构建议：PROPOSED / NOT_APPROVED。RA-02 前置审批尚未满足。**
-
-精确来源基点：`ac9a5ce3142232e86576b5d789d93b95508e259d`，对应已独立审阅并 push 的 W2 HEAD，尚未合入 main；该 gate 依据用户交接及本次远端 SHA 核验。W1/W2 原文、语料、标签、hash 和阈值保持不变。本文交付可审阅的选择、输入说明与验收要求，不签署 Tech Lead/操作者决定，不宣告 W3 或 RA-01 COMPLETE，不启动 RA-02。
-
-[规范架构](architecture-decisions.md)与[安全模型](security-model.md)保持优先；[roadmap 第 6–8 节](research-assistant-roadmap.md)、[W1 第 5–7 节](research-assistant-product-contract.md)及 [W2 第 3–6 节](research-assistant-evaluation.md)是设计依赖。下文 **C** 是本基点已读代码/既有测试事实；**P** 是待批准、待实现的要求。示例是本包新写的文档样例，没有引用 held-out 案例、响应或答案。
+**DATA 契约版本 v0.1.0；RA-01/W3 历史源码基点 `ac9a5ce3142232e86576b5d789d93b95508e259d`。** 材料经 [PR #136](https://github.com/runyiy/ai-api-security-platform/pull/136) 集成；DATA 后续采纳如上。W1/W2 语料、标签、hash 和阈值没有因设计采纳改变。下文示例是独立编写的文档值，不含 held-out 答案；原验证不是后来控制的实现证明。
 
 现有 FastAPI/PostgreSQL、单 trusted operator、local-first 边界保持。Default Deny、Target 非授权、一次 execution 一个 immutable revision、不 union grants、Scope/safety 只收窄、mandatory allowlist/exact origin/safe path、即时执行前重验、GET-only/no redirects/有界执行及适用精确审批均不被数据许可放宽；认证材料只经 AuthenticationContext，AI 无 executor、shell、任意 fetch、凭据、审批、policy-write 或 Finding-confirmation authority。导入/响应/model output 始终为不可信数据，公网 runtime 继续 blocked。
 
 ## 1. 决策与批准登记
 
-六个标识沿用 roadmap，不是新增工作包或已批准 ADR 编号。审批者须审阅本文精确版本和 commit，记录接受/拒绝/有条件接受、条件、理由、身份与 aware 时间；代码 review PASS、roadmap 持续授权、数据使用许可、Target 执行许可、provider 支出批准相互不能替代。
+六个标识沿用 roadmap，不是新增工作包或已批准 ADR 编号。审批者须审阅本文精确版本和 commit，记录接受/拒绝/有条件接受、条件、理由、身份与 aware 时间；独立代码审阅接受、roadmap 持续授权、数据使用许可、Target 执行许可、provider 支出批准相互不能替代。
 
 | 现有标识 | 本包建议与依赖 | 批准责任及最晚检查点 | 实际批准证据 |
 | --- | --- | --- | --- |
-| ADR-RA-DATA | 第 2–5 节的输入、隔离、资格、lifecycle 与兼容方案 | Tech Lead 批准字段/存储/迁移/兼容；操作者确认数据资格、保留期限及运维可行性。RA-02/W1 使用输入设计前确认适用部分；RA-02/W2 持久化前批准并实现全部适用控制 | **无；PENDING** |
-| ADR-RA-INTENT | 第 6 节及后续 [INTENT v0.1.0 / I1–I7](research-intent-contract.md#9-待决定表)：精确协议、health120s/pair30s/intent300s、失效与兼容建议 | Tech Lead 批准协议/模型/兼容；操作者决定时间和操作可行性、确认业务事实。RA-04/W1 依赖代码前，health/verifier及预算依赖按I6检查 | **I1–I7 ADOPTED（本次W1用户交接，见后续采纳记录）；实际请求/凭据/数据/费用未授权** |
-| ADR-RA-PROPOSAL | 第 7 节及后续 [W1契约§2/P1–P6](research-ai-provider-contract.md#2-proposal-protocol-p)：独立、无 authority 的 typed suggestion | Tech Lead 批准协议/消费边界；操作者确认解释与拒绝方式。RA-05 proposal 集成前 | **DESIGN ADOPTED for W1 fake-only（见页首记录）；operational approvals PENDING** |
-| ADR-RA-EGRESS | 第 8 节及后续 [W1契约§3–7/E1–E6](research-ai-provider-contract.md#3-providermodel-比较与推荐-p)：默认关闭的独立 provider transport、资格与核算 | Tech Lead 批准边界/用量解释；操作者独立批准模型、账号、数据及费用。RA-05 provider 代码前；每次真实运行前再次核验许可 | **DESIGN ADOPTED for W1 fake-only（见页首记录）；operational approvals PENDING** |
-| ADR-RA-TASK | 第 9 节及 [W2预算/观察提案](research-ai-budget-contract.md)：预算/观察与 M8 精确计划协调分工；PostgreSQL仍为推荐 | Tech Lead 批准状态/事务/恢复；操作者批准硬预算与审批操作。RA-06 实施前，若更早引入审批聚合则更早 | **B1–B8/N1 and Linux isolation ADOPTED; W2 runtime evidence/implementation and broader TASK choices pending** |
+| ADR-RA-DATA | 第 2–5 节的输入、隔离、资格、lifecycle 与兼容方案 | Tech Lead 批准字段/存储/迁移/兼容；操作者确认数据资格、保留期限及运维可行性。RA-02/W1 使用输入设计前确认适用部分；RA-02/W2 持久化前批准并实现全部适用控制 | **D1–D4 DESIGN ADOPTED，见 DATA 采纳记录；实际私有数据与运维许可仍独立** |
+| ADR-RA-INTENT | 第 6 节及后续 [INTENT v0.1.0 / I1–I7](research-intent-contract.md#9-待决定表)：精确协议、health120s/pair30s/intent300s、失效与兼容建议 | Tech Lead 批准协议/模型/兼容；操作者决定时间和操作可行性、确认业务事实。RA-04/W1 依赖代码前，health/verifier及预算依赖按I6检查 | **I1–I7 ADOPTED（见 INTENT 采纳记录）；实际请求/凭据/数据/费用未授权** |
+| ADR-RA-PROPOSAL | 第 7 节及后续 [W1契约§2/P1–P6](research-ai-provider-contract.md#2-proposal-protocol-p)：独立、无 authority 的 typed suggestion | Tech Lead 批准协议/消费边界；操作者确认解释与拒绝方式。RA-05 proposal 集成前 | **DESIGN ADOPTED for W1 fake-only（见 [W1 采纳记录](research-ai-provider-contract.md#w1-design-adoption-and-implementation-record)）；operational approvals PENDING** |
+| ADR-RA-EGRESS | 第 8 节及后续 [W1契约§3–7/E1–E6](research-ai-provider-contract.md#3-providermodel-比较与推荐-p)：默认关闭的独立 provider transport、资格与核算 | Tech Lead 批准边界/用量解释；操作者独立批准模型、账号、数据及费用。RA-05 provider 代码前；每次真实运行前再次核验许可 | **DESIGN ADOPTED for W1 fake-only（见 [W1 采纳记录](research-ai-provider-contract.md#w1-design-adoption-and-implementation-record)）；operational approvals PENDING** |
+| ADR-RA-TASK | 第 9 节及 [W2预算/观察提案](research-ai-budget-contract.md)：预算/观察与 M8 精确计划协调分工；B1–B8 中 PostgreSQL 协调设计已采纳，broader TASK 未决 | Tech Lead 批准状态/事务/恢复；操作者批准硬预算与审批操作。RA-06 实施前，若更早引入审批聚合则更早 | **B1–B8/N1/Linux isolation/限定 CI AppArmor ADOPTED；运行时前提已集成；W2 其余实现与 broader TASK 未完成** |
 | ADR-RA-PUBLIC | 第 10 节：readiness、自有演练、第三方许可分开 | Tech Lead 批准控制和 go/no-go；操作者取得每项实际测试许可。RA-08 控制修改前；RA-08/09 各执行门槛单独审查 | **无；PENDING** |
 
-RA-02 准备度是 **设计材料可供决定，依赖实现仍受阻**。D1–D4 是 ADR-RA-DATA 内的审阅项，不是新 ADR。建议逐项签署；批准记录为空时不得把默认推荐当成已批准选项。
+D1–D4 是 ADR-RA-DATA 内已采纳的设计项，不是新 ADR。下表保留方案/替代及适用条件；不重开采纳，但数据资格和操作许可不能从设计决定推导。
 
-| 审阅项 | 推荐方案 P | 有意义的替代方案与代价 | 本次未决内容 |
+| 审阅项 | 推荐方案 P | 有意义的替代方案与代价 | 采纳后的适用条件/独立操作边界 |
 | --- | --- | --- | --- |
-| D1 输入与资格 | `ra-observation/1`，仅 GET 元数据和极少响应事实；默认 synthetic，额外批准后才允许 reviewed-minimized-private | 接受完整 HAR 再清洗：原文进入进程/错误链风险更大，超出 RA-02 初始约定；只收状态码：更小但缺对象/身份上下文 | 字段、数值上限、私有字段资格须批准；不靠“已脱敏”自报通过 |
+| D1 输入与资格 | `ra-observation/1`，仅 GET 元数据和极少响应事实；默认 synthetic，额外批准后才允许 reviewed-minimized-private | 接受完整 HAR 再清洗：原文进入进程/错误链风险更大，超出 RA-02 初始约定；只收状态码：更小但缺对象/身份上下文 | 字段/数值上限已采纳；每项私有材料资格仍须批准，不靠“已脱敏”自报通过 |
 | D2 项目边界 | 新的本地 research context 与显式 Target 关联；新 intake/observation/映射/日志全部 project-scoped | 直接把 Target ID 当 project：简单但无法表达项目许可/隔离；引入租户/RBAC 平台：超出单操作者产品 | 推荐一个 Target 同时只归一个活跃 research context；跨 context 转移须停用旧映射并审核，不能复制私有观察 |
-| D3 生命周期 | 新 observation payload 与最小 provenance/tombstone 分开；默认 30 天、显式提前删除、有界 hold、独立备份控制，详见第 4 节 | session-only 不持久化：可降低风险但不满足可恢复观察；长期留存：增加泄漏与删除负担；应用层逐项目加密：可加强密钥撤销，但需新的密钥/恢复设计 | 30/30/90/7 天建议及加密存储/逻辑删除余留风险须由操作者接受；需要更强擦除保证的数据先拒收 |
+| D3 生命周期 | 新 observation payload 与最小 provenance/tombstone 分开；默认 30 天、显式提前删除、有界 hold、独立备份控制，详见第 4 节 | session-only 不持久化：可降低风险但不满足可恢复观察；长期留存：增加泄漏与删除负担；应用层逐项目加密：可加强密钥撤销，但需新的密钥/恢复设计 | 30/30/90/7 天方案及其设计条件已采纳；具体数据/存储运维资格仍独立，需要更强擦除保证的数据先拒收 |
 | D4 兼容边界 | RA-02 只新增 observation/intake 域，不搬迁/清洗旧 TestRun 或 M13；未来 execution-source lifecycle 另有版本门槛 | 把导入转成 TestRun 或就地清空旧 body：破坏 provenance/读取/指纹，不能采纳；旧数据显式迁移：需额外规范决定及完整兼容证据 | 本包不给旧 body 删除许可；新执行源数据的具体 schema/不可用语义仍须在 RA-04 敏感执行前批准实现 |
 
 ## 2. ADR-RA-DATA：输入和信任边界
@@ -200,7 +183,7 @@ RA-02 自身 network/provider 消耗上限均为 0。未来执行上下文须有
 
 ## 4. 项目、访问、保留与事件处理 P
 
-下列控制是 **RA-02/W2 首次相应持久化前**的依赖，不得借 RA-08 延后。选择 synthetic-only 也要通过零网络、provenance 和隔离检查；私有最小化资料额外要求全部适用 lifecycle/部署证据。若操作者不批准 D3 数字，保持 PENDING，不能默认为无限留存。
+下列控制是 **RA-02/W2 首次相应持久化前**的依赖，不得借 RA-08 延后。选择 synthetic-only 也要通过零网络、provenance 和隔离检查；私有最小化资料额外要求全部适用 lifecycle/部署证据。D3 数字已按采纳记录生效；范围外的新留存要求仍需明确决定，不能默认为无限留存。
 
 | 面向 | 推荐行为、期限与失败边界 |
 | --- | --- |
@@ -258,9 +241,7 @@ M12 当前 review 会追加 human_verified 行、保留原 candidate；`observed
 
 **RA-04/W1 后续材料：** [详细协议 v0.1.0](research-intent-contract.md)提供本基点实际调用证据（§1）、immutable core/摘要/plan link（§2–3）、health与精确时间窗（§4）、等待/变化失效规则（§5）、TestCase/M13/rollback选择（§6）及独立合成验收映射（§7）。下列原始 C/P 段落保留为 RA-01/W3 历史，不作为当前代码未经核验的证明。
 
-**当前未决：** I1–I7 尚无批准。推荐数值为 **PROPOSED / PENDING_APPROVAL：health120秒、baseline完成至probe开始及最终pair消费30秒、intent300秒**，均以半开边界及更早依赖截止收窄。建议两单GET plan同revision、分别适用审批；凭据版本/身份/映射/事实/Scope/来源变化重建整对。当前缺少可信health receipt与运行预算核验，不能把RA-02的operator claim或unverified budget升格为执行资格。受控新TestCase类型、所有旧读者分派和保留数据的回退要求须Tech Lead明确决定；health解释器属RA-04/W2，提前依赖须按I6确认次序。本文仅提供review材料，不实施bridge、验证器或迁移；不改变其他ADR状态。
-
-**W2 continuation:** the adopted I1–I7 constraints are implemented as recorded in [W2 verification](research-response-verification.md); the original C/P paragraphs below remain historical. No W2 reviewer PASS or stage completion is asserted.
+**已采纳 I1–I7：** health120秒、baseline完成至probe开始及最终pair消费30秒、intent300秒，均用半开边界与更早依赖截止收窄；同 revision 的两个单 GET plan 分别适用审批，凭据/身份/映射/事实/Scope/来源变化重建整对。精确出处见 [INTENT 采纳](#intent-后续采纳记录ra-04w1)。RA-02 的 operator claim/unverified budget 仍不能代替可信 health receipt 或运行预算；实现与验证见 W1/W2 记录。以下 C/P 保留原基点理由与兼容边界。
 
 **具体问题：** 如何把有来源的 access facts 和确认的 Resource-to-slot 关联变成可审批的单动作计划，并用合法 baseline 验证 probe，同时保留旧 cross-owner 证据与报告？
 
@@ -272,11 +253,11 @@ baseline 必须有独立 current allowed 事实和合资格完整对象证据；
 
 **替代与兼容：** 继续强制 legacy owner-baseline 可少改表，但损失上述业务语义，必须显式缩小产品声明且不能改 oracle/分母掩盖；扩展旧 TestCase 唯一键/重解释 `owner_baseline` 则影响生成幂等、旧 reports 和 M13，风险更大。推荐新 intent/evidence 版本与明确消费分派，旧模型/FK/指纹/审阅保持不变；不能让旧 API 消费新类型后给出似乎正常的结果。
 
-**待决/检查点：** Tech Lead 在 RA-04/W1 前批准 intent 存储/摘要联结方式、旧读者兼容和 pair/revision 规则；操作者确认 allowed baseline 选择及更新凭据步骤。session 健康证明的来源、最长有效时长、baseline/probe 最大间隔、等待后 binding/secret-version 变化如何使审批失效，**尚无批准数值或协议**，依赖代码前必须补齐。若需要 health GET，它本身也需授权、精确计划/适用审批并计入总请求，不自动访问 login/MFA。RA-02/W3 仅保存合资格事实和缺项；不得提前实施该 bridge。
+**当前检查点：** I1–I7 已解决初始 intent/linkage/pair/time/compatibility 设计；更广请求形态和敏感执行-source lifecycle 未从中获得批准。Health GET 本身仍需授权、精确计划/适用审批并计入总请求，不自动访问 login/MFA；实际账号、业务事实和运行许可仍需独立核验。
 
 ## 7. ADR-RA-PROPOSAL：上游建议与既有 Finding advisory
 
-**RA-05/W1后续材料：** [独立协议、字段/限额、opaque引用及确定性消费](research-ai-provider-contract.md#2-proposal-protocol-p)，P1–P6待决定；DOCUMENTATION_ONLY / PENDING_INDEPENDENT_REVIEW。下文保留原始原则/兼容记录，新材料不代表协议已采纳或实现。
+**RA-05/W1后续材料：** [独立协议、字段/限额、opaque引用及确定性消费](research-ai-provider-contract.md#2-proposal-protocol-p)，P1–P6 已采纳用于 fake-only W1，adapter 经 PR #150 集成。下文保留原始原则/兼容记录；实际使用许可与真实 provider 验收未完成。
 
 **具体问题：** AI 可提供何种有限建议，如何拒绝越权、未知引用和不确定输出，而不把现有 Finding 后分析误认为自主发现？
 
@@ -286,11 +267,11 @@ baseline 必须有独立 current allowed 事实和合资格完整对象证据；
 
 **替代与兼容：** 把所有建议塞进现有 AIAnalysisResult 可少一个协议，但会混淆 Finding 后解释与上游计划；给模型 executor/任意 fetch 工具违反既有规范，不是可采纳替代。推荐保留旧路由和 FindingAIAnalysis 读取兼容，新增协议必须在 RA-05 的获批范围单独实现，不拿旧表文本作为新执行指令。
 
-**待决/检查点：** Tech Lead 在 RA-05 proposal 集成前批准建议类型、精确字段/大小上限、版本协商、可用引用集合、拒绝码及 deterministic consumer；操作者审阅拒绝/解释的可用性。验收须包括恶意指令、跨项目/held-out 引用、虚构动作/事实/确认、超长/缺失/重复输出，且 execution/approval/policy-write/Finding-confirmation 为 0。当前不把这些未来协议上限借用成 W2 或 importer 的限制。
+**当前检查点：** W1 P1–P6 已确定建议类型、字段/上限、版本、引用、拒绝码和 deterministic consumer；更改这些设计须独立决定。操作者仍审阅拒绝/解释的可用性。验收须包括恶意指令、跨项目/held-out 引用、虚构动作/事实/确认、超长/缺失/重复输出，且 execution/approval/policy-write/Finding-confirmation 为 0。当前不把这些未来协议上限借用成 W2 或 importer 的限制。
 
 ## 8. ADR-RA-EGRESS：provider 外发与实际用量
 
-**RA-05/W1后续材料：** [官方provider/model比较与推荐](research-ai-provider-contract.md#3-providermodel-比较与推荐-p)、[数据/局部POST边界](research-ai-provider-contract.md#4-外发数据和独立-transport-p)、[凭据](research-ai-provider-contract.md#5-provider-账号与凭据-p)、[用量与最坏预留](research-ai-provider-contract.md#6-usage预算与未来-w2-接口-p)及E1–E6全部PROPOSED / PENDING_APPROVAL。下文“本包不选vendor/model”指原RA-01/W3历史；本次只准备推荐，实际选择、例外和支出仍待批准。
+**RA-05/W1后续材料：** [官方provider/model比较与推荐](research-ai-provider-contract.md#3-providermodel-比较与推荐-p)、[数据/局部POST边界](research-ai-provider-contract.md#4-外发数据和独立-transport-p)、[凭据](research-ai-provider-contract.md#5-provider-账号与凭据-p)、[用量与最坏预留](research-ai-provider-contract.md#6-usage预算与未来-w2-接口-p)及 E1–E6 设计约束已采纳用于 fake-only W1。固定 profile/局部 transport 设计不授权真实账号、数据、支出或 live egress；下文原始 vendor/model 未选择的叙述仅指 RA-01/W3 基点。
 
 **具体问题：** 如何在 Target GET-only/public blocked 不变的前提下接入一个确切 provider，并证明数据、凭据和最坏成本都有边界？
 
@@ -302,13 +283,11 @@ baseline 必须有独立 current allowed 事实和合资格完整对象证据；
 
 **替代与兼容：** 把 provider 当 Target 或直接换 Mock 实例会混用许可、secret 与费用域，不采纳；继续只用规则/Mock 可保留离线能力，但不能宣称真实 AI 比较完成。推荐 adapter 与旧 advisory/proposal 两个消费者显式分派，存储模型/设置/prompt/核算版本；旧 analysis/reports 不重新解释或改写。
 
-**待决/检查点：** RA-05 provider 代码前由 Tech Lead 批准传输/密钥/数据 minimization、缓存 retention/account 边界、usage 适配与总生成量是否可硬限；操作者选定模型及费用账户。B 的有界上下文/预算、每项运行总 tokens/费用硬 cap、费率/币种/缓存计费均仍未批准；RA-07 实测前按当时官方资料和独立预算许可冻结，**缺失不是 0**。验收必须覆盖 omitted call、发送后超时/用量未知、cached/reasoning double count、恰好/超预算及数据 egress canary；真实调用/收费另批，本包上限为 0。
+**当前检查点：** W1 E1–E6 已确定 fake-only transport/data/credential/usage 设计；真实账号与材料、operational retention、输入/隐藏 token 上界证明及实际支出仍待独立资格和批准。B 的有界上下文/预算、每项运行总 tokens/费用硬 cap、实际账号费率/币种/缓存计费仍须核验批准；RA-07 实测前按当时官方资料和独立预算许可冻结，**缺失不是 0**。验收必须覆盖 omitted call、发送后超时/用量未知、cached/reasoning double count、恰好/超预算及数据 egress canary；真实调用/收费另批，本包上限为 0。
 
 ## 9. ADR-RA-TASK：预算、审批集合和恢复
 
-**Current W2 dependency:** B1–B8, reviewed [concrete B1/B8 v0.1.1](research-ai-w2-implementation-contract.md), N1 and its Linux/bubblewrap prerequisite have the subsequent review/adoption recorded [here](research-ai-w2-runtime-validation.md#adoption-and-scope). Runtime implementation/evidence obligations remain; W2 is incomplete. TASK choices outside this bounded adoption, operational budgets and real use remain pending.
-
-**Historical RA-05/W2 design preparation:** [v0.1.0 proposal](research-ai-budget-contract.md) maps deterministic preparation, exact receipts, short-transaction reservation/settlement, final-send qualification, independent observation and recovery to actual W1 ports. B1–B8 remain **PROPOSED / PENDING_APPROVAL**; PostgreSQL authority is assessed, not adopted. Review and User adoption are required before dependent W2 implementation, earlier than RA-06. This does not approve task/account caps, account evidence access, storage/retention, spending or real sends; M8 and the historical recommendations below retain their boundaries.
+**当前 W2 依赖：** [B1–B8](research-ai-budget-contract.md#w2-design-adoption-record)、[具体 B1/B8 v0.1.1](research-ai-w2-implementation-contract.md)、[N1/Linux/bubblewrap/限定 CI AppArmor](research-ai-w2-runtime-validation.md#adoption-and-scope)按各自记录生效。N1 运行时前提已通过集成；preparation/accounting/permit/lifecycle/recovery 及其验收仍未完成。Broader TASK/RA-06、operational budgets、真实运行和 account evidence access/retention 仍未决，M8 边界不变。
 
 **具体问题：** 谁拥有任务状态、消费预算与观察账本，如何把有限精确 plans 组合成操作流程，而不把 M8 的 plan ownership 当作 research scheduler？
 
@@ -320,7 +299,7 @@ request/token/cost 在可发送前原子预留，observer 与结果声明分开�
 
 **替代与兼容：** 内存 task dict 不能跨进程/重启保证预算；用 TestCase.status 推断恢复会绕过现有 M8 fencing；自动把多个 action 放进一个可执行计划不受当前实现支持。推荐独立任务域引用旧 plans/canonical results，不新增 Redis、自动 worker 探测或放宽 single_process/multi_process 边界。
 
-**待决/检查点：** Tech Lead 在 RA-06（或更早审批聚合）前批准状态机、budget/observer 事务边界、worker 生命周期、取消/失败语义和 local CLI；操作者批准总预算、有限审批呈现及恢复步骤。拟议 30 分钟/100 Target GET（含 health）/并发 1/不超 revision/platform rate ；C 每案例最多 2 次调用，每次最多 4096 input tokens / 1024 total generated tokens（适用时含 reasoning），每案例模型累计墙钟时间最多 60 秒，保持 W2 数值，**task 总 token/费用与 B cap 仍不能从 synthetic 额度推导**。可信 observer 怎样捕获“两份账本都漏了一个现实事件”、如何对账 provider 的 delayed usage，是批准前需验证的开放项。验收使用独立故障/多进程证据验证并发预留、崩溃各时点、取消和 in-doubt，不要求本包实现 scheduler。
+**剩余决定/检查点：** B1–B8/N1 已限定 W2 的 budget/observer 与取消/恢复设计，不能标回待采纳；RA-06 的任务状态机、worker 生命周期、审批聚合和 local CLI 仍需在依赖实现前决定；操作者批准总预算、有限审批呈现及恢复步骤。拟议 30 分钟/100 Target GET（含 health）/并发 1/不超 revision/platform rate ；C 每案例最多 2 次调用，每次最多 4096 input tokens / 1024 total generated tokens（适用时含 reasoning），每案例模型累计墙钟时间最多 60 秒，保持 W2 数值，**task 总 token/费用与 B cap 仍不能从 synthetic 额度推导**。可信 observer 怎样捕获“两份账本都漏了一个现实事件”、如何对账 provider 的 delayed usage，在 N1 fake 机制内有已采纳的证据义务，live account 证据通道与 provider delayed usage 仍是未决操作/设计门槛。验收使用独立故障/多进程证据验证并发预留、崩溃各时点、取消和 in-doubt，不要求本包实现 scheduler。
 
 ## 10. ADR-RA-PUBLIC：分开的发布与测试许可
 
@@ -330,28 +309,28 @@ request/token/cost 在可发送前原子预留，observer 与结果声明分开�
 
 **推荐 P：** 沿现有架构，默认拒绝保持到独立 readiness gate：完整 outbound 清单（Target、OpenAPI、未来 provider/其他消费者）、DNS/IP/port/canonical origin/peer/TOCTOU、secret/data lifecycle、限制/kill/audit/deployment/rollback 演练均有适用负向证据。再独立批准自有环境演练；第三方测试仍需专属 Target enrollment、revision/Scope/平台安全、身份、精确审批及程序约束，三者不能互相替代。
 
-**替代与兼容：** 改一个 public 开关后继承本地 PASS、认为 wildcard/DNS 命中等于授权、或复用 provider 出口放行 Target 都不符合当前规范。推荐窄且可回退的版本门槛，公共模式无法证明控制时拒绝；保留 GET-only、no redirect、immutable single revision、即时重验、时间/字节/速率/并发及安全审计，不改变本地许可含义。
+**替代与兼容：** 改一个 public 开关后继承本地验收通过、认为 wildcard/DNS 命中等于授权、或复用 provider 出口放行 Target 都不符合当前规范。推荐窄且可回退的版本门槛，公共模式无法证明控制时拒绝；保留 GET-only、no redirect、immutable single revision、即时重验、时间/字节/速率/并发及安全审计，不改变本地许可含义。
 
 **待决/检查点：** RA-08 控制改动前由 Tech Lead 批准差距清单、门槛、停用/回退；自有演练由操作者明确批准，RA-09 每项第三方测试另取许可。实际公共环境、具体演练计划、provider 与 Target 所需网络边界差异均在届时审查；本包没有相关执行证据。DATA 对导入和 RA-04 敏感执行的前置控制不能等到此时补做。
 
 ## 11. 审阅结论模板与剩余决定
 
-当前登记仅说明 **材料已形成**。建议 Review Project 先审查 complete base-to-HEAD，再由 Tech Lead/操作者对精确版本分别记录：
+当前决定必须引用精确材料、真实决定来源、条件和已知观察时间；不得补造缺失的消息时间、签名或 approval ID。设计已采纳与材料已审阅不互相替代，未记录的阶段/产品裁决不由此表推定。
 
-| 记录内容 | 当前值/待填写 |
+| 事项 | 当前状态与剩余边界 |
 | --- | --- |
-| W3 文档与验证的独立审查 | PENDING；没有 Codex 代签 |
-| DATA D1–D4 选择、例外与条件 | PENDING；须明确采纳/修改哪些字段、限额、资格、项目归属、30/30/90/7 天方案及删除余留风险 |
-| RA-02 所需批准关联 | PENDING；需批准记录的确切引用、批准者、aware 时间、适用实现包及生效/撤回条件 |
-| 其余五个 ADR | DEFERRED_TO_DEPENDENCY_GATE；已列出责任和检查点，未批准依赖代码 |
-| W2 标签/阈值与真实运行预算批准 | 工程 review/push 已通过不等于这些批准；以独立明确记录为准，本文不推定已签署 |
-| RA-01 stage exit / RA-02 进入 | 尚未满足；需综合 W1/W2/W3、适用 DATA 批准及验收，不以本包 commit 宣告 COMPLETE |
-
-若 Reviewer 接受文档而对任一 DATA 前置选择尚无结论，保留该项 PENDING 并阻止依赖实现；无需更改既有 roadmap 次序，也不能以 standing authorization 绕过 architecture decision。
+| DATA D1–D4 | 已采纳；每项实际数据资格、存储/备份/删除操作仍按条件核验；D4 未授权清洗旧 TestRun/M13 |
+| Knowledge K1–K4 | [已采纳](research-knowledge-contract.md#k1k4-后续采纳记录ra-03w2)；review/reuse/validation/publish 与项目数据许可分开 |
+| INTENT I1–I7 | 已采纳并有有界合成本地实现/演示；更广请求形态与实际执行许可不自动获批 |
+| W1 P1–P6 / E1–E6 | fake-only 设计/adapter 已集成；live-provider acceptance、账号/材料/retention/预算未完成 |
+| W2 B1–B8 / N1 与运行时决定 | 已采纳，运行时前提已集成；完整协议实现及 T/X/Y 验收未完成 |
+| Broader TASK / PUBLIC | RA-06 编排/审批/worker/CLI 及 RA-08 控制发布、自有公网演练、第三方许可仍须各自决定 |
+| 评测标签/阈值、B cap、总任务/账号额度 | 以独立明确记录为准；冻结 synthetic fixture 和工程 gate 不替代产品/预算批准 |
+| 阶段与生产/运营结论 | 已集成增量见 roadmap；不从 CI 成功推定完整 W2、production readiness 或 operational permission |
 
 ## 12. 证据边界与本次验证
 
-本次直接读取了以上规范，以及下面列出的生产路径/模型/schema 和兼容测试；这是与六项决策直接相关的读取，不是全仓库 outbound、安全或 migration 审计。没有读取 W2 held-out 答案作为设计输入；既有 evaluator 在自己的测试边界读取/验证它们，不将内容输出作示例。C 引用均锁定本次 exact base；T 引用是既有断言，本次运行结果另记，不把它们说成未来控制已实现。
+原 RA-01/W3 编写时直接读取了以上规范，以及下面列出的生产路径/模型/schema 和兼容测试；这是与六项决策直接相关的读取，不是全仓库 outbound、安全或 migration 审计。没有读取 W2 held-out 答案作为设计输入；既有 evaluator 在自己的测试边界读取/验证它们，不将内容输出作示例。C 引用均锁定本次 exact base；T 引用是既有断言，当时运行结果另记，不把它们说成未来控制已实现。
 
 | 证据索引 | 已读直接来源与限制 |
 | --- | --- |
@@ -368,37 +347,7 @@ request/token/cost 在可发送前原子预留，observer 与结果声明分开�
 | T01/T02/T03 | [pairing tests][T01]、[fingerprint conflict tests][T02]、[retention migration tests][T03]：精确 pair/源变更拒绝/历史保持及 FK；不是未来迁移证明 |
 | T04/T05/T06/T07 | [assertion review][T04]、[AI redaction boundary][T05]、[M14 acceptance][T06]、[M8 progress tests][T07]：未来消费者必须兼容的现有断言 |
 
-本次验证于 **2026-09-10 00:08–00:11 UTC**（本地工作日 2026-09-09）完成，Ubuntu 24.04.2 / WSL2、项目 `.venv` Python 3.12.3、PostgreSQL 16.15。按 [M14 隔离 runbook](m14-offline-matrix-acceptance.md#reproducible-isolated-local-run) 创建独占 native 实例：database/user `ra01_w3_test`，`127.0.0.1:55451`，当前用户拥有新目录 `/tmp/ra01-w3-test.VfKPMU/data`。应用 import 前显式配置测试 DATABASE_URL、allowlist、topology 及临时加密变量，不使用 `.env` 选库；独立 psql 查询核验 database/user/address/port/version/data_directory、初始 public 表数 0、无其他 client backend，目录属主也单独核验。仅停止本次创建的实例，已确认 postmaster.pid 移除。
-
-从 `backend/` 在上述环境中**串行**执行：
-
-| 命令/检查 | 实际结果 |
-| --- | --- |
-| `python -m pip install --requirement requirements-dev.txt` | 所需开发依赖已满足；无 dependency 变更 |
-| `python -m evaluation.ra01 verify` | PASS；freeze digest 保持 `692c33a321cc59e9799377ed512402ac33826dec06707d494b3d5853006a231a`；没有运行生成器或重写冻结文件 |
-| `python -m pytest tests/evaluation` | **79 passed**；既有 evaluator 内部完整性测试不把 held-out 内容用于文档示例 |
-| `python -m alembic current` / `python -m alembic heads` / `python -m alembic upgrade head` | 初始无 revision；唯一 head `b5d7f9a1c3e6`；upgrade 成功 |
-| 以下 compatibility 命令 | **199 passed, 7 warnings** |
-| `python -m pytest` | **2089 passed, 55 warnings**；包含全部既有后端回归 |
-| `python -m pip check` / `python -m alembic current` | No broken requirements found；最终 `b5d7f9a1c3e6 (head)` |
-| 完整 diff、链接/anchors、exact-base 引用/标识、数字/JSON 示例、`git diff --check` | 仅本文与 roadmap 三处导航/状态修改；W1/W2/全部 backend 文件保持原样；检查通过 |
-
-```bash
-python -m pytest \
-  tests/api/test_finding_evidence_pairing.py \
-  tests/api/test_finding_evidence_fingerprints.py \
-  tests/api/test_finding_evidence_retention.py \
-  tests/migrations/test_finding_evidence_retention_migration.py \
-  tests/reports/test_security_report.py \
-  tests/ai/test_analysis_redaction_boundary.py \
-  tests/api/test_resource_access_assertion_review.py \
-  tests/api/test_resource_access_resolution.py \
-  tests/integration/test_m14_matrix_acceptance.py \
-  tests/services/test_plan_execution.py \
-  tests/services/test_execution_plan_progress.py
-```
-
-没有测试失败或环境阻塞；pip 的 home cache 不可写提示仅导致禁用缓存，pytest warnings 均来自既有测试。没有弱化/跳过失败或重试至绿。日志、DSN、临时密钥与检查脚本均留在仓库外；不提交新代码/schema/test/migration。上述 PASS 只说明现有回归及文档静态一致性，**不是新 DATA 控制实现证明、ADR 批准或 reviewer-PASS**。
+**历史验证摘要：** 原 RA-01/W3 在 2026-09-10 00:08–00:11 UTC 的独立自有 TEST PostgreSQL 环境记录了 79 evaluation tests、199 compatibility tests、全量 2089 tests，以及文档检查；冻结 digest `692c33a321cc59e9799377ed512402ac33826dec06707d494b3d5853006a231a` 不变。完整命令、环境限制和结果保留在 [reviewed `dcdb50f`](https://github.com/runyiy/ai-api-security-platform/commit/dcdb50fd36c098173c2580389577bb59558c0982) / PR #136。它们不是新 DATA 控制、ADR 批准或当前维护的 backend 验证。本文维护仅做文档静态检查；不复用历史临时库或 operator 设置。
 
 [C01]: https://github.com/runyiy/ai-api-security-platform/blob/ac9a5ce3142232e86576b5d789d93b95508e259d/backend/app/scanners/openapi.py#L313
 [C01s]: https://github.com/runyiy/ai-api-security-platform/blob/ac9a5ce3142232e86576b5d789d93b95508e259d/backend/app/schemas/openapi.py#L5

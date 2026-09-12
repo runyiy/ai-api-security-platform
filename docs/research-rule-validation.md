@@ -1,5 +1,7 @@
 # RA-03/W3：规则正反例验证与反馈审核
 
+> **记录状态（[PR #142](https://github.com/runyiy/ai-api-security-platform/pull/142)）：** 合成规则验证与独立发布 gate 已集成。下文基点、提交时 pending 状态、验证结果和包内停止指令是历史记录；旧停止点不约束后续已授权工作。契约/安全/验收要求仍有效，采纳按精确记录、当前进度按 [roadmap](research-assistant-roadmap.md#5-固定阶段与依赖)；集成不授予操作许可。
+
 **IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**。本包仅实施RA-03/W3，不宣布RA-03完成、独立reviewer PASS或RA-04启动。起点为本地核验的clean main `cd60493cafc1d8bdcbf57cea84638d3138b3e78b`；分支 `codex/ra-03-w3-rule-validation`。W2经PR #141合并及main 2690 passed来自用户交接；本包不重开已关闭的Planning Issue #132，不创建milestone/PR，不push。K1–K4的[采纳记录](research-knowledge-contract.md#k1k4-后续采纳记录ra-03w2)和既有[架构](architecture-decisions.md)/[安全模型](security-model.md)继续约束实现。
 
 ## 1. 实际验证能力

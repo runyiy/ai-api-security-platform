@@ -301,16 +301,6 @@ Only after Gate A, Gate B, and all applicable Public SRC Readiness requirements 
 
 ## 9. Development workflow
 
-Implement one small reviewed issue at a time:
+Work within one bounded reviewed scope at a time. A GitHub Issue is optional tracking, not a mandatory prerequisite for each roadmap package. Implementation produces a local commit and stops without pushing; Reviewer owns independent review, authorized publication, PR/CI integration and exact-main verification. Existing authorization persists within its scope; material architecture changes and operational permissions still require their own decisions.
 
-```text
-Milestone
-  -> small issue
-  -> implementation and focused tests
-  -> full regression suite
-  -> self-review and diff review
-  -> human review
-  -> CI and merge
-```
-
-Each issue defines one concrete goal, security constraints, explicit exclusions, required tests, and done criteria. Architecture changes require human review before implementation.
+Each scope states the goal, security constraints, exclusions, appropriate validation and acceptance criteria. Pure documentation work needs document/link/diff validation, not application imports or database regression; Reviewer PR/exact-main gates remain separate. Current RA continuation and the implementation/Reviewer boundary are described in [the Research Assistant roadmap](research-assistant-roadmap.md#10-变更控制工作流和最终停止条件). This summary does not reproduce the local-only canonical Review rules.

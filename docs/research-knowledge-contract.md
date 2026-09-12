@@ -1,16 +1,14 @@
 # RA-03/W1：知识分类、版本与人工审核发布契约
 
-**文档 v0.1.0 · RA-03/W1 · IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**。这是已形成的设计材料；以下知识域字段、状态和接口义务均为 **PROPOSED / NOT_APPROVED / NOT_IMPLEMENTED**，不是现有 API/schema 或发布记录。
+**v0.1.0 · K1–K4 DESIGN ADOPTED.** Exact provenance and conditions are retained [below](#k1k4-后续采纳记录ra-03w2). W1/W2/W3 were integrated through PR #140/#141/#142. Review, reuse, rule validation and a separate human publication decision remain distinct; adoption grants no private-data, execution, egress or spending permission.
 
-精确源码基点：`4ac9b284029a515766d7532a0381be86bea7ce09`。本次 fetch 核验本地 HEAD 与 `origin/codex/ra-02-w3-identity-resource-context` 相同、工作树干净后创建 `codex/ra-03-w1-knowledge-contract`。RA-02/W3 独立 review/push 已通过依据用户交接，未合入 main；不据此代签 stage COMPLETE、知识决定或运行许可。
-
-任务依据为 [RA-03 验收卡](research-assistant-roadmap.md#ra-03--版本化知识已审查规则和受限检索)。[架构](architecture-decisions.md)、[安全模型](security-model.md)优先；[DATA 采纳记录](research-assistant-adr-decisions.md#data-后续决定记录ra-02w1)只批准其精确历史版本的 D1–D4，不批准本契约的分类/复用选择或其余五个 ADR。本包只改本文与 roadmap，不建立知识表、迁移、运行入口或新 ADR 编号。
+Original C/P code observations and validation are tied to `4ac9b284029a515766d7532a0381be86bea7ce09`. Their pending-adoption/implementation and package-stop wording is historical; current progress is in the [roadmap](research-assistant-roadmap.md#5-固定阶段与依赖). [Architecture](architecture-decisions.md), [security](security-model.md) and [DATA adoption](research-assistant-adr-decisions.md#data-后续决定记录ra-02w1) retain authority. No knowledge fields, limits or acceptance obligations change here.
 
 ## K1–K4 后续采纳记录（RA-03/W2）
 
 用户本次 RA-03/W2 交接明确确认：操作者采纳本文 **v0.1.0、commit `ec0f1eefef0eaf2a5bdf652f58ba2c0c6a083810` 的 K1–K4**。范围是五类隔离/独立合成复用、不可变版本/追加决定、来源不可用即停止消费、W3 独立验证加另一次人工发布。该交接同时明确允许依序实施 W2；未增加审批人或代签 Tech Lead。处理交接时工具观测时间为 **2026-09-10T06:46:49Z**，不是精确消息接收或签署时刻，后二者未知。
 
-本文顶部、§7 及结尾的 PENDING/NOT_IMPLEMENTED 保留为 W1 原始历史。后续实际实现和限制以 [W2 实施记录](research-knowledge-retrieval.md) 为准；不倒写原契约版本。W1 经 PR #140 集成，W2 起点为 main `dcf3ec044157bb7db816368d5b7683a1b7edfb1d`。本次采纳不批准任何真实私有材料、普通规则发布、执行、外发或费用，不替其他 pending ADR 作决定。**W2 普通 publication 仍关闭；合成测试发布记录不是 W3 验证或人工实际发布证据。**
+本文 §7 及结尾的 PENDING/NOT_IMPLEMENTED 保留为 W1 原始历史。后续实际实现和限制以 [W2 实施记录](research-knowledge-retrieval.md) 为准；不倒写原契约版本。W1 经 PR #140 集成，W2 起点为 main `dcf3ec044157bb7db816368d5b7683a1b7edfb1d`。本次采纳不批准任何真实私有材料、普通规则发布、执行、外发或费用，不替其他 pending ADR 作决定。**W2 当时的普通 publication 关闭状态已由 [W3 真实验证加独立 publish gate](research-rule-validation.md#2-不可变证据与发布资格)细化；合成测试发布记录仍不是 W3 验证或人工实际发布证据。**
 
 ## 1. 当前证据与阅读边界
 

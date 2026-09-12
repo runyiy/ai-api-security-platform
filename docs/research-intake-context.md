@@ -1,5 +1,7 @@
 # RA-02/W1：可信研究 intake context
 
+> **记录状态（[PR #137](https://github.com/runyiy/ai-api-security-platform/pull/137)）：** synthetic-only intake context 已集成。下文基点、提交时 pending 状态、验证结果和包内停止指令是历史记录；旧停止点不约束后续已授权工作。契约/安全/验收要求仍有效，采纳按精确记录、当前进度按 [roadmap](research-assistant-roadmap.md#5-固定阶段与依赖)；集成不授予操作许可。
+
 **research-intake-v1 · IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**
 
 基点为 reviewed W3 commit `dcdb50fd36c098173c2580389577bb59558c0982`，分支 `codex/ra-02-w1-intake-context`；W1–W3 未合入 main。本包依据 [roadmap RA-02/W1](research-assistant-roadmap.md#ra-02--任务规则受限离线观察和可用测试上下文) 与 [DATA 后续采纳记录](research-assistant-adr-decisions.md#data-后续决定记录ra-02w1)，只实现 synthetic 元数据输入和缺项展示。没有 observation importer、payload lifecycle、身份/Resource/slot 提议、credential 更新、bridge、执行入口、scheduler、provider、retrieval 或 CLI。

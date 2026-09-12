@@ -1,5 +1,7 @@
 # RA-04/W2 — exact session, response and pair evidence
 
+> **记录状态（[PR #145](https://github.com/runyiy/ai-api-security-platform/pull/145)）：** 精确响应/健康/配对验证已集成。下文基点、提交时 pending 状态、验证结果和包内停止指令是历史记录；旧停止点不约束后续已授权工作。契约/安全/验收要求仍有效，采纳按精确记录、当前进度按 [roadmap](research-assistant-roadmap.md#5-固定阶段与依赖)；集成不授予操作许可。
+
 Implementation record, protocol version 1. Starting base: `c4d6750eb42af5556036419980a0eb312f892d78`; branch `codex/ra-04-w2-response-verification`. The current user handoff records W1 independent review and PR #144 integration, and authorizes this ordered W2 package under adopted INTENT I1–I7. This record does not confer execution/data/spending permission, claim independent W2 PASS, or complete RA-04/W3.
 
 ## 1. Local operations and authority

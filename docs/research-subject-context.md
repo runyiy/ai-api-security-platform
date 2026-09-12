@@ -1,5 +1,7 @@
 # RA-02/W3：显式身份、Resource/slot 提议和业务事实上下文
 
+> **记录状态（[PR #139](https://github.com/runyiy/ai-api-security-platform/pull/139)）：** synthetic-only 身份/Resource/事实提议已集成。下文基点、提交时 pending 状态、验证结果和包内停止指令是历史记录；旧停止点不约束后续已授权工作。契约/安全/验收要求仍有效，采纳按精确记录、当前进度按 [roadmap](research-assistant-roadmap.md#5-固定阶段与依赖)；集成不授予操作许可。
+
 **research-subject-v1 · IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**。精确 base `e4f4de9ebb230b7dcde9d696bbfb8d731c6f283c`，分支 `codex/ra-02-w3-identity-resource-context`；本次 fetch 核验 published W2 HEAD。W2 独立 review/push 已通过依据本次交接，未合入 main。本文不签署 W3 reviewer-PASS、RA-02 COMPLETE 或其他 ADR 批准。
 
 依据 [RA-02 验收卡](research-assistant-roadmap.md#ra-02--任务规则受限离线观察和可用测试上下文)、[DATA 采纳记录](research-assistant-adr-decisions.md#data-后续决定记录ra-02w1)、[W3 映射](research-assistant-adr-decisions.md#53-对既有-ra-02-工作包的具体映射-p)与 [INTENT 未决门槛](research-assistant-adr-decisions.md#6-adr-ra-intent显式访问语义精确配对与-session)实现。本包新增 context/proposal 元数据，真实 Target 请求、DNS、provider、费用、secret resolution、ExecutionPlan/TestRun/Finding 创建均为零。

@@ -1,5 +1,7 @@
 # RA-04/W1：有界 candidate-to-intent/plan 转换
 
+> **记录状态（[PR #144](https://github.com/runyiy/ai-api-security-platform/pull/144)）：** 有界 bridge 已集成。后续 W2 解释器以 response-verification 记录为准。下文基点、提交时 pending 状态、验证结果和包内停止指令是历史记录；旧停止点不约束后续已授权工作。契约/安全/验收要求仍有效，采纳按精确记录、当前进度按 [roadmap](research-assistant-roadmap.md#5-固定阶段与依赖)；集成不授予操作许可。
+
 **IMPLEMENTED / PENDING_INDEPENDENT_REVIEW · 新purpose审批/执行关闭**
 
 基点 `59390a480db133db9411908af05df37dd625fc91`；本地clean main、origin/main和HEAD一致后创建 `codex/ra-04-w1-intent-bridge`。PR #143/main push CI通过是用户交接证据，本次未查询远端CI。操作者明确采纳 [INTENT v0.1.0](research-intent-contract.md) reviewed `6723cb5bfa62a10453f18f8158c25000a1997711` 的I1–I7，Review Project Tech Lead采用为实现约束；采纳记录在协议和 [ADR](research-assistant-adr-decisions.md#intent-后续采纳记录ra-04w1)。历史pending段落保留，不补造签名/批准时间。

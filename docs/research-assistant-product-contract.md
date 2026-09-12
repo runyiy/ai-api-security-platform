@@ -1,5 +1,7 @@
 # Research Assistant 产品与能力契约 — RA-01/W1
 
+> **记录状态（[PR #134](https://github.com/runyiy/ai-api-security-platform/pull/134)）：** 产品/能力规格已集成。未决产品选择不由代码集成批准。下文基点、提交时 pending 状态、验证结果和包内停止指令是历史记录；旧停止点不约束后续已授权工作。契约/安全/验收要求仍有效，采纳按精确记录、当前进度按 [roadmap](research-assistant-roadmap.md#5-固定阶段与依赖)；集成不授予操作许可。
+
 **文档版本：0.1.0 · 2026-09-09 · IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**
 
 | 版本与审查项 | 固定值 |
