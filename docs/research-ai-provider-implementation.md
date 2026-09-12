@@ -1,12 +1,8 @@
 # RA-05/W1 provider adapter — fake-only implementation
 
-**IMPLEMENTED / PENDING_INDEPENDENT_REVIEW · 2026-09-11**
+**REVIEWED / INTEGRATED, fake-only.** [PR #150](https://github.com/runyiy/ai-api-security-platform/pull/150) integrated reviewed `0e3b94a909ee01eba41c79a264f056665c0222ce`, including the [authority-read timing correction](#authority-read-timing-correction-p1). The [W1 design adoption](research-ai-provider-contract.md#w1-design-adoption-and-implementation-record) remains effective; live calls and operational account/key/material/retention/budget/egress permissions remain disabled or unapproved.
 
-**Current correction:** independent review of `1a3e01c976c6606779abedf3071d3530a5667814` identified an authority-read timing gap despite its passing tests. The [P1 correction and validation record](#authority-read-timing-correction-p1) below supersedes its timing-coverage claim. Earlier results remain historical evidence, not acceptance of this correction.
-
-Base: `386b08b2cca8f49a8ebeff14cc64e4a30d8b2037`; branch: `codex/ra-05-w1-provider-adapter`. Local HEAD/main, clean tree, origin `https://github.com/runyiy/ai-api-security-platform.git`, remote main and absence of the suggested branch were checked before branching. A read-only GitHub check also found no open PRs and confirmed main CI `34582003149` completed successfully at this base. No remote writes were performed.
-
-The [adoption record](research-ai-provider-contract.md#w1-design-adoption-and-implementation-record) records the user's adoption of reviewed v0.1.0 / `29376dda7e0ffa99fe3f1947bb2c3e83df81c228`: P1–P6 and E1–E6 design constraints apply to **W1 fake-only implementation**. Actual account/key use, per-material egress/retention, operational budgets, paid calls and deployment remain unapproved. The synthetic receipt quantities are validation values, not spending approval. This record does not sign independent review, W1 acceptance or RA-05 completion, and does not start W2/W3.
+Implementation details below describe this W1 increment. Its validation/correction narratives, starting base `386b08b2cca8f49a8ebeff14cc64e4a30d8b2037`, pending-hosted wording and package stop instructions are historical; they do not reopen review or block already authorized later work. [Current roadmap](research-assistant-roadmap.md#5-固定阶段与依赖) records the integrated N1 runtime prerequisite and incomplete broader W2. No full W1 live acceptance or RA-05 completion is inferred.
 
 ## Implementation and trust boundaries
 

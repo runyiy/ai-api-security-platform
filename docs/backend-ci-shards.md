@@ -1,5 +1,7 @@
 # Isolated backend CI partitions
 
+> **记录状态（[PR #146](https://github.com/runyiy/ai-api-security-platform/pull/146)）：** CI 分片已集成。下文时长是历史测量，不证明当前 hosted 性能收益。下文基点、提交时 pending 状态、验证结果和包内停止指令是历史记录；旧停止点不约束后续已授权工作。契约/安全/验收要求仍有效，采纳按精确记录、当前进度按 [roadmap](research-assistant-roadmap.md#5-固定阶段与依赖)；集成不授予操作许可。
+
 This maintenance change starts at `4b0a37650df59db6a7708704fbbfe0e96a92e6aa`. It changes scheduling only. Existing application code, test assertions/fixtures, migrations, dependency versions and evaluation content remain unchanged. The handoff's hosted evidence is 832–918 seconds for serial pytest, with 476–527 seconds in the three W2 files; dependency installation was 7–8 seconds and initial migrations 1–2 seconds. Hosted performance for this change remains pending Review Project execution.
 
 [The workflow](../.github/workflows/backend-tests.yml) retains pull requests to main and pushes to main, Python 3.12, dependency caching, PostgreSQL 16, read-only token permissions and bounded 20-minute jobs. There are no path exemptions, feature-push runs, retries, result reuse, xdist or test-wait changes.

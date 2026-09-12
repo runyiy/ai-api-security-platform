@@ -1,22 +1,20 @@
 # RA-04/W1：INTENT 协议与兼容性建议
 
-**文档 v0.1.0 · PROPOSED / PENDING_APPROVAL · DOCUMENTATION_ONLY / PENDING_INDEPENDENT_REVIEW**
+**v0.1.0 · I1–I7 DESIGN ADOPTED.** Exact provenance and conditions are retained [below](#i1i7-后续采纳与-w1-实施记录); W1/W2 and the bounded synthetic W3 demonstration were integrated through PR #144/#145/#147. Operational Target/health requests, credentials, private materials and spending remain separate permissions.
 
-基点为本地核验的 clean `main`：`bedc55395d2e5abf3479026fd201430b537baff2`；分支 `codex/ra-04-w1-intent-contract`。用户交接记录 RA-03/W3 reviewed `91db91f59761b5683309062d9b7ac51536bfe75f` 经 PR #142 集成、main 2790 passed；这是交接证据，本包未重新运行 backend suite，也不代签 stage COMPLETE。本文在既有 RA-04/W1 内补齐 [ADR-RA-INTENT §6](research-assistant-adr-decisions.md#6-adr-ra-intent显式访问语义精确配对与-session)，不是新增工作包。推荐协议、数值、持久化名和结果码均待决定、待实现；文档审阅不等于操作者或 Tech Lead 采纳。
-
-[架构授权/执行约束](architecture-decisions.md#authorization-and-execution)、[安全模型 §§3–4、8–13](security-model.md#3-core-security-invariants)、[产品契约 §§5–7](research-assistant-product-contract.md#5-请求形态支持矩阵)优先。本文不修改这些不变量。初始范围仍为 private/local 合成 Target、一个 builder-compatible 无歧义 resource path 参数、GET、完整 JSON object、显式 anonymous/bearer；query/nested/multiple 仅 preview，其他形态不转换。没有请求、凭据读取、实际批准或样本导入；示例为独立作者值，不能作为执行命令。
+The C/P sections retain the original proposal's code base `bedc55395d2e5abf3479026fd201430b537baff2` and design reasoning; original pending-review/adoption and package-stop instructions are historical. [Architecture](architecture-decisions.md), [security](security-model.md) and [product scope](research-assistant-product-contract.md#5-请求形态支持矩阵) retain priority. This maintenance changes no I1–I7 fields, times, compatibility obligations or acceptance cases. [Current stage status](research-assistant-roadmap.md#5-固定阶段与依赖).
 
 ## I1–I7 后续采纳与 W1 实施记录
 
 本次用户 **RA-04/W1 bounded conversion handoff** 明确记录：操作者采纳本文 **v0.1.0、reviewed commit `6723cb5bfa62a10453f18f8158c25000a1997711` 的 I1–I7**，Review Project Tech Lead 将其作为实现约束。Codex只转录该交接，不补造批准身份、签名或消息时间。原文PROPOSED/PENDING段落保留为该次提案历史；不再表示I1–I7设计未获采纳。
 
-采纳允许既有W1有序实现，不批准实际Target/health请求、凭据访问、私有材料或支出，也不批准其余待决ADR。W1基于main `59390a480db133db9411908af05df37dd625fc91` 实现映射确认、有限manifest与独立预算决定、不可变core/两单GET计划/link及旧入口拒绝，详见 [W1实施与实际验证](research-intent-bridge.md)。**IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**；生产W2解释/health证明入口仍明确拒绝，新purpose的审批/执行保持关闭。测试中的future-qualified envelope只是独立受控替身，不是运行时证据。§1及§8原代码/验证记录锁定原提案基点，不能倒读为本次实现事实；pair30秒实际运行/最终响应解释留在W2，未伪造执行时间。
+采纳允许既有W1有序实现，不批准实际Target/health请求、凭据访问、私有材料或支出，也不批准其余待决ADR。W1基于main `59390a480db133db9411908af05df37dd625fc91` 实现映射确认、有限manifest与独立预算决定、不可变core/两单GET计划/link及旧入口拒绝，详见 [W1实施与实际验证](research-intent-bridge.md)。**W1 当时的依赖状态：** 生产 W2 解释/health 证明尚未提供时，新 purpose 的审批/执行保持关闭；后续 W2 集成见下一节。测试中的future-qualified envelope只是独立受控替身，不是运行时证据。§1及§8原代码/验证记录锁定原提案基点，不能倒读为本次实现事实；pair30秒实际运行/最终响应解释留在W2，未伪造执行时间。
 
 ## W2 implementation continuation record
 
-The current RA-04/W2 user handoff records W1 independent review and integration through PR #144, starting main `c4d6750eb42af5556036419980a0eb312f892d78`. Standing ordered implementation authorization and the previously adopted I1–I7 remain binding; no new approval identity, signature or timestamp is inferred. The historical proposal/W1 refusal text above is preserved as history.
+The historical RA-04/W2 user handoff records W1 independent review and integration through PR #144, starting main `c4d6750eb42af5556036419980a0eb312f892d78`. Standing ordered implementation authorization and the previously adopted I1–I7 remain binding; no new approval identity, signature or timestamp is inferred. The historical proposal/W1 refusal text above is preserved as history.
 
-[W2 implementation and validation](research-response-verification.md) implements the production interpretation/health provenance, finite-budget exact dispatcher, 120/300/30-second final boundaries and immutable pair/uncertainty evidence. The dedicated path requires genuine platform evidence and all current authorization/approval/credential/M8 checks; legacy consumers remain closed to research semantics. Private material, public execution, providers, rule publication and W3 demonstration remain excluded. W2 is pending independent Review Project review; this continuation does not authorize deployment requests or declare RA-04 complete.
+[W2 implementation and validation](research-response-verification.md) implements the production interpretation/health provenance, finite-budget exact dispatcher, 120/300/30-second final boundaries and immutable pair/uncertainty evidence. The dedicated path requires genuine platform evidence and all current authorization/approval/credential/M8 checks; legacy consumers remain closed to research semantics. Private material, public execution, providers, rule publication and the later W3 demonstration were excluded from the W2 increment. W2 was integrated through PR #145 and the later bounded W3 demonstration through PR #147; neither authorizes deployment requests or production use.
 
 ## 1. 当前代码证据 C 与缺口
 

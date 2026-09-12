@@ -1,5 +1,7 @@
 # RA-02/W2：受限离线 observation intake
 
+> **记录状态（[PR #138](https://github.com/runyiy/ai-api-security-platform/pull/138)）：** synthetic-only observation 及生命周期修正已集成。下文基点、提交时 pending 状态、验证结果和包内停止指令是历史记录；旧停止点不约束后续已授权工作。契约/安全/验收要求仍有效，采纳按精确记录、当前进度按 [roadmap](research-assistant-roadmap.md#5-固定阶段与依赖)；集成不授予操作许可。
+
 > **v0.1.2 tombstone 时钟修复 · PENDING_INDEPENDENT_REVIEW**：父提交为 reviewed HEAD `e3da1a0e2a9a709f2b0f7fc97f7d9f5f8fc6b652`，仅处理更早已记录的不可用原因，见第 9 节。以下旧版本与验证记录保留。
 
 > **v0.1.1 生命周期修复 · PENDING_INDEPENDENT_REVIEW**：以 reviewed HEAD `ad105f3e7da24d588a2e4be161a79b50645a63d7` 为父提交，仅修复三个生命周期 blocker，见第 8 节。下方 v0.1.0、第 6–7 节保留初始 W2 提交的验证/文件历史；任务 base 仍为 `2575a34270fc53bddc75373afe220ba06a34883e`。

@@ -1,14 +1,8 @@
 # RA-05/W1：AI proposal protocol 与 provider/model 建议
 
-> **Current W1 status:** P1–P6 and E1–E6 design constraints are adopted for fake-only implementation; see the [adoption record](#w1-design-adoption-and-implementation-record) and [implementation evidence](research-ai-provider-implementation.md). The original proposal and validation statements below remain historical. Operational approvals and independent implementation review remain outstanding.
+**v0.1.0 · W1 P1–P6 / E1–E6 DESIGN ADOPTED for fake-only implementation.** The [exact adoption record](#w1-design-adoption-and-implementation-record) preserves provenance and conditions; the [adapter](research-ai-provider-implementation.md) was reviewed and integrated through [PR #150](https://github.com/runyiy/ai-api-security-platform/pull/150). Real account/key/material/retention/budget/egress permissions and real-provider acceptance remain unresolved. Broader W2 is incomplete; [current roadmap status](research-assistant-roadmap.md#5-固定阶段与依赖).
 
-**文档 v0.1.0 · DOCUMENTATION_ONLY / PENDING_INDEPENDENT_REVIEW**
-
-**全部本包推荐：PROPOSED / PENDING_APPROVAL · 2026-09-11**
-
-本包属于既有 [RA-05/W1](research-assistant-roadmap.md#ra-05--有硬预算约束的真实-ai-辅助)，补齐 [PROPOSAL §7](research-assistant-adr-decisions.md#7-adr-ra-proposal上游建议与既有-finding-advisory) 和 [EGRESS §8](research-assistant-adr-decisions.md#8-adr-ra-egressprovider-外发与实际用量) 的决定材料。建议先选 **OpenAI Responses API / `gpt-5.6-terra`、low reasoning、无工具、无 prompt cache 的单次建议**作为后续 adapter 的设计目标；这不是模型、数据、账号或支出的批准。adapter 未实施，W1/RA-05 未完成，RA-05/W2 未开始。
-
-开始时工作区干净，local main/HEAD 与 `git ls-remote origin refs/heads/main` 都为 **`d058cb82215c61b4c7811784abb24dc0ae069f80`**；origin 为 `https://github.com/runyiy/ai-api-security-platform.git`。从该精确 base 新建 `codex/ra-05-w1-provider-proposal`，没有已开始的同名工作或基点漂移。Git 核对该 main 的 parent 包含 reviewed feature `167853e2a7386088b3d915e12e2c2e383fa3effe`，两者 tree 相同。用户交接记录 PR #147 集成、独立本地验证、[PR CI 34569913522](https://github.com/runyiy/ai-api-security-platform/actions/runs/34569913522) 和 [main CI 34570935882](https://github.com/runyiy/ai-api-security-platform/actions/runs/34570935882) 各通过完整 **3266** tests；本包未重新审计 CI 日志或运行这些测试。这是有界合成本地演示验收，不是 production/public/provider readiness。
+The comparison, P-labelled recommendations and code observations below are the original 2026-09-11 design snapshot at `d058cb82215c61b4c7811784abb24dc0ae069f80`, retained with their official-source dates. The fixed profile was subsequently adopted; historical pending-design requests and package-only stop instructions are retired. This cleanup does not refresh provider availability/prices, approve a new model, grant live egress or alter the adopted protocol. Original preparation/validation history is retained in [PR #148](https://github.com/runyiy/ai-api-security-platform/pull/148).
 
 ## 1. 规范、已采纳决定与当前实现
 
@@ -302,7 +296,7 @@ W1未来可定义并fake测试三个接口义务；**本包不实现，W2不提�
 
 ## 7. 决策登记 P
 
-P1–P6/E1–E6仅为既有PROPOSAL/EGRESS的本页审阅项，不是新ADR、package或milestone。所有记录均 **PROPOSED / PENDING_APPROVAL**，独立review也待完成。真正决定须引用本文件版本和exact commit、具体项、采纳/替代/拒绝及条件、真实责任人/角色和aware时间；此处不填签名或批准ID。Tech Lead协议/传输决定不能代替operator模型/数据/账号/预算决定。
+P1–P6/E1–E6仅为既有PROPOSAL/EGRESS的本页审阅项，不是新ADR、package或milestone。设计推荐已按后续记录采纳；下表保留原选择、替代与条件，不重开设计审批。实际材料/账号/retention/费用许可仍独立。真正决定须引用本文件版本和exact commit、具体项、采纳/替代/拒绝及条件、真实责任人/角色和aware时间；此处不填签名或批准ID。Tech Lead协议/传输决定不能代替operator模型/数据/账号/预算决定。
 
 | 项 | 推荐 | 替代及代价 | 决定者 / 未决条件 |
 | --- | --- | --- | --- |
@@ -353,6 +347,6 @@ P1–P6/E1–E6仅为既有PROPOSAL/EGRESS的本页审阅项，不是新ADR、pa
 - **Decision evidence:** the current user handoff records the user's reply **“采用”** to Review Project's explicit adoption request for W1 fake-only implementation. Review Project carries these recommendations as implementation requirements. The decision was observed on **2026-09-11**; no exact message timestamp, additional approver, signature or approval ID is supplied or invented.
 - **Effect:** design adopted and existing W1 implementation authorized, including fixed OpenAI Responses / `gpt-5.6-terra` / low reasoning / no fallback and the protocol, data, transport, credential and usage constraints. DATA D1–D4, K1–K4 and INTENT I1–I7 remain applicable.
 - **Operational limits:** no actual account/key use, per-material egress/retention, operational budget, paid call, deployment or Target execution is approved. E5 examples remain synthetic arithmetic, not spending limits. The provider POST design exception does not broaden Target GET-only/public-blocked behavior.
-- **Implementation:** [W1 adapter and validation record](research-ai-provider-implementation.md), **IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**. Real calls remain disabled; real-provider acceptance is pending. No independent implementation PASS, W1 acceptance or RA-05 COMPLETE is claimed. W2/W3 have not started.
+- **Implementation:** [W1 adapter and validation record](research-ai-provider-implementation.md), **REVIEWED / INTEGRATED via PR #150**. Real calls remain disabled; real-provider acceptance is pending. Broader W2 and RA-05 remain incomplete; W3 has not started.
 
-The original §7 pending table and §9 documentation-only validation above describe the proposal's historical state. This appended record establishes subsequent design adoption without changing those historical claims or converting design adoption into operational authority.
+The original recommendations in §7 and documentation-only validation in §9 preserve the proposal's history. This appended record establishes subsequent design adoption without changing those historical claims or converting design adoption into operational authority.

@@ -1,5 +1,7 @@
 # RA-04/W3：本地合成端到端演示
 
+> **记录状态（[PR #147](https://github.com/runyiy/ai-api-security-platform/pull/147)）：** 有界合成本地演示已集成；其验收不证明 production/public/provider readiness。下文基点、提交时 pending 状态、验证结果和包内停止指令是历史记录；旧停止点不约束后续已授权工作。契约/安全/验收要求仍有效，采纳按精确记录、当前进度按 [roadmap](research-assistant-roadmap.md#5-固定阶段与依赖)；集成不授予操作许可。
+
 基点 `844581154700a57607987e059091c3c4de43b238`；分支 `codex/ra-04-w3-local-demonstration`。开始前 clean local main、fetch 后 origin/main 及远端 main 均与基点一致。当前交接记录 W2 经 PR #145、CI 分片经 PR #146 集成，PR/main 各 3228 tests passed；这是交接记录，不代签本包独立 review。本文与可执行验收属于既有 W3；不宣告 RA-04 COMPLETE，不开始 RA-05。
 
 ## 1. 操作者演示入口

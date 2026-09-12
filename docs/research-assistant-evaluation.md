@@ -1,5 +1,7 @@
 # Research Assistant 评测契约 RA-01/W2
 
+> **记录状态（[PR #135](https://github.com/runyiy/ai-api-security-platform/pull/135)）：** 离线评测实现已集成。标签/阈值、B cap 和实际预算仍按独立决定处理。下文基点、提交时 pending 状态、验证结果和包内停止指令是历史记录；旧停止点不约束后续已授权工作。契约/安全/验收要求仍有效，采纳按精确记录、当前进度按 [roadmap](research-assistant-roadmap.md#5-固定阶段与依赖)；集成不授予操作许可。
+
 **ra01-evaluation-v1 · IMPLEMENTED / PENDING_INDEPENDENT_REVIEW**
 
 精确依赖起点：`548425daf2539f61b76be319279d310f0e688934`（W1）；工作包 **RA-01/W2**。W1 独立审阅、anti-drift 和 exact-SHA push 已通过，依据本次用户交接；W1 契约原文作为该版本历史保留。本包只有离线 evaluator、合成语料、测试与说明，不是产品运行器，也不授予 W3/RA-02+、provider 费用、公网或外部提交许可。独立 reviewer、Tech Lead 标签审阅及操作者阈值/预算批准仍未完成，RA-01 未 COMPLETE。
