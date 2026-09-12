@@ -177,6 +177,20 @@ jobs:
           }
           timeout --kill-after=2s 5s bwrap --version
 
+      - name: Prepare approved Ubuntu bwrap policy
+        timeout-minutes: 3
+        run: |
+          timeout --kill-after=5s 150s env -i PATH=/usr/bin:/bin LANG=C.UTF-8 \
+            python3 -I ../.github/scripts/n1_apparmor_policy.py prepare "$RUNNER_TEMP/n1-bwrap-policy"
+
+      - name: Load approved bwrap policy in temporary hosted job
+        id: n1_policy
+        timeout-minutes: 1
+        run: |
+          sudo -n timeout --kill-after=2s 30s env -i PATH=/usr/bin:/bin LANG=C.UTF-8 \
+            GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
+            python3 -I ../.github/scripts/n1_apparmor_policy.py load "$RUNNER_TEMP/n1-bwrap-policy/profile"
+
       - name: Verify required N1 sandbox capabilities
         timeout-minutes: 1
         run: |
@@ -213,6 +227,8 @@ jobs:
               (code / 'child.py').write_text('parent_namespaces = ' + repr(namespaces) + '\n' + textwrap.dedent('''
                   import ctypes, errno, os
                   from pathlib import Path
+                  label = Path('/proc/self/attr/current').read_text().strip()
+                  assert label == 'bwrap//&unpriv_bwrap (enforce)', 'N1_APPARMOR_CHILD_CONFINEMENT_REQUIRED: ' + repr(label[:256])
                   for name, parent in parent_namespaces.items():
                       assert os.readlink('/proc/self/ns/' + name) != parent, 'N1_NAMESPACE_NOT_ISOLATED: ' + name
                   status = dict(line.split(':', 1) for line in Path('/proc/self/status').read_text().splitlines())
@@ -244,12 +260,21 @@ jobs:
                   diagnose(started)
                   sys.exit('::error::N1_CAPABILITY_FAILED: required sandbox profile unavailable; inspect the diagnostic above; host security controls must remain enabled')
               print('N1_CAPABILITY_OK: isolated user/PID/network/IPC/UTS/mount namespaces, zero capabilities, no-new-privileges, denied nested user namespaces, private writable tmp and read-only code')
+              print('N1_APPARMOR_CHILD_OK: bwrap//&unpriv_bwrap (enforce)')
           PY
 
       - name: Run serial remaining partition
         env:
           EXPECTED_COLLECTION_SHA256: ${{ needs.collection.outputs.full_sha256 }}
         run: python -m ci_shards run remaining --expected-sha256 "$EXPECTED_COLLECTION_SHA256"
+
+      - name: Verify policy and restrictions after remaining partition
+        if: ${{ always() && steps.n1_policy.outcome == 'success' }}
+        timeout-minutes: 1
+        run: |
+          sudo -n timeout --kill-after=2s 20s env -i PATH=/usr/bin:/bin LANG=C.UTF-8 \
+            GITHUB_ACTIONS="$GITHUB_ACTIONS" RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
+            python3 -I ../.github/scripts/n1_apparmor_policy.py verify
 
   pytest:
     name: pytest
