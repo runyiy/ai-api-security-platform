@@ -18,13 +18,18 @@ def compile_policy(body, *options):
                        *options, '--stdout'], data=('abi <abi/4.0>,\n' + body).encode())
 
 
-def exported_blob(root, data, slot='one'):
-    records = policy.binary_identity(data)
+def exported_blob(root, data, slot='one', *, records=None):
+    # Linux v6.8 apparmorfs.c: seq_rawdata_{abi,hash}_show and
+    # seq_profile_{name,mode,attach,hash}_show; policy_unpack.c: aa_unpack.
+    # Optional independent records keep source-derived oracles separate from
+    # the binary reader tested by the broader generated-fixture suite.
+    if records is None:
+        records = policy.binary_identity(data)
     raw = root / 'policy/raw_data' / slot
     raw.mkdir(parents=True)
     (raw / 'raw_data').write_bytes(data)
-    (raw / 'sha256').write_text(hashlib.sha256(data).hexdigest())
-    (raw / 'abi').write_text(str(next(iter(records.values()))['abi']))
+    (raw / 'sha256').write_text(hashlib.sha256(data).hexdigest() + '\n')
+    (raw / 'abi').write_text('v' + str(list(records.values())[-1]['abi']) + '\n')
     (root / 'policy/revision').write_text('1\n')
     for name, entry in records.items():
         directory = root / 'policy/profiles'
@@ -253,7 +258,7 @@ class BinaryEvidenceTests(ExportFixtureTests):
 
     def test_raw_blob_profile_hash_abi_and_export_mismatches_fail(self):
         for field, value in (('raw_data/one/sha256', '0' * 64), ('profiles/browser/sha256', '0' * 64),
-                             ('raw_data/one/abi', '9'), ('profiles/browser/attach', '/usr/bin/bwrap'),
+                             ('raw_data/one/abi', 'v9\n'), ('profiles/browser/attach', '/usr/bin/bwrap'),
                              ('profiles/browser/mode', 'enforce')):
             with self.subTest(field=field), tempfile.TemporaryDirectory() as tmp:
                 root = Path(tmp)
@@ -443,6 +448,89 @@ class AccessIdentityTests(ExportFixtureTests):
                 policy.snapshot(root)
         reports = [json.loads(line.removeprefix('N1_APPARMOR ')) for line in output.getvalue().splitlines()]
         return reports[-1]['inventory']
+
+    def independent_blob(self, specifications):
+        # No policy.binary_identity/BINARY/Wire calls construct this oracle.
+        # policy_unpack.c's named U32 version header is 16 bytes; aa_unpack
+        # hashes the following profile segment with crypto.c's LE32 version.
+        # Changing the ABI below is a labelled synthetic wire test, not proof
+        # that any modified bytes have been accepted by a real kernel.
+        chunks, records = [], {}
+        for name, attachment, mode, abi in specifications:
+            body = 'profile ' + name
+            if attachment == '<unknown>':
+                body += ' /opt/independent/**'
+            body += ' flags=(' + mode + ') {}'
+            data = compile_policy(body)
+            self.assertEqual(data[:12], b'\x04\x08\x00version\x00\x02')
+            version = int.from_bytes(data[12:16], 'little')
+            self.assertEqual(version & 0x3ff, 7)
+            version = (version & ~0x3ff) | abi
+            packed_version = version.to_bytes(4, 'little')
+            data = data[:12] + packed_version + data[16:]
+            chunks.append(data)
+            records[name] = {'attach': attachment, 'mode': mode, 'abi': abi,
+                             'matches': [], 'sha256': hashlib.sha256(
+                                 packed_version + data[16:]).hexdigest()}
+        blob = b''.join(chunks)
+        for record in records.values():
+            record['raw_sha256'] = hashlib.sha256(blob).hexdigest()
+        return blob, records
+
+    def test_supported_kernel_abi_formats_with_independent_export_values(self):
+        for abi in range(5, 10):
+            with self.subTest(abi=abi), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                data, expected = self.independent_blob([('plain', 'plain', 'enforce', abi)])
+                exported_blob(root, data, records=expected)
+                raw = root / 'policy/raw_data/one'
+                self.assertEqual((raw / 'abi').read_bytes(), ('v%d\n' % abi).encode())
+                self.assertEqual((raw / 'sha256').read_bytes(),
+                                 hashlib.sha256(data).hexdigest().encode() + b'\n')
+                directory = root / 'policy/profiles/plain'
+                for field, value in (('name', b'plain\n'), ('attach', b'plain\n'),
+                                     ('mode', b'enforce\n')):
+                    self.assertEqual((directory / field).read_bytes(), value)
+                self.assertEqual(policy.snapshot(root), expected)
+
+    def test_kernel_abi_is_last_header_with_independent_profile_hashes(self):
+        specifications = [('plain', 'plain', 'enforce', 7),
+                          ('glob', '<unknown>', 'complain', 8)]
+        for specs, exported, wrong in ((specifications, b'v8\n', b'v7\n'),
+                                       (specifications[::-1], b'v7\n', b'v8\n')):
+            with self.subTest(exported=exported), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                data, expected = self.independent_blob(specs)
+                exported_blob(root, data, records=expected)
+                leaf = root / 'policy/raw_data/one/abi'
+                self.assertEqual(leaf.read_bytes(), exported)
+                self.assertEqual(policy.snapshot(root), expected)
+                leaf.write_bytes(wrong)
+                report = self.failure(root)
+                self.assertEqual(len(report['failures']), 2)
+                self.assertTrue(all(failure['result'] == 'N1_APPARMOR_RAW_POLICY_ABI_MISMATCH'
+                                    for failure in report['failures']))
+
+    def test_malformed_unsupported_and_mismatched_kernel_abi_fail_closed(self):
+        malformed = (b'', b'7', b'7\n', b'v7', b'V7\n', b'v07\n', b'v+7\n', b'v-7\n',
+                     b' v7\n', b'v7 \n', b'v7\r\n', b'v7\n\n', b'v7\nprivate',
+                     b'v7\x00\n', b'v\xff\n', 'v７\n'.encode(), b'v4\n', b'v10\n',
+                     b'v0\n', b'v4294967295\n')
+        cases = [(value, 'ABI_FORMAT_UNSUPPORTED') for value in malformed]
+        cases += [(b'v9\n', 'ABI_MISMATCH'), (b'v' + b'7' * 32 + b'\n', 'READ_LIMIT')]
+        data, expected = self.independent_blob([('plain', 'plain', 'enforce', 7)])
+        for value, code in cases:
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                exported_blob(root, data, records=expected)
+                (root / 'policy/raw_data/one/abi').write_bytes(value)
+                failure = self.failure(root)['failures'][0]
+                self.assertIn(code, failure['result'])
+                self.assertEqual(failure['field'], 'raw_abi')
+                self.assertEqual(failure['operation'], 'read' if code == 'READ_LIMIT' else 'validate')
+                self.assertEqual(failure['category'], 'malformed_evidence')
+                self.assertIsNone(failure['errno'])
+                self.assertNotIn('private', json.dumps(failure))
 
     def test_complete_inventory_through_real_directory_magic_link(self):
         with tempfile.TemporaryDirectory() as tmp:

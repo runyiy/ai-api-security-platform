@@ -344,7 +344,12 @@ def loaded_entry(directory, depth, name, entry, cache, namespace):
             with evidence('parse', 'raw_data'):
                 records = binary_identity(data)
             with evidence('validate', 'raw_abi'):
-                abi = int(read_descriptor(descriptors['raw_abi'], 32, 'raw_abi').decode().strip())
+                # Linux seq_rawdata_abi_show emits exactly "v%d\n". Support
+                # only ABI 5-9, as in the binary reader; do not normalize text.
+                exported_abi = read_descriptor(descriptors['raw_abi'], 32, 'raw_abi')
+                require(re.fullmatch(rb'v[5-9]\n', exported_abi) is not None,
+                        'RAW_POLICY_ABI_FORMAT_UNSUPPORTED')
+                abi = int(exported_abi[1:-1])
                 # The export describes the LAST header of the COMPLETE blob.
                 require(list(records.values())[-1]['abi'] == abi, 'RAW_POLICY_ABI_MISMATCH')
             cache[key] = records
