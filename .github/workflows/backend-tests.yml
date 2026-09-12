@@ -160,6 +160,79 @@ jobs:
       - name: Apply database migrations
         run: alembic upgrade head
 
+      - name: Install bubblewrap from runner distribution
+        timeout-minutes: 3
+        run: |
+          timeout --kill-after=5s 60s sudo -n apt-get update || {
+            echo '::error::N1_BUBBLEWRAP_INSTALL_FAILED: distribution package index update failed or timed out'
+            exit 1
+          }
+          timeout --kill-after=5s 90s sudo -n apt-get install --yes --no-install-recommends bubblewrap || {
+            echo '::error::N1_BUBBLEWRAP_INSTALL_FAILED: distribution package installation failed or timed out'
+            exit 1
+          }
+          command -v bwrap || {
+            echo '::error::N1_BUBBLEWRAP_REQUIRED: installed executable is not discoverable'
+            exit 1
+          }
+          timeout --kill-after=2s 5s bwrap --version
+
+      - name: Verify required N1 sandbox capabilities
+        timeout-minutes: 1
+        run: |
+          env -i PATH="$PATH" LANG=C.UTF-8 python -I - <<'PY'
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import tempfile
+          import textwrap
+
+          sys.path.insert(0, str(Path.cwd()))
+          from tests.ai.n1_sandbox import Sandbox
+
+          # Use the adopted profile and selected Python runtime, without a DB or
+          # application imports. Only this fixed synthetic probe exposes stderr.
+          with tempfile.TemporaryDirectory(prefix='n1-ci-capability-') as directory:
+              root = Path(directory)
+              code, database, call = (root / name for name in ('code', 'database', 'call'))
+              for path in (code, database, call):
+                  path.mkdir()
+              namespaces = {name: os.readlink('/proc/self/ns/' + name)
+                            for name in ('user', 'pid', 'net', 'ipc', 'uts', 'mnt')}
+              (code / 'child.py').write_text('parent_namespaces = ' + repr(namespaces) + '\n' + textwrap.dedent('''
+                  import ctypes, errno, os
+                  from pathlib import Path
+                  for name, parent in parent_namespaces.items():
+                      assert os.readlink('/proc/self/ns/' + name) != parent, 'N1_NAMESPACE_NOT_ISOLATED: ' + name
+                  status = dict(line.split(':', 1) for line in Path('/proc/self/status').read_text().splitlines())
+                  for name in ('CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb'):
+                      assert int(status[name].strip(), 16) == 0, 'N1_CAPABILITIES_NOT_DROPPED: ' + name
+                  assert status['NoNewPrivs'].strip() == '1', 'N1_NO_NEW_PRIVILEGES_REQUIRED'
+                  libc = ctypes.CDLL(None, use_errno=True)
+                  assert libc.unshare(0x10000000) == -1 and ctypes.get_errno() in (errno.EPERM, errno.ENOSPC), 'N1_NESTED_USERNS_NOT_DENIED'
+                  assert list(Path('/tmp').iterdir()) == [], 'N1_PRIVATE_TMP_REQUIRED'
+                  Path('/tmp/probe').write_text('synthetic')
+                  try:
+                      Path('/code/forbidden').write_text('synthetic')
+                  except OSError as error:
+                      assert error.errno == errno.EROFS, 'N1_READ_ONLY_CODE_REQUIRED'
+                  else:
+                      raise RuntimeError('N1_READ_ONLY_CODE_REQUIRED')
+                  print('N1_CAPABILITY_OK')
+              '''))
+              try:
+                  result = subprocess.run(Sandbox(code, database, call).command('child.py'),
+                                          stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                          close_fds=True, env={'PATH': '/usr/bin:/bin'}, timeout=10)
+              except subprocess.TimeoutExpired:
+                  sys.exit('::error::N1_CAPABILITY_TIMEOUT: required sandbox did not complete within 10 seconds')
+              if result.returncode != 0 or result.stdout.strip() != 'N1_CAPABILITY_OK':
+                  print(result.stderr[:4096], file=sys.stderr)
+                  sys.exit('::error::N1_CAPABILITY_FAILED: required sandbox profile unavailable; inspect the diagnostic above; host security controls must remain enabled')
+              print('N1_CAPABILITY_OK: isolated user/PID/network/IPC/UTS/mount namespaces, zero capabilities, no-new-privileges, denied nested user namespaces, private writable tmp and read-only code')
+          PY
+
       - name: Run serial remaining partition
         env:
           EXPECTED_COLLECTION_SHA256: ${{ needs.collection.outputs.full_sha256 }}
