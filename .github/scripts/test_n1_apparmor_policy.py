@@ -1,5 +1,7 @@
 """CI policy guards; real compilation, simulated kernel exports, never loaded."""
 import contextlib
+import errno
+import os
 import hashlib
 import io
 import json
@@ -35,11 +37,20 @@ def exported_blob(root, data, slot='one'):
             (directory / field).write_text(entry[field] + '\n')
         (directory / 'name').write_text(name.split('//')[-1] + '\n')
         for field, target in (('raw_data', 'raw_data'), ('raw_sha256', 'sha256'), ('raw_abi', 'abi')):
-            (directory / field).symlink_to(raw / target)
+            (directory / field).symlink_to(os.path.relpath(raw / target, directory))
     return records
 
 
-class PolicyTests(unittest.TestCase):
+class ExportFixtureTests(unittest.TestCase):
+    def setUp(self):
+        # Ordinary fixtures are deliberately not securityfs/apparmorfs. Only
+        # this filesystem-type assertion is replaced; all traversal is real.
+        check = patch.object(policy, 'verify_filesystem')
+        self.filesystem_check = check.start()
+        self.addCleanup(check.stop)
+
+
+class PolicyTests(ExportFixtureTests):
     def test_attachment_conflicts_include_aliases_braces_globs_and_unknowns(self):
         with tempfile.TemporaryDirectory() as root:
             for attachment in ('/usr/bin/bwrap', '/bin/bwrap', '/{usr/,}bin/bwrap',
@@ -95,8 +106,11 @@ class PolicyTests(unittest.TestCase):
 
     def test_inaccessible_inventory_fails_closed(self):
         with tempfile.TemporaryDirectory() as root:
-            with self.assertRaisesRegex(policy.PolicyError, 'INVENTORY_UNAVAILABLE'):
+            with self.assertRaises(policy.PolicyError) as failure:
                 policy.snapshot(Path(root))
+            self.assertEqual(failure.exception.diagnostic, {
+                'operation': 'open', 'field': 'policy',
+                'category': 'missing_interface', 'errno': errno.ENOENT})
 
     def test_snapshot_keeps_nested_profile_names_distinct(self):
         with tempfile.TemporaryDirectory() as root:
@@ -165,7 +179,7 @@ class PolicyTests(unittest.TestCase):
             policy.run(['/usr/bin/python3', '-I', '-c', 'import time; time.sleep(30)'], timeout=.05)
 
 
-class BinaryEvidenceTests(unittest.TestCase):
+class BinaryEvidenceTests(ExportFixtureTests):
     @classmethod
     def setUpClass(cls):
         cls.unrelated = compile_policy('profile browser /opt/browser/{bin,other} flags=(unconfined) {}\n'
@@ -368,6 +382,217 @@ class BinaryEvidenceTests(unittest.TestCase):
         data[offset + 13] |= 4
         with self.assertRaisesRegex(policy.PolicyError, 'BINARY_EVIDENCE'):
             policy.binary_identity(bytes(data))
+
+
+class KernelTraversalTests(unittest.TestCase):
+    def test_real_namespace_magic_link_has_nonpath_text_but_kernel_identity(self):
+        link = Path('/proc/self/ns/mnt')
+        self.assertRegex(os.readlink(link), r'^mnt:\[\d+\]$')
+        with self.assertRaises(FileNotFoundError):
+            link.resolve(strict=True)
+        with policy.opened(link, os.O_RDONLY, 'policy', follow=True) as fd:
+            self.assertEqual(policy.object_identity(os.fstat(fd)),
+                             policy.object_identity(os.stat(link)))
+
+    def test_real_deleted_directory_magic_link_opens_without_path_resolution(self):
+        # A directory analogue of AppArmor's non-path readlink text. No mount,
+        # user namespace, policy activation or privilege is needed.
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp) / 'namespace'
+            directory.mkdir()
+            with policy.opened(directory, os.O_RDONLY | os.O_DIRECTORY, 'policy') as original:
+                directory.rmdir()
+                link = Path('/proc/self/fd') / str(original)
+                self.assertTrue(os.readlink(link).endswith(' (deleted)'))
+                with self.assertRaises(FileNotFoundError):
+                    link.resolve(strict=True)
+                with policy.opened(link, os.O_RDONLY | os.O_DIRECTORY, 'policy', follow=True) as fd:
+                    self.assertEqual(policy.object_identity(os.fstat(fd)),
+                                     policy.object_identity(os.fstat(original)))
+                    self.assertEqual(os.listdir(fd), [])
+                (Path(tmp) / 'policy').symlink_to(link)
+                with patch.object(policy, 'verify_filesystem'), policy.policy_namespace(Path(tmp)) as fd:
+                    self.assertEqual(policy.object_identity(os.fstat(fd)),
+                                     policy.object_identity(os.fstat(original)))
+
+    def test_filesystem_check_uses_actual_descriptor_type_and_errno(self):
+        with policy.opened('/proc', os.O_RDONLY | os.O_DIRECTORY, 'security') as fd:
+            policy.verify_filesystem(fd, 0x9fa0)  # PROC_SUPER_MAGIC
+            with self.assertRaisesRegex(policy.PolicyError, 'FILESYSTEM_IDENTITY'):
+                policy.verify_filesystem(fd, 0x5a3c69f0)
+        with self.assertRaises(OSError) as failure:
+            policy.verify_filesystem(-1, 0x5a3c69f0)
+        self.assertEqual(failure.exception.errno, errno.EBADF)
+
+    def test_ordinary_filesystem_cannot_impersonate_trusted_kernel_namespace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / 'policy').mkdir()
+            with self.assertRaisesRegex(policy.PolicyError, 'FILESYSTEM_IDENTITY') as failure:
+                policy.snapshot(Path(tmp))
+            self.assertEqual(failure.exception.diagnostic['field'], 'security')
+
+
+class AccessIdentityTests(ExportFixtureTests):
+    @classmethod
+    def setUpClass(cls):
+        cls.data = compile_policy('profile other /opt/other/** {}')
+
+    def failure(self, root):
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            with self.assertRaisesRegex(policy.PolicyError, 'INVENTORY_UNRESOLVED'):
+                policy.snapshot(root)
+        reports = [json.loads(line.removeprefix('N1_APPARMOR ')) for line in output.getvalue().splitlines()]
+        return reports[-1]['inventory']
+
+    def test_complete_inventory_through_real_directory_magic_link(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            expected = exported_blob(root, self.data)
+            (root / 'policy').rename(root / 'namespace')
+            with policy.opened(root / 'namespace', os.O_RDONLY | os.O_DIRECTORY, 'policy') as fd:
+                (root / 'policy').symlink_to('/proc/self/fd/' + str(fd))
+                with patch.object(Path, 'resolve', side_effect=AssertionError('pathname resolution forbidden')):
+                    self.assertEqual(policy.snapshot(root), expected)
+            self.assertEqual([call.args[1] for call in self.filesystem_check.call_args_list],
+                             [0x73636673, 0x5a3c69f0])
+
+    def test_link_escape_absolute_sibling_wrong_field_and_depth_rejected(self):
+        for target in ('/tmp/private/raw_data', '../../../raw_data/one/raw_data',
+                       '../../raw_data-other/one/raw_data', '../../raw_data/../raw_data',
+                       '../../raw_data/one/sha256', '../../raw_data/one/extra/raw_data'):
+            with self.subTest(target=target), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                exported_blob(root, self.data)
+                link = root / 'policy/profiles/other/raw_data'
+                link.unlink()
+                link.symlink_to(target)
+                report = self.failure(root)
+                self.assertEqual(report['raw_bytes'], 0)
+                self.assertEqual(report['failures'][0]['operation'], 'validate_link')
+                self.assertNotIn(target, json.dumps(report))
+
+    def test_canonical_directories_and_leaves_cannot_redirect_outside_namespace(self):
+        for relative in ('raw_data', 'raw_data/one', 'raw_data/one/raw_data'):
+            with self.subTest(relative=relative), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                exported_blob(root, self.data)
+                original = root / 'policy' / relative
+                outside = root / 'private'
+                original.rename(outside)
+                original.symlink_to(outside)
+                report = self.failure(root)
+                self.assertEqual(report['raw_bytes'], 0)
+                failure = report['failures'][0]
+                self.assertEqual(failure['category'], 'traversal_failure')
+                self.assertIn(failure['errno'], (errno.ELOOP, errno.ENOTDIR))
+                self.assertNotIn(str(outside), json.dumps(report))
+
+    def test_different_blob_metadata_link_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            exported_blob(root, self.data)
+            link = root / 'policy/profiles/other/raw_abi'
+            link.unlink()
+            link.symlink_to('../../raw_data/two/abi')
+            self.assertEqual(self.failure(root)['raw_bytes'], 0)
+
+    def test_kernel_target_identity_mismatch_is_rejected_before_read(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            exported_blob(root, self.data)
+            foreign = root / 'private'
+            foreign.write_text('unrelated-secret')
+            foreign_stat = foreign.stat()
+            original = os.stat
+            def changed(path, *args, **kwargs):
+                if path == 'raw_data' and kwargs.get('dir_fd') is not None:
+                    return foreign_stat
+                return original(path, *args, **kwargs)
+            with patch.object(policy.os, 'stat', side_effect=changed):
+                report = self.failure(root)
+            self.assertEqual(report['raw_bytes'], 0)
+            self.assertEqual(report['failures'][0]['operation'], 'stat_identity')
+            self.assertNotIn('unrelated-secret', json.dumps(report))
+
+    def test_namespace_change_during_snapshot_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            exported_blob(root, self.data)
+            replacement = root / 'replacement'
+            replacement.mkdir()
+            original = policy.namespace_snapshot
+            def change(*args):
+                result = original(*args)
+                (root / 'policy').rename(root / 'old')
+                replacement.rename(root / 'policy')
+                return result
+            with patch.object(policy, 'namespace_snapshot', side_effect=change):
+                with self.assertRaisesRegex(policy.PolicyError, 'NAMESPACE_IDENTITY'):
+                    policy.snapshot(root)
+
+    def test_link_change_after_blob_read_fails_and_closes_descriptors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            exported_blob(root, self.data)
+            original = policy.read_descriptor
+            def change(fd, limit, field):
+                data = original(fd, limit, field)
+                if field == 'raw_data':
+                    link = root / 'policy/profiles/other/raw_data'
+                    link.unlink()
+                    link.symlink_to('../../raw_data/one/abi')
+                return data
+            before = len(os.listdir('/proc/self/fd'))
+            with patch.object(policy, 'read_descriptor', side_effect=change):
+                report = self.failure(root)
+            self.assertGreater(report['raw_bytes'], 0)
+            self.assertEqual(report['failures'][0]['operation'], 'stat_identity')
+            self.assertEqual(len(os.listdir('/proc/self/fd')), before)
+
+    def test_nonregular_and_oversize_evidence_fail_without_blocking(self):
+        for kind in ('fifo', 'oversize'):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                exported_blob(root, self.data)
+                leaf = root / 'policy/raw_data/one/raw_data'
+                if kind == 'fifo':
+                    leaf.unlink()
+                    os.mkfifo(leaf)
+                else:
+                    with leaf.open('wb') as output:
+                        output.truncate(policy.BINARY['MAX_BLOB'] + 1)
+                report = self.failure(root)
+                self.assertIn('LINK_IDENTITY' if kind == 'fifo' else 'READ_LIMIT',
+                              report['failures'][0]['result'])
+
+    def test_errno_and_malformed_diagnostics_identify_operation_and_field(self):
+        for number, category in ((errno.EACCES, 'denied_access'),
+                                 (errno.ENOENT, 'missing_interface'),
+                                 (errno.ELOOP, 'traversal_failure'), (errno.EIO, 'io_failure')):
+            with self.subTest(number=number), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                exported_blob(root, self.data)
+                original = os.open
+                def failing(path, *args, **kwargs):
+                    if path == 'abi':
+                        raise OSError(number, 'private error', '/private/path')
+                    return original(path, *args, **kwargs)
+                with patch.object(policy.os, 'open', side_effect=failing):
+                    report = self.failure(root)
+                failure = report['failures'][0]
+                self.assertEqual({key: failure[key] for key in ('operation', 'field', 'category', 'errno')},
+                                 {'operation': 'open', 'field': 'raw_abi', 'category': category, 'errno': number})
+                self.assertNotIn('private', json.dumps(report))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            exported_blob(root, self.data)
+            (root / 'policy/raw_data/one/abi').write_bytes(b'private-invalid-abi')
+            failure = self.failure(root)['failures'][0]
+            self.assertEqual(failure['field'], 'raw_abi')
+            self.assertEqual(failure['operation'], 'validate')
+            self.assertEqual(failure['category'], 'malformed_evidence')
+            self.assertIsNone(failure['errno'])
+            self.assertNotIn('private', json.dumps(failure))
 
 
 if __name__ == '__main__':

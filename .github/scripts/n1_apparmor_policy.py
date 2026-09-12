@@ -4,6 +4,9 @@ prepare is unprivileged and uses an isolated authenticated Ubuntu APT source.
 load/verify require the hosted Ubuntu job; they never execute a sandbox payload.
 """
 import argparse
+import contextlib
+import ctypes
+import errno
 import fnmatch
 import hashlib
 import io
@@ -164,14 +167,124 @@ def attachment_may_match(pattern, target='/usr/bin/bwrap'):
     return False
 
 
-def revision(security=SECURITY):
-    # This is a pollable notification file, not a regular read-to-EOF file.
-    fd = os.open(security / 'policy/revision', os.O_RDONLY | os.O_NONBLOCK)
+@contextlib.contextmanager
+def evidence(operation, field):
+    # Only fixed operation/field labels and numeric errno leave this boundary.
+    # Never expose filenames, link text, evidence bytes or OS exception text.
     try:
-        value = os.read(fd, 128).decode().strip()
+        yield
+    except (PolicyError, OSError, ValueError) as error:
+        if isinstance(error, PolicyError) and hasattr(error, 'diagnostic'):
+            raise
+        number = error.errno if isinstance(error, OSError) else None
+        category = ('denied_access' if number in (errno.EACCES, errno.EPERM) else
+                    'missing_interface' if number == errno.ENOENT else
+                    'traversal_failure' if number in (errno.ELOOP, errno.ENOTDIR, errno.EXDEV) else
+                    'io_failure' if number is not None else 'malformed_evidence')
+        failure = PolicyError(str(error) if isinstance(error, PolicyError)
+                              else 'N1_APPARMOR_EVIDENCE_UNAVAILABLE')
+        failure.diagnostic = {'operation': operation, 'field': field,
+                              'category': category, 'errno': number}
+        raise failure from None
+
+
+def object_identity(info):
+    return info.st_dev, info.st_ino, stat.S_IFMT(info.st_mode)
+
+
+def verify_filesystem(fd, expected):
+    # Linux statfs is at most 120 bytes on the supported hosted amd64 ABI;
+    # f_type is its first native long. An oversized aligned buffer avoids
+    # depending on the remaining libc struct fields.
+    buffer = (ctypes.c_long * 32)()
+    libc = ctypes.CDLL(None, use_errno=True)
+    call = libc.fstatfs
+    call.argtypes = [ctypes.c_int, ctypes.c_void_p]
+    call.restype = ctypes.c_int
+    if call(fd, ctypes.byref(buffer)) != 0:
+        raise OSError(ctypes.get_errno(), 'fstatfs')
+    require(buffer[0] == expected, 'POLICY_FILESYSTEM_IDENTITY')
+
+
+@contextlib.contextmanager
+def opened(path, flags, field, *, parent=None, follow=False):
+    with evidence('open', field):
+        fd = os.open(path, flags | os.O_CLOEXEC | (0 if follow else os.O_NOFOLLOW),
+                     dir_fd=parent)
+    try:
+        yield fd
     finally:
         os.close(fd)
-    require(value.isdecimal(), 'POLICY_REVISION_UNAVAILABLE')
+
+
+@contextlib.contextmanager
+def policy_namespace(security):
+    # Walk the ordinary absolute securityfs path one component at a time.
+    # Only the fixed final policy component may use kernel magic traversal.
+    with contextlib.ExitStack() as stack:
+        current = stack.enter_context(opened('/', os.O_RDONLY | os.O_DIRECTORY, 'security'))
+        parts = Path(security).absolute().parts[1:]
+        with evidence('validate', 'security'):
+            require(len(parts) <= 64 and all(part not in ('.', '..') for part in parts),
+                    'POLICY_ROOT_LAYOUT')
+        for part in parts:
+            current = stack.enter_context(opened(part, os.O_RDONLY | os.O_DIRECTORY,
+                                                 'security', parent=current))
+        with evidence('fstatfs', 'security'):
+            verify_filesystem(current, 0x73636673)  # SECURITYFS_MAGIC
+        namespace = stack.enter_context(opened('policy', os.O_RDONLY | os.O_DIRECTORY,
+                                                'policy', parent=current, follow=True))
+        with evidence('fstatfs', 'policy'):
+            verify_filesystem(namespace, 0x5a3c69f0)  # AAFS_MAGIC
+        with evidence('stat', 'policy'):
+            require(object_identity(os.fstat(namespace)) == object_identity(
+                os.stat('policy', dir_fd=current)), 'POLICY_NAMESPACE_IDENTITY')
+        yield namespace
+        with evidence('stat', 'policy'):
+            require(object_identity(os.fstat(namespace)) == object_identity(
+                os.stat('policy', dir_fd=current)), 'POLICY_NAMESPACE_IDENTITY')
+
+
+def read_evidence(parent, filename, limit, field=None):
+    field = field or filename
+    with opened(filename, os.O_RDONLY | os.O_NONBLOCK, field, parent=parent) as fd:
+        return read_descriptor(fd, limit, field)
+
+
+def read_descriptor(fd, limit, field):
+    with evidence('fstat', field):
+        require(stat.S_ISREG(os.fstat(fd).st_mode), 'POLICY_OBJECT_TYPE')
+    with evidence('read', field):
+        # revision is pollable and must only receive one read.
+        if field == 'revision':
+            value = os.read(fd, limit + 1)
+        else:
+            chunks, count = [], 0
+            while count <= limit:
+                chunk = os.read(fd, min(65536, limit + 1 - count))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                count += len(chunk)
+            value = b''.join(chunks)
+        require(len(value) <= limit, 'READ_LIMIT')
+        return value
+
+
+def text_evidence(parent, filename, limit, field=None):
+    field = field or filename
+    value = read_evidence(parent, filename, limit, field)
+    with evidence('decode', field):
+        return value.decode().strip()
+
+
+def revision(security=SECURITY, *, namespace=None):
+    if namespace is None:
+        with policy_namespace(security) as fd:
+            return revision(security, namespace=fd)
+    value = text_evidence(namespace, 'revision', 128)
+    with evidence('validate', 'revision'):
+        require(value.isascii() and value.isdecimal(), 'POLICY_REVISION_UNAVAILABLE')
     return value
 
 
@@ -182,75 +295,130 @@ def binary_identity(data):
         raise PolicyError('N1_APPARMOR_BINARY_EVIDENCE_UNRESOLVED') from None
 
 
-def loaded_entry(directory, name, entry, cache, security):
-    # Kernel per-profile symlinks link to the COMPLETE original load blob, not
-    # necessarily a single profile or the current source file on disk.
-    paths = {field: (directory / field).resolve(strict=True)
-             for field in ('raw_data', 'raw_sha256', 'raw_abi')}
-    raw = paths['raw_data']
-    raw_root = (security / 'policy/raw_data').resolve(strict=True)
-    require(raw.is_relative_to(raw_root) and raw.name == 'raw_data'
-            and paths['raw_sha256'] == raw.parent / 'sha256'
-            and paths['raw_abi'] == raw.parent / 'abi', 'RAW_POLICY_LINK_IDENTITY')
-    if raw not in cache:
-        remaining = 64 * 1024 * 1024 - cache['bytes']
-        require(remaining > 0, 'INVENTORY_BYTE_LIMIT')
-        data = read(raw, min(BINARY['MAX_BLOB'], remaining))
-        cache['bytes'] += len(data)
-        require(cache['bytes'] <= 64 * 1024 * 1024, 'INVENTORY_BYTE_LIMIT')
-        digest = hashlib.sha256(data).hexdigest()
-        require(read(paths['raw_sha256'], 128).decode().strip() == digest, 'RAW_POLICY_HASH_MISMATCH')
-        records = binary_identity(data)
-        abi = int(read(paths['raw_abi'], 32).decode().strip())
-        # The kernel exports the LAST header's ABI for a complete load blob;
-        # individual segments retain their own versions in their profile hash.
-        require(list(records.values())[-1]['abi'] == abi, 'RAW_POLICY_ABI_MISMATCH')
-        cache[raw] = records
-    record = cache[raw].get(name)
-    require(record is not None, 'LOADED_PROFILE_MISSING_FROM_BLOB')
-    require(read(directory / 'sha256', 128).decode().strip() == record['sha256'],
-            'LOADED_PROFILE_HASH_MISMATCH')
-    require(all(record[key] == entry[key] for key in ('attach', 'mode')), 'LOADED_PROFILE_EXPORT_MISMATCH')
-    return record
+def loaded_entry(directory, depth, name, entry, cache, namespace):
+    # Parse the kernel's bounded relative link layout, then independently open
+    # canonical objects from the pinned namespace without following ANY links.
+    # Link text chooses a candidate; kernel object identity authorizes it.
+    fields = {'raw_data': 'raw_data', 'raw_sha256': 'sha256', 'raw_abi': 'abi'}
+    slots = []
+    for field, filename in fields.items():
+        with evidence('readlink', field):
+            target = os.readlink(field, dir_fd=directory)
+        with evidence('validate_link', field):
+            parts = target.split('/')
+            require(len(target) <= 4096 and len(parts) == depth * 2 + 3
+                    and parts[:depth * 2] == ['..'] * (depth * 2)
+                    and parts[-3] == 'raw_data' and parts[-1] == filename
+                    and parts[-2] not in ('', '.', '..'), 'RAW_POLICY_LINK_IDENTITY')
+            slots.append(parts[-2])
+    with evidence('validate_link', 'raw_abi'):
+        require(len(set(slots)) == 1, 'RAW_POLICY_LINK_IDENTITY')
+    with contextlib.ExitStack() as stack:
+        raw_root = stack.enter_context(opened('raw_data', os.O_RDONLY | os.O_DIRECTORY,
+                                              'raw_root', parent=namespace))
+        blob = stack.enter_context(opened(slots[0], os.O_RDONLY | os.O_DIRECTORY,
+                                          'raw_blob', parent=raw_root))
+        descriptors, identities = {}, {}
+        for field, filename in fields.items():
+            fd = stack.enter_context(opened(filename, os.O_RDONLY | os.O_NONBLOCK,
+                                            field, parent=blob))
+            with evidence('stat_identity', field):
+                info = os.fstat(fd)
+                require(stat.S_ISREG(info.st_mode)
+                        and info.st_dev == os.fstat(namespace).st_dev
+                        and object_identity(info) == object_identity(os.stat(field, dir_fd=directory)),
+                        'RAW_POLICY_LINK_IDENTITY')
+                identities[field] = object_identity(info)
+            descriptors[field] = fd
+        key = tuple(identities.values())
+        if key not in cache:
+            remaining = 64 * 1024 * 1024 - cache['bytes']
+            with evidence('validate', 'raw_data'):
+                require(remaining > 0, 'INVENTORY_BYTE_LIMIT')
+            data = read_descriptor(descriptors['raw_data'], min(BINARY['MAX_BLOB'], remaining), 'raw_data')
+            cache['bytes'] += len(data)
+            with evidence('validate', 'raw_sha256'):
+                digest = hashlib.sha256(data).hexdigest()
+                require(read_descriptor(descriptors['raw_sha256'], 128, 'raw_sha256').decode().strip()
+                        == digest, 'RAW_POLICY_HASH_MISMATCH')
+            with evidence('parse', 'raw_data'):
+                records = binary_identity(data)
+            with evidence('validate', 'raw_abi'):
+                abi = int(read_descriptor(descriptors['raw_abi'], 32, 'raw_abi').decode().strip())
+                # The export describes the LAST header of the COMPLETE blob.
+                require(list(records.values())[-1]['abi'] == abi, 'RAW_POLICY_ABI_MISMATCH')
+            cache[key] = records
+        with evidence('validate', 'raw_data'):
+            record = cache[key].get(name)
+            require(record is not None, 'LOADED_PROFILE_MISSING_FROM_BLOB')
+        digest = text_evidence(directory, 'sha256', 128)
+        with evidence('validate', 'sha256'):
+            require(digest == record['sha256'], 'LOADED_PROFILE_HASH_MISMATCH')
+        for field in ('attach', 'mode'):
+            with evidence('validate', field):
+                require(record[field] == entry[field], 'LOADED_PROFILE_EXPORT_MISMATCH')
+        for field in fields:
+            with evidence('stat_identity', field):
+                require(object_identity(os.stat(field, dir_fd=directory)) == identities[field],
+                        'RAW_POLICY_LINK_IDENTITY')
+        return record
 
 
 def snapshot(security=SECURITY):
-    root = security / 'policy/profiles'
-    require(root.is_dir(), 'POLICY_INVENTORY_UNAVAILABLE')
-    original_revision = revision(security)
+    with policy_namespace(security) as namespace:
+        return namespace_snapshot(namespace, security)
+
+
+def namespace_snapshot(namespace, security):
+    original_revision = revision(security, namespace=namespace)
     result = {}
     cache, failures, unknowns = {'bytes': 0}, [], []
-    pending = [(root, '')]
-    while pending:
-        parent, prefix = pending.pop()
-        for directory in parent.iterdir():
-            require(directory.is_dir() and not directory.is_symlink(), 'POLICY_INVENTORY_LAYOUT')
-            name = prefix + read(directory / 'name', 4096).decode().strip()
-            require(name not in result and len(result) < 4096, 'POLICY_INVENTORY_AMBIGUOUS')
-            entry = {}
-            try:
-                entry['attach'] = read(directory / 'attach', 4096).decode().strip()
-                entry['mode'] = read(directory / 'mode', 128).decode().strip()
-                result[name] = loaded_entry(directory, name, entry, cache, security)
-                status = {'name': name[:256], 'result': 'resolved',
-                          'matches': result[name]['matches'], 'sha256': result[name]['sha256'],
-                          'raw_sha256': result[name]['raw_sha256']}
-            except (PolicyError, OSError, ValueError) as error:
-                result[name] = entry
-                status = {'name': name[:256], 'result': str(error) if isinstance(error, PolicyError)
-                          else 'N1_APPARMOR_EVIDENCE_UNAVAILABLE'}
-                failures.append(status)
-            if entry.get('attach') == '<unknown>':
-                unknowns.append(status)
-            children = directory / 'profiles'
-            if children.exists():
-                pending.append((children, name + '//'))
-    # Report every unknown in this bounded inventory, even if another entry is
-    # unresolved or conflicting. No application names receive exceptions.
+
+    def visit(parent, prefix, depth):
+        with evidence('listdir', 'profiles'):
+            # scandir is streamed; do not allocate an unbounded directory list.
+            with os.scandir(parent) as entries:
+                names = []
+                for item in entries:
+                    require(len(names) < 4096, 'POLICY_INVENTORY_LIMIT')
+                    names.append(item.name)
+        for basename in names:
+            with evidence('validate', 'profiles'):
+                require(depth <= 64 and len(result) < 4096, 'POLICY_INVENTORY_LIMIT')
+            with opened(basename, os.O_RDONLY | os.O_DIRECTORY, 'profile', parent=parent) as directory:
+                name = prefix + text_evidence(directory, 'name', 4096)
+                with evidence('validate', 'name'):
+                    require(name and len(name) <= 4096 and name not in result,
+                            'POLICY_INVENTORY_AMBIGUOUS')
+                entry = {}
+                try:
+                    entry['attach'] = text_evidence(directory, 'attach', 4096)
+                    entry['mode'] = text_evidence(directory, 'mode', 128)
+                    result[name] = loaded_entry(directory, depth, name, entry, cache, namespace)
+                    status = {'name': name[:256], 'result': 'resolved',
+                              'matches': result[name]['matches'], 'sha256': result[name]['sha256'],
+                              'raw_sha256': result[name]['raw_sha256']}
+                except PolicyError as error:
+                    result[name] = entry
+                    status = {'name': name[:256], 'result': str(error),
+                              **getattr(error, 'diagnostic', {})}
+                    failures.append(status)
+                if entry.get('attach') == '<unknown>':
+                    unknowns.append(status)
+                with evidence('stat', 'profiles'):
+                    try:
+                        os.stat('profiles', dir_fd=directory, follow_symlinks=False)
+                    except FileNotFoundError:
+                        continue
+                with opened('profiles', os.O_RDONLY | os.O_DIRECTORY, 'profiles', parent=directory) as children:
+                    visit(children, name + '//', depth + 1)
+
+    with opened('profiles', os.O_RDONLY | os.O_DIRECTORY, 'profiles', parent=namespace) as root:
+        visit(root, '', 1)
     emit('unknown_attachments', unknowns)
     emit('inventory', {'profiles': len(result), 'raw_bytes': cache['bytes'],
                        'revision': original_revision, 'failures': failures})
-    require(revision(security) == original_revision, 'POLICY_CHANGED_DURING_INVENTORY')
+    require(revision(security, namespace=namespace) == original_revision, 'POLICY_CHANGED_DURING_INVENTORY')
     require(not failures, 'POLICY_INVENTORY_UNRESOLVED')
     return result
 
@@ -376,6 +544,8 @@ def main():
             emit('offline_syntax', 'passed; no kernel policy loaded')
     except (PolicyError, OSError, ValueError, KeyError, TypeError, tarfile.TarError) as error:
         message = str(error) if isinstance(error, PolicyError) else 'N1_APPARMOR_EVIDENCE_UNAVAILABLE'
+        if hasattr(error, 'diagnostic'):
+            emit('evidence_failure', error.diagnostic)
         print('::error::' + message, file=sys.stderr)
         return 1
     return 0
