@@ -12,6 +12,7 @@ from pathlib import Path
 import socket
 import sys
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 
 IDENTITY_SQL = """SELECT json_build_object('database',current_database(),
@@ -20,20 +21,35 @@ IDENTITY_SQL = """SELECT json_build_object('database',current_database(),
  'system_identifier',(SELECT system_identifier::text FROM pg_control_system()))"""
 
 
+def verify_database_identity(database_url, expected):
+    # No Settings import or operator .env lookup occurs before identity checks.
+    # The caller also supplies an empty owned cwd and an explicit minimal env.
+    assert not Path('.env').exists()
+    # urlsplit normalizes leading controls/case; libpq consumes the original.
+    assert (database_url.startswith('postgresql+psycopg://')
+            and all(ord(c) > 32 and ord(c) != 127 for c in database_url))
+    target = urlsplit(database_url)
+    # CI publishes its service on localhost, but PostgreSQL reports its own
+    # container address/port. Constrain the client target independently; URL
+    # options must not override it with hostaddr, a service or multiple hosts.
+    assert (target.scheme == 'postgresql+psycopg'
+            and target.hostname in ('localhost', '127.0.0.1', '::1')
+            and target.port is not None and 0 < target.port <= 65535
+            and target.username and target.password and target.path not in ('', '/')
+            and not target.query and not target.fragment)
+    import psycopg
+    with psycopg.connect(database_url.replace('postgresql+psycopg:', 'postgresql:', 1),
+                          connect_timeout=3, options='-c statement_timeout=3000') as db:
+        identity = db.execute(IDENTITY_SQL).fetchone()[0]
+        assert identity == expected
+
+
 def main():
     raw = sys.stdin.buffer.readline(65537)
     assert raw.endswith(b'\n') and len(raw) <= 65536
     data = json.loads(raw)
-    # No Settings import or operator .env lookup occurs before identity checks.
-    # The caller also supplies an empty owned cwd and an explicit minimal env.
-    assert not Path('.env').exists()
-    import psycopg
     database_url = os.environ['DATABASE_URL']
-    with psycopg.connect(database_url.replace('postgresql+psycopg:', 'postgresql:', 1),
-                          connect_timeout=3, options='-c statement_timeout=3000') as db:
-        identity = db.execute(IDENTITY_SQL).fetchone()[0]
-        assert identity == data['database_identity']
-        assert identity['host'] == '127.0.0.1'
+    verify_database_identity(database_url, data['database_identity'])
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from sqlalchemy import create_engine, event, text
     from sqlalchemy.orm import sessionmaker
