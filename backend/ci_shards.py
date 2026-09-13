@@ -18,6 +18,7 @@ W2_FILES = frozenset({
     'tests/services/test_research_verification.py',
     'tests/services/test_research_verification_expiry.py',
     'tests/api/test_research_verification.py',
+    'tests/integration/test_ra04_local_demonstration.py',
 })
 SHARDS = ('w2', 'remaining')
 REQUIRED_JOBS = frozenset({'collection', *SHARDS})
