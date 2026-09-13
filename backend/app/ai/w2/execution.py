@@ -5,6 +5,7 @@ Only the bounded W1 projection enters the child. The controller and all SQL,
 call core, registry, journal and witness state remain in the parent.
 """
 from dataclasses import asdict
+from hashlib import sha256
 from pathlib import Path
 import shutil
 import tempfile
@@ -77,8 +78,17 @@ def child_outcome(raw, runtime):
         tuple(display), doc['refusal_code'])
 
 
+def _analysis_identity(runtime, completion, outcome):
+    # Parent-only, volatile provenance, never a provider/accounting receipt.
+    # The child cannot import this module or write the parent's runtime object.
+    return ('ra-w3-origin/1', runtime.key.encode(), runtime.run.encode(),
+            runtime.permit.encode(), completion.encode(),
+            sha256(b'ra-w3-origin-analysis/1\n' + canonical(asdict(outcome))).digest())
+
+
 def execute_fake(runtime, response, *, owned_directory=None):
     """Run one already reserved call. No retry or implicit gate reopening."""
+    runtime._analysis_receipt = None
     with tempfile.TemporaryDirectory(prefix='w2-call-', dir=owned_directory) as temporary:
         sandbox = child_projection(Path(temporary)/'isolated', runtime, response)
         server = CallServer(sandbox.call_socket/'endpoint', runtime).start()
@@ -89,4 +99,7 @@ def execute_fake(runtime, response, *, owned_directory=None):
                 result = ProposalOutcome('AUDIT_UNAVAILABLE', 'unknown', Usage())
         finally:
             server.close()
-        return runtime.complete_v1(result)
+        completion, outcome = runtime.complete_v1(result)
+        if completion.display_state == 'ELIGIBLE_NOW' and outcome.code is None:
+            runtime._analysis_receipt = _analysis_identity(runtime, completion, outcome)
+        return completion, outcome
