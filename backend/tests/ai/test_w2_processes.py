@@ -118,6 +118,11 @@ class CoordinatorEvidenceServer:
             observation = decode('Observation', canonical(arguments['event']))
             assert read.scope == rt.key.scope and observation.key_digest == rt.key.fingerprint()
             return authority.observe_v1(read, observation).document()
+        if action == 'proves_final':
+            assert set(arguments) == {'event'}
+            observation = decode('Observation', canonical(arguments['event']))
+            assert observation.key_digest == rt.key.fingerprint()
+            return authority.proves_final(rt.key, observation)
         assert not arguments
         if action == 'ticket':
             self.ticket = authority.begin_acceptance_v1(rt.run, rt.admission, rt.prepared.core.body_digest)
@@ -126,6 +131,8 @@ class CoordinatorEvidenceServer:
             return [e.document() for e in authority.events(rt.key)]
         if action == 'coverage':
             return authority.coverage()
+        if action == 'proves_zero':
+            return authority.proves_zero(rt.key)
         if action == 'accepted':
             return authority.witness.accepted[rt.key.fingerprint()]
         if action == 'closed':

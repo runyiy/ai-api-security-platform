@@ -493,11 +493,9 @@ class BudgetStore:
                     conflict_found = blocked = True
                     continue
                 if event.kind == 'ZERO_PROVEN':
-                    require(observer.calls.get(key.fingerprint(), {}).get('closed') is True
-                            and observer.witness.accepted[key.fingerprint()] == 0, 'OBSERVER_UNAVAILABLE')
+                    require(observer.proves_zero(key), 'OBSERVER_UNAVAILABLE')
                 else:
-                    require(observer.witness.accepted[key.fingerprint()] == 1
-                            and event.terminal in ('COMPLETED', 'INCOMPLETE', 'FAILED', 'CANCELLED'), 'OBSERVER_UNAVAILABLE')
+                    require(observer.proves_final(key, event), 'OBSERVER_UNAVAILABLE')
                 if event.usage.state != 'known':
                     self._retain(db, key, row, balances, event)
                     self._pause(db, key, row, balances)

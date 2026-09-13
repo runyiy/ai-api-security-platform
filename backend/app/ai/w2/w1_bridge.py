@@ -112,7 +112,7 @@ class CallRuntime:
         self.hook(stage)
         self.deadline.check()
         if stage in ('after_send', 'before_consume', 'before_return', 'final_return', 'complete'):
-            require(self.observer.available and self.observer.coverage() and self.observer.witness.accepted[self.key.fingerprint()] == 1,
+            require(self.observer.available and self.observer.coverage() and self.observer.proves_response(self.key),
                     'OBSERVER_UNAVAILABLE')
         view = self.preparation.requalify(self.prepared, self.deadline, token=self.guard_token)
         with self.store.transaction(self.deadline) as db:
