@@ -211,7 +211,10 @@ def test_t9_same_observer_id_conflicting_durable_contents_pause(w2):
     rt=accepted(w2);rt.reconcile()
     original=next(e for e in w2.authority.events(rt.key) if e.kind=='FINAL_USAGE')
     event=w2.authority.late_usage(rt.key,Usage('known',1000,100,0,0,0,1100),event_id=original.event_id)
-    assert w2.authority.coverage() and event.event_id==original.event_id
+    assert event.kind=='CONFLICT'
+    assert w2.authority.coverage() and event.event_id!=original.event_id
+    assert event.evidence_digest==original.fingerprint()
+    assert w2.authority.observations[original.event_id]==original
     with pytest.raises(PortError,match='CONFLICT'):w2.store.reconcile_v1(rt.run,rt.key,[event.event_id],w2.authority)
     assert all(b['settled_tokens']==2432 and b['held_tokens']==5120 and b['state']=='PAUSED_UNKNOWN' for b in balances(rt.key))
     with SessionLocal() as db:assert db.scalar(select(t.conflict.c.reason))=='EVENT_CONFLICT'

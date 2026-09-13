@@ -184,7 +184,7 @@ AI 接收 typed data 并返回建议，不拥有 executor、shell、任意 fetch
 
 ### RA-05 — 有硬预算约束的真实 AI 辅助
 
-[W1 fake-only 实现](research-ai-provider-implementation.md)、[B1–B8 采纳](research-ai-budget-contract.md#w2-design-adoption-record)、[具体 W2 契约](research-ai-w2-implementation-contract.md)和 [N1 运行时验收](research-ai-w2-runtime-validation.md)分别记录设计、实现与证据。运行时前提已集成；后续 W2 fake-only 本地实现及 T1–T12、X1–X8、Y1–Y5（含 Y3 两种历史）证据已纳入同一运行时记录，待独立审查。尚未 push、PR 或进行新 CI；真实 provider、W3/cache 和 RA-06 不由这些合成结果获准。
+[W1 fake-only 实现](research-ai-provider-implementation.md)、[B1–B8 采纳](research-ai-budget-contract.md#w2-design-adoption-record)、[具体 W2 契约](research-ai-w2-implementation-contract.md)和 [N1 运行时验收](research-ai-w2-runtime-validation.md)分别记录设计、实现与证据。运行时前提已集成；后续 W2 fake-only 本地实现及 T1–T12、X1–X8、Y1–Y5（含 Y3 两种历史）证据已纳入同一运行时记录。独立审查指出的核销不确定性、observer ID 覆盖和 SQL 事务所属进程崩溃覆盖问题，已进入同一记录的修复候选，仍待独立审查。尚未 push、PR 或进行新 CI；真实 provider、W3/cache 和 RA-06 不由这些合成结果获准。
 
 - **用户操作与进入条件：** RA-04 的适用阶段验收、有效工作范围，以及 AI proposal/provider-egress ADR 获批。操作者可显式启用一个 provider，处理合资格且有上限的建议任务，查看带引用的建议、拒绝判断和实际用量。真实调用验证还需要凭据、数据资格及获批费用上限。
 - **包含与排除：** 一个真实 provider adapter、一项模型选择策略，在该任务中依据届时官方文档选择；不静默更换 provider 或 fallback。先用已审查规则，再做受限检索，仅在解释或提议仍无法确定时升级至模型。类型化输出包含证据引用、不确定性和拒绝判断。AI 不能执行、批准、确认 Finding、访问凭据、获取任意 URL、使用 shell 工具或修改策略。

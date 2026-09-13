@@ -1,12 +1,13 @@
 """Atomic dual-scope reservations and conservative, append-only settlement."""
 from contextlib import contextmanager
 from hashlib import sha256
+from time import monotonic
 from uuid import uuid4
 
 from sqlalchemy import select, insert, update, func, text, and_
 from sqlalchemy.exc import IntegrityError
 from app.ai.proposals.bindings import RATE_CARD, USAGE_MAPPING
-from app.ai.proposals.codec import canonical
+from app.ai.proposals.codec import canonical, bounded_json
 from . import schema as t
 from .records import make, decode, require, PortError, MAX_N, stamp, utc, _scalar
 
@@ -136,10 +137,45 @@ class BudgetStore:
         return eid
 
     def _pause(self, db, key, row, balances, *, state='IN_DOUBT'):
-        db.execute(update(t.reservation).where(t.reservation.c.key_digest == key.fingerprint()).values(state=state))
+        # The locked dictionaries are the transaction's working projections.
+        # Updating SQL alone lets a later event overwrite the pause with stale
+        # ACTIVE/SETTLED values. Cleanup must never downgrade a conflict either.
+        row['state'] = 'CONFLICT' if row['state'] == 'CONFLICT' else state
+        db.execute(update(t.reservation).where(t.reservation.c.key_digest == key.fingerprint()).values(state=row['state']))
         for balance, _ in balances:
+            balance['state'] = 'CANCELLED' if balance['state'] == 'CANCELLED' else 'PAUSED_UNKNOWN'
             db.execute(update(t.balance).where(t.balance.c.balance_id == balance['balance_id']).values(
-                state='CANCELLED' if balance['state'] == 'CANCELLED' else 'PAUSED_UNKNOWN'))
+                state=balance['state']))
+
+    def _retain(self, db, key, row, balances, incoming=None):
+        receipt = decode('Reservation', bytes(row['receipt']))
+        held = [max(row['held_tokens'], receipt.reserved_tokens),
+                max(row['held_microusd'], receipt.reserved_microusd)]
+        if incoming is not None and incoming.usage.state == 'known':
+            try:
+                tokens, cost = actual(incoming.usage)
+                held = [max(held[0], tokens-row['actual_tokens']),
+                        max(held[1], cost-row['actual_microusd'])]
+            except PortError:
+                # Exact counts remain immutable evidence. Unrepresentable cost
+                # is a coverage failure, never a truncated final amount.
+                pass
+        for index, dimension in enumerate(('tokens', 'microusd')):
+            field = 'held_'+dimension
+            if any(b[field]+held[index]-row[field] > MAX_N for b, _ in balances):
+                # Retain the representable original reserve where possible;
+                # the frozen scope and evidence carry the unbounded remainder.
+                original = max(row[field], receipt['reserved_'+dimension])
+                held[index] = original if all(b[field]+original-row[field] <= MAX_N for b, _ in balances) else row[field]
+        for balance, _ in balances:
+            for dimension, amount in zip(('tokens', 'microusd'), held):
+                field = 'held_'+dimension
+                balance[field] += amount-row[field]
+            db.execute(update(t.balance).where(t.balance.c.balance_id == balance['balance_id']).values(
+                held_tokens=balance['held_tokens'], held_microusd=balance['held_microusd']))
+        row.update(held_tokens=held[0], held_microusd=held[1])
+        db.execute(update(t.reservation).where(t.reservation.c.key_digest == key.fingerprint()).values(
+            held_tokens=held[0], held_microusd=held[1]))
 
     def reserve_v1(self, run, key, prepared, deadline):
         require(prepared.key == key and run.scope == key.scope and run.call_ref == key.call_ref
@@ -250,8 +286,8 @@ class BudgetStore:
         with self.transaction() as db:
             balances = self._balances(db, key.scope)
             row, _ = self._call(db, key, ctx)
-            if row['state'] != 'SETTLED':
-                self._pause(db, key, row, balances)
+            self._retain(db, key, row, balances)
+            self._pause(db, key, row, balances)
 
     def terminal_projection(self,ctx,key,terminal,usage):
         require(terminal in ('NONE','COMPLETED','INCOMPLETE','FAILED','CANCELLED','UNKNOWN'))
@@ -277,34 +313,77 @@ class BudgetStore:
                 existing_digest=existing, incoming_digest=incoming, reason=reason))
             self._event(db, row, 'CONFLICT', dict(existing_digest=existing, incoming_digest=incoming, reason=reason,
                 incoming=incoming_record.document() if incoming_record is not None else None), cid, recovery=True)
-        receipt = decode('Reservation', bytes(row['receipt']))
-        held = max(row['held_tokens'], receipt.reserved_tokens), max(row['held_microusd'], receipt.reserved_microusd)
-        if incoming_record is not None and incoming_record.usage.state=='known':
-            try:
-                tokens,cost=actual(incoming_record.usage)
-                held=max(held[0],tokens-row['actual_tokens']),max(held[1],cost-row['actual_microusd'])
-            except PortError:
-                # Exact unrepresentable counts are retained in the conflict
-                # event. Freeze rather than truncating them into a fake final.
-                self._pause(db,key,row,balances,state='CONFLICT')
-                return
-        if any(max(b['held_tokens']+held[0]-row['held_tokens'],b['held_microusd']+held[1]-row['held_microusd'])>MAX_N for b,_ in balances):
-            self._pause(db,key,row,balances,state='CONFLICT')
-            return
-        for balance, _ in balances:
-            tokens = balance['held_tokens']+held[0]-row['held_tokens']
-            cost = balance['held_microusd']+held[1]-row['held_microusd']
-            require(max(tokens, cost) <= MAX_N, 'LIMIT_EXCEEDED')
-            db.execute(update(t.balance).where(t.balance.c.balance_id == balance['balance_id']).values(held_tokens=tokens, held_microusd=cost))
-        db.execute(update(t.reservation).where(t.reservation.c.key_digest == key.fingerprint()).values(
-                   held_tokens=held[0], held_microusd=held[1]))
+        self._retain(db, key, row, balances, incoming_record)
         self._pause(db, key, row, balances, state='CONFLICT')
+
+    def evidence_prefix(self, db, key, events):
+        """Only an immutable S9 receipt can retire a contradictory prefix."""
+        raw = db.scalar(select(t.event.c.record).where(t.event.c.key_digest == key.fingerprint(),
+            t.event.c.kind == 'RECOVERY_RESOLVED').order_by(t.event.c.sequence.desc()).limit(1))
+        if raw is None:
+            return 0
+        record = bounded_json(bytes(raw), maximum=4096, depth=4, nodes=64)
+        require(set(record) == {'format', 'decision_id', 'settlement_id', 'final_event_id',
+            'observation_count', 'observation_digest'} and record['format'] == 'ra-w2-recovery-resolution/1', 'CONFLICT')
+        count = record['observation_count']
+        require(type(count) is int and 1 <= count <= len(events) <= 64
+            and sha256(canonical([e.document() for e in events[:count]])).hexdigest() == record['observation_digest'], 'CONFLICT')
+        decision = db.execute(select(t.recovery).where(t.recovery.c.decision_id == record['decision_id'],
+            t.recovery.c.key_digest == key.fingerprint())).mappings().one_or_none()
+        settled = db.execute(select(t.settlement).where(t.settlement.c.settlement_id == record['settlement_id'],
+            t.settlement.c.key_digest == key.fingerprint())).mappings().one_or_none()
+        require(decision is not None and settled is not None and settled['final_event_id'] == record['final_event_id']
+            and any(e.event_id == record['final_event_id'] for e in events[:count]), 'CONFLICT')
+        context = decode('RecoveryContext', bytes(decision['record']))
+        require(context.key == key and context.owner_generation == decision['owner_generation'], 'CONFLICT')
+        final = decode('Settlement', bytes(settled['record']))
+        chosen = next(e for e in events[:count] if e.event_id == record['final_event_id'])
+        require(chosen.kind in ('FINAL_USAGE', 'ZERO_PROVEN') and chosen.usage.state == 'known'
+            and actual(chosen.usage) == (final.settled_tokens, final.settled_microusd)
+            and final.key_digest == key.fingerprint() and final.final_event_id == chosen.event_id
+            and final.settlement_id == settled['settlement_id'] and final.revision == settled['revision'], 'CONFLICT')
+        latest = db.scalar(select(t.settlement.c.settlement_id).where(t.settlement.c.key_digest == key.fingerprint())
+            .order_by(t.settlement.c.revision.desc()).limit(1))
+        require(latest == settled['settlement_id'], 'CONFLICT')
+        postings = list(db.execute(select(t.posting).where(t.posting.c.settlement_id == settled['settlement_id'])).mappings())
+        require(len(postings) == 4 and {(p['scope_kind'], p['dimension']) for p in postings}
+            == {(kind, dimension) for kind in ('account', 'task') for dimension in ('tokens', 'microusd')}
+            and all(p['balance_id'] == balance_id(key.scope, p['scope_kind']) for p in postings), 'CONFLICT')
+        return count
+
+    def unresolved_conflict(self, db, key):
+        latest = db.scalar(select(func.max(t.event.c.sequence)).where(t.event.c.key_digest == key.fingerprint(),
+            t.event.c.kind == 'RECOVERY_RESOLVED')) or 0
+        return bool(db.scalar(select(func.count()).select_from(t.event).where(t.event.c.key_digest == key.fingerprint(),
+            t.event.c.kind == 'CONFLICT', t.event.c.sequence > latest)))
+
+    def evidence_hazards(self, events, prefix=0, known=None):
+        """Scan the bounded producer inventory, independent of selected copies."""
+        hazards = []
+        for event in events[prefix:]:
+            if event.kind in ('CONFLICT', 'COVERAGE_GAP'):
+                hazards.append(('EVENT_CONFLICT' if event.kind == 'CONFLICT' else 'COVERAGE_GAP', event))
+            elif event.kind == 'FINAL_USAGE':
+                if event.usage.state != 'known':
+                    hazards.append(('USAGE_UNKNOWN', event))
+                else:
+                    try:
+                        value = actual(event.usage)
+                    except PortError:
+                        hazards.append(('USAGE_OVERFLOW', event))
+                        continue
+                    if known is not None and known != value:
+                        hazards.append(('FINAL_CONFLICT', event))
+                    known = value
+        return hazards
 
     def reconcile_v1(self, ctx, key, observation_ids, observer, *, recovery_decision=None):
         require(type(observation_ids) in (list, tuple) and 1 <= len(observation_ids) <= 8
                 and len(set(observation_ids)) == len(observation_ids), 'LIMIT_EXCEEDED')
         # Fetch from the independent producer, never trust callback-supplied usage.
-        events = {e.event_id: e for e in observer.events(key)}
+        inventory = tuple(observer.events(key))
+        require(len(inventory) <= 64 and len({e.event_id for e in inventory}) == len(inventory), 'OBSERVER_UNAVAILABLE')
+        events = {e.event_id: e for e in inventory}
         require(all(i in events for i in observation_ids), 'OBSERVER_UNAVAILABLE')
         selected = [decode('Observation', events[i].encode()) for i in observation_ids]
         read=ctx.read if ctx._name=='RecoveryContext' else make('ReadContext',scope=ctx.scope,
@@ -313,10 +392,18 @@ class BudgetStore:
         # Producer acknowledgement is obtained before SQL locks. Its durable
         # journal projection must match each supplied event, not just an in-
         # memory callback value or agreement between two SQL ledgers.
-        for event in selected:
-            ack=observer.observe_v1(read,event,3)
-            require((ack.event_id,ack.sequence,ack.event_digest)==(event.event_id,event.sequence,event.fingerprint()),
-                    'OBSERVER_UNAVAILABLE')
+        observe_until = monotonic()+3
+        try:
+            for event in inventory:
+                ack=observer.observe_v1(read,event,max(0, observe_until-monotonic()))
+                require((ack.event_id,ack.sequence,ack.event_digest)==(event.event_id,event.sequence,event.fingerprint()),
+                        'OBSERVER_UNAVAILABLE')
+        except PortError:
+            self.mark_unknown(ctx, key)
+            raise
+        if tuple(observer.events(key)) != inventory:
+            self.mark_unknown(ctx, key)
+            raise PortError('OBSERVER_UNAVAILABLE', key.fingerprint())
         conflict_found = False
         result = None
         with self.transaction() as db:
@@ -327,10 +414,52 @@ class BudgetStore:
                 decision = db.execute(select(t.recovery).where(t.recovery.c.decision_id == ctx.recovery_decision_id)).mappings().one_or_none()
                 require(decision is not None and decision['key_digest'] == key.fingerprint()
                         and decision['owner_generation'] == ctx.owner_generation, 'OWNER_LOST')
+            prefix = self.evidence_prefix(db, key, inventory)
+            retired = {e.event_id for e in inventory[:prefix]}
+            hazards = self.evidence_hazards(inventory, prefix,
+                (row['actual_tokens'], row['actual_microusd']) if row['revision'] else None)
+            hard_conflict = (row['state'] == 'CONFLICT' or self.unresolved_conflict(db, key)
+                or any(reason != 'USAGE_UNKNOWN' for reason, _ in hazards))
+            resolving = (is_recovery and (bool(hazards) or hard_conflict or row['state'] != 'SETTLED')
+                and (not hard_conflict or recovery_decision == ctx.recovery_decision_id))
+            if resolving:
+                # One decision chooses one exact final and inventory prefix.
+                # It cannot authorize subsequently arriving contradictions.
+                used = list(db.scalars(select(t.event.c.record).where(t.event.c.key_digest == key.fingerprint(),
+                    t.event.c.kind == 'RECOVERY_RESOLVED')))
+                resolving = not any(bounded_json(bytes(raw), maximum=4096, depth=4, nodes=64)['decision_id']
+                    == ctx.recovery_decision_id for raw in used)
+            for reason, incoming in hazards:
+                if reason == 'USAGE_UNKNOWN':
+                    if not resolving:
+                        self._retain(db, key, row, balances, incoming)
+                        self._pause(db, key, row, balances)
+                else:
+                    self._conflict(db, key, row, balances, incoming.evidence_digest,
+                        incoming.fingerprint(), reason, incoming)
+                    conflict_found = not resolving
+            blocked = (bool(hazards) or hard_conflict) and not resolving
+            if blocked:
+                # Every known lower bound matters, including an earlier larger
+                # final whose later contradictory receipt is smaller.
+                for incoming in inventory[prefix:]:
+                    if incoming.kind in ('FINAL_USAGE', 'CONFLICT'):
+                        self._retain(db, key, row, balances, incoming)
+                self._pause(db, key, row, balances, state='CONFLICT' if hard_conflict else 'IN_DOUBT')
+            conflict_found |= row['state'] == 'CONFLICT' and not resolving
+            if resolving:
+                require(sum(e.kind in ('FINAL_USAGE', 'ZERO_PROVEN') for e in selected) <= 1, 'CONFLICT')
             for event in selected:
                 require(event.key_digest == key.fingerprint() and event.call_ref == key.call_ref
                         and event.body_digest == core.body_digest, 'CONFLICT')
                 require(is_recovery or event.owner_generation == ctx.owner_generation, 'OWNER_LOST')
+                if event.event_id in retired and not resolving:
+                    continue
+                ledger = db.execute(select(t.event).where(t.event.c.event_id == event.event_id)).mappings().one_or_none()
+                if ledger is not None and (ledger['key_digest'] != key.fingerprint() or bytes(ledger['record']) != event.encode()):
+                    self._conflict(db, key, row, balances, ledger['digest'], event.fingerprint(), 'EVENT_CONFLICT', event)
+                    conflict_found = blocked = True
+                    continue
                 prior = db.execute(select(t.observation_copy).where(
                     (t.observation_copy.c.event_id == event.event_id) |
                     and_(t.observation_copy.c.observer_epoch == event.observer_epoch,
@@ -339,12 +468,15 @@ class BudgetStore:
                     if bytes(prior['record']) != event.encode():
                         self._conflict(db, key, row, balances, prior['digest'], event.fingerprint(), 'EVENT_CONFLICT',event)
                         conflict_found = True
-                        break
+                        blocked = True
+                        continue
                 else:
                     if row['event_count'] >= 64:
-                        self._pause(db, key, row, balances)
+                        self._retain(db, key, row, balances, event)
+                        self._pause(db, key, row, balances, state='CONFLICT')
                         conflict_found = True
-                        break
+                        blocked = True
+                        continue
                     db.execute(insert(t.observation_copy).values(event_id=event.event_id, key_digest=key.fingerprint(),
                         observer_epoch=event.observer_epoch, sequence=event.sequence, digest=event.fingerprint(), record=event.encode()))
                     self._event(db, row, event.kind, event, event.event_id, recovery=True)
@@ -353,8 +485,12 @@ class BudgetStore:
                     db.execute(update(t.reservation).where(t.reservation.c.key_digest == key.fingerprint()).values(closed=True))
                 if event.kind not in ('FINAL_USAGE', 'ZERO_PROVEN'):
                     continue
-                if not observer.coverage():
-                    self._pause(db, key, row, balances)
+                if blocked:
+                    continue
+                if not observer.coverage() or tuple(observer.events(key)) != inventory:
+                    self._conflict(db, key, row, balances, event.evidence_digest,
+                        event.fingerprint(), 'COVERAGE_GAP', event)
+                    conflict_found = blocked = True
                     continue
                 if event.kind == 'ZERO_PROVEN':
                     require(observer.calls.get(key.fingerprint(), {}).get('closed') is True
@@ -363,12 +499,14 @@ class BudgetStore:
                     require(observer.witness.accepted[key.fingerprint()] == 1
                             and event.terminal in ('COMPLETED', 'INCOMPLETE', 'FAILED', 'CANCELLED'), 'OBSERVER_UNAVAILABLE')
                 if event.usage.state != 'known':
+                    self._retain(db, key, row, balances, event)
                     self._pause(db, key, row, balances)
                     continue
                 try:
                     tokens, cost = actual(event.usage)
                 except PortError:
-                    self._pause(db, key, row, balances)
+                    self._conflict(db, key, row, balances, event.evidence_digest,
+                        event.fingerprint(), 'USAGE_OVERFLOW', event)
                     # Preserve the original bounded counts in the immutable copy.
                     conflict_found = True
                     continue
@@ -376,23 +514,27 @@ class BudgetStore:
                     .order_by(t.settlement.c.revision.desc()).limit(1)).mappings().one_or_none()
                 if prior_settlement:
                     previous = decode('Settlement', bytes(prior_settlement['record']))
-                    if (tokens, cost) == (row['actual_tokens'], row['actual_microusd']) and row['state'] != 'CONFLICT':
+                    if ((tokens, cost) == (row['actual_tokens'], row['actual_microusd'])
+                            and row['state'] == 'SETTLED' and not resolving):
                         result = previous
                         continue
-                    if not is_recovery or recovery_decision != ctx.recovery_decision_id:
+                    if not resolving:
                         self._conflict(db, key, row, balances, previous.accounting_digest, event.fingerprint(), 'FINAL_CONFLICT',event)
                         conflict_found = True
-                        break
-                elif row['state'] == 'CONFLICT' and (not is_recovery or recovery_decision != ctx.recovery_decision_id):
+                        blocked = True
+                        continue
+                elif row['state'] == 'CONFLICT' and not resolving:
                     conflict_found = True
-                    break
+                    continue
                 held_t, held_c = row['held_tokens'], row['held_microusd']
                 delta_t, delta_c = tokens-row['actual_tokens'], cost-row['actual_microusd']
                 if any(not (0 <= b['settled_tokens']+delta_t <= MAX_N and 0 <= b['settled_microusd']+delta_c <= MAX_N)
                        for b, _ in balances):
-                    self._pause(db, key, row, balances)
+                    self._conflict(db, key, row, balances, event.evidence_digest,
+                        event.fingerprint(), 'BALANCE_OVERFLOW', event)
                     conflict_found = True
-                    break
+                    blocked = True
+                    continue
                 revision = row['revision']+1
                 sid = uuid4().hex
                 totals = dict(key_digest=key.fingerprint(), final_event_id=event.event_id, revision=revision,
@@ -421,14 +563,23 @@ class BudgetStore:
                 row.update(state='SETTLED', actual_tokens=tokens, actual_microusd=cost, held_tokens=0, held_microusd=0, revision=revision)
                 db.execute(update(t.reservation).where(t.reservation.c.key_digest == key.fingerprint()).values(**{k: row[k] for k in
                     ('state', 'actual_tokens', 'actual_microusd', 'held_tokens', 'held_microusd', 'revision')}))
+                if resolving:
+                    self._event(db, row, 'RECOVERY_RESOLVED', dict(format='ra-w2-recovery-resolution/1',
+                        decision_id=ctx.recovery_decision_id, settlement_id=sid, final_event_id=event.event_id,
+                        observation_count=len(inventory),
+                        observation_digest=sha256(canonical([e.document() for e in inventory])).hexdigest()), recovery=True)
+                    retired.update(e.event_id for e in inventory)
+                    resolving = False
                 self.hook('before_settlement_commit')
             if result is None and not conflict_found and row['state'] != 'SETTLED':
                 self._pause(db, key, row, balances)
         if conflict_found:
             raise PortError('CONFLICT', key.fingerprint())
-        if result is None:
-            return self.current_settlement(key)
-        return result
+        if tuple(observer.events(key)) != inventory or not observer.coverage():
+            self.mark_unknown(ctx, key)
+        # Re-read the committed disposition: a later event in the batch can
+        # invalidate a previously constructed result without undoing its S.
+        return self.current_settlement(key)
 
     def current_settlement(self, key):
         with self.transaction() as db:

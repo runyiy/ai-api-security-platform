@@ -72,12 +72,14 @@ class Recovery:
                         final=decode('Settlement',bytes(settlements[-1]['record']))
                         if (final.settled_tokens,final.settled_microusd)!=(row['actual_tokens'],row['actual_microusd']):mismatch=True
                 unresolved=row['state']!='SETTLED'
-                finals=[e for e in self.authority.events(key) if e.kind=='FINAL_USAGE']
-                if finals and finals[-1].usage.state=='known':
-                    from .accounting import actual
-                    try:
-                        unresolved |= actual(finals[-1].usage)!=(row['actual_tokens'],row['actual_microusd'])
-                    except PortError:unresolved=True
+                events = self.authority.events(key)
+                try:
+                    prefix = self.store.evidence_prefix(db, key, events)
+                    unresolved |= bool(self.store.evidence_hazards(events, prefix,
+                        (row['actual_tokens'], row['actual_microusd'])))
+                    unresolved |= self.store.unresolved_conflict(db, key)
+                except PortError:
+                    mismatch = unresolved = True
                 for field in ('account_balance','task_balance'):
                     bid=row[field]
                     require(bid in totals,'CONFLICT')
@@ -108,6 +110,11 @@ class Recovery:
         record=dict(format='ra-w2-budget-resume/1',scope=read.scope.document(),decision_id=decision_id,kinds=list(kinds))
         digest=sha256(canonical(record)).hexdigest()
         with self.writer.mutation('RECOVERY',decision_id,digest,deadline) as operation:
+            # A restored SETTLED projection is insufficient. Compare all
+            # independent observations and exact correction provenance first.
+            # Inventory commits pauses even if the following resume is denied.
+            rows = self._inventory(deadline)
+            require(self.authority.coverage(), 'OBSERVER_UNAVAILABLE')
             with self.store.transaction(deadline) as db:
                 operation.bind(db)
                 balances=self.store._balances(db,read.scope)
@@ -122,6 +129,15 @@ class Recovery:
                         and policy['valid_from']<=deadline.check()<policy['expires_at'],'RESERVATION_UNAVAILABLE')
                     require(db.scalar(select(func.count()).select_from(t.core.join(t.reservation))
                         .where(column==b['balance_id'],t.reservation.c.state!='SETTLED'))==0,'COMMIT_UNKNOWN')
+                    for row in rows:
+                        if row[policy['scope_kind']+'_balance'] != b['balance_id']:continue
+                        key = decode('ReservationKey', bytes(row['key_bytes']))
+                        current, _ = self.store._call(db, key)
+                        events = self.authority.events(key)
+                        prefix = self.store.evidence_prefix(db, key, events)
+                        require(not self.store.evidence_hazards(events, prefix,
+                            (current['actual_tokens'], current['actual_microusd']))
+                            and not self.store.unresolved_conflict(db, key), 'COMMIT_UNKNOWN')
                     require(db.scalar(select(func.count()).select_from(t.core.join(t.admission))
                         .where(column==b['balance_id'],~t.admission.c.closed))==0,'COMMIT_UNKNOWN')
                     db.execute(update(t.balance).where(t.balance.c.balance_id==b['balance_id']).values(state='ACTIVE'))

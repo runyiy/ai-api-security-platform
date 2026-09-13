@@ -153,6 +153,11 @@ class FakeAuthority:
                 self.permits[permit.permit_id]=dict(record=permit,consumed=False,revoked=True)
             elif payload.get('format') == 'ra-w2-observation/1':
                 event = decode('Observation', canonical(payload))
+                # Histories written by an older producer may contain an ID
+                # twice. Do not reconstruct such a history by choosing either
+                # value; retain the journal and fail closed for investigation.
+                require(event.event_id not in self.observations
+                        and event.sequence == row['sequence'], 'OBSERVER_UNAVAILABLE')
                 self.observations[event.event_id] = event
                 call = self.calls.get(event.key_digest)
                 require(call is not None, 'OBSERVER_UNAVAILABLE')
@@ -190,8 +195,14 @@ class FakeAuthority:
         if (count, self.journal.head) != (self.witness.head_sequence, self.witness.head_digest):
             return False
         observed = {e.event_id for e in self.observations.values() if e.kind == 'WRITE_ACCEPTED'}
-        logged={r['payload']['event_id']:r['payload'] for r in self.journal.entries
-                if r['payload'].get('format')=='ra-w2-observation/1'}
+        logged = {}
+        for row in self.journal.entries:
+            payload = row['payload']
+            if payload.get('format') != 'ra-w2-observation/1':
+                continue
+            if payload['event_id'] in logged or payload['sequence'] != row['sequence']:
+                return False
+            logged[payload['event_id']] = payload
         return (observed == self.witness.acceptance_ids and set(logged)==set(self.observations)
                 and all(e.document()==logged[e.event_id] for e in self.observations.values()))
 
@@ -331,14 +342,55 @@ class FakeAuthority:
             self._event(call, permit, 'PERMIT_ISSUED')
             return permit
 
-    def _event(self, call, permit, kind, usage=None, terminal='NONE', *, event_id=None):
-        require(call['events'] < (64 if kind in ('STREAM_CLOSED', 'ZERO_PROVEN', 'CONFLICT', 'COVERAGE_GAP') else 56), 'LIMIT_EXCEEDED')
-        event = make('Observation', key_digest=call['key'].fingerprint(), call_ref=call['key'].call_ref,
+    def _event(self, call, permit, kind, usage=None, terminal='NONE', *, event_id=None,
+               conflict_as_observation=False):
+        contents = dict(key_digest=call['key'].fingerprint(), call_ref=call['key'].call_ref,
+            owner_generation=call['owner'], kind=kind, permit_id=permit.permit_id if permit else None,
+            body_digest=call['body_digest'], terminal=terminal, usage=usage or usage_view(Usage()))
+        original = self.observations.get(event_id) if event_id is not None else None
+        if original is not None:
+            # The producer owns the observation envelope (sequence, epochs and
+            # time). Redelivery carries only these bound semantic contents and
+            # must return the original envelope, even following a restart.
+            if all(original[field] == value for field, value in contents.items()):
+                return original
+            self.state = 'RECOVERY_REQUIRED'
+            conflict_contents = {**contents, 'kind': 'CONFLICT'}
+            # Conflicts get their own immutable identity. The evidence digest
+            # links the attempted reuse to the complete original observation,
+            # while the incoming usage/terminal/binding remain visible. A
+            # repeated contradiction consumes no additional event capacity.
+            conflict = next((event for event in self.observations.values()
+                    if event.kind == 'CONFLICT' and event.evidence_digest == original.fingerprint()
+                    and all(event[field] == value for field, value in conflict_contents.items())
+                    ), None)
+            if conflict is None:
+                conflict = self._append_observation(call, conflict_contents, evidence_digest=original.fingerprint())
+            if conflict_as_observation:
+                return conflict
+            raise PortError('CONFLICT', contents['key_digest'])
+        if (kind == 'FINAL_USAGE' and self.state == 'OPEN'
+                and any(event.kind == 'FINAL_USAGE' and event.key_digest == contents['key_digest']
+                    and (event.usage, event.terminal) != (contents['usage'], contents['terminal'])
+                    for event in self.observations.values())):
+            # Late evidence can invalidate a previously settled call before
+            # SQL copies it. Close acceptance under A immediately, including
+            # a genuinely new event ID, so stale balances admit no new send.
+            self.state = 'RECOVERY_REQUIRED'
+        return self._append_observation(call, contents, event_id=event_id)
+
+    def _append_observation(self, call, contents, *, event_id=None, evidence_digest=None):
+        kind = contents['kind']
+        limit = 64 if kind in ('STREAM_CLOSED', 'ZERO_PROVEN', 'CONFLICT', 'COVERAGE_GAP') else 56
+        if call['events'] >= limit:
+            if self.state == 'OPEN':
+                self.state = 'RECOVERY_REQUIRED'
+            raise PortError('LIMIT_EXCEEDED', contents['key_digest'])
+        event = make('Observation', **contents,
             event_id=event_id or uuid4().hex, observer_epoch=self.observer_epoch, authority_epoch=self.epoch,
             acceptance_generation=self.generation, sequence=len(self.journal.entries)+1,
-            owner_generation=call['owner'], kind=kind, permit_id=permit.permit_id if permit else None,
-            body_digest=call['body_digest'], observed_at=stamp(self.now()), terminal=terminal,
-            usage=usage or usage_view(Usage()), evidence_digest=self.journal.head)
+            observed_at=stamp(self.now()), evidence_digest=evidence_digest or self.journal.head)
+        require(event.event_id not in self.observations, 'CONFLICT')
         self._append(event)
         self.observations[event.event_id] = event
         call['events'] += 1
@@ -401,7 +453,11 @@ class FakeAuthority:
             require(self.coverage() and self.witness.accepted[key.fingerprint()] == 1, 'OBSERVER_UNAVAILABLE')
             call = self.calls[key.fingerprint()]
             permit = next(v['record'] for v in self.permits.values() if v['record'].key == key)
-            return self._event(call, permit, 'FINAL_USAGE', usage_view(usage), terminal,event_id=event_id)
+            # This parent fixture returns the durable evidence disposition so
+            # its caller can copy/reconcile a rejected identity as CONFLICT.
+            # It never substitutes the incoming contents for a valid final.
+            return self._event(call, permit, 'FINAL_USAGE', usage_view(usage), terminal,
+                event_id=event_id, conflict_as_observation=True)
 
     def events(self, key):
         return tuple(e for e in self.observations.values() if e.key_digest == key.fingerprint())
