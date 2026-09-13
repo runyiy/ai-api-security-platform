@@ -1,3 +1,4 @@
+from app.ai.w2.lifecycle import writer as w2_lifecycle_writer
 from fastapi import (
     APIRouter,
     Depends,
@@ -26,6 +27,7 @@ router = APIRouter(
     response_model=ScopeRead,
     status_code=status.HTTP_201_CREATED,
 )
+@w2_lifecycle_writer
 def create_scope(
     payload: ScopeCreate,
     db: Session = Depends(get_db),

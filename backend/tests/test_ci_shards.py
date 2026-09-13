@@ -8,20 +8,37 @@ import pytest
 import ci_shards as ci
 
 
+RA04_DEMONSTRATION = 'tests/integration/test_ra04_local_demonstration.py'
+RA04_PARAMETERS = ('zeta', 'alpha')
+
+
 def nodes():
-    return [f'{path}::test_example[case-{i}]' for i, path in enumerate(sorted(ci.W2_FILES))] + [
+    assigned = [f'{path}::test_example[case-{i}]' for i, path in enumerate(sorted(ci.W2_FILES))
+                if path != RA04_DEMONSTRATION]
+    moved = [f'{RA04_DEMONSTRATION}::test_owned[{value}]' for value in RA04_PARAMETERS]
+    remaining = [
         'tests/migrations/test_future.py::test_upgrade',
         'tests/new_directory/test_new.py::test_new[one]',
         'tests/new_directory/test_new.py::test_new[two]',
     ]
+    # Interleave files/shards and use nonalphabetical parameter order: neither
+    # sorted groups nor positional slices establish collection-order retention.
+    return [assigned[0], remaining[0], moved[0], *assigned[1:], remaining[1], moved[1], remaining[2]]
 
 
 def test_every_new_node_and_parameter_is_assigned_in_original_order():
+    assert RA04_DEMONSTRATION in ci.W2_FILES
     full = nodes()
     w2, rest = (ci.partition(full, name) for name in ci.SHARDS)
     summary = ci.verify_collections(full, w2, rest)
-    assert summary['full_count'] == 6 and summary['intersection_count'] == 0
-    assert rest == full[3:] and w2 == full[:3]
+    expected_w2 = [node for node in full if node.split('::', 1)[0] in ci.W2_FILES]
+    expected_rest = [node for node in full if node.split('::', 1)[0] not in ci.W2_FILES]
+    assert summary['full_count'] == len(full) and summary['intersection_count'] == 0
+    assert summary['w2_count'] == len(expected_w2) and summary['remaining_count'] == len(expected_rest)
+    assert rest == expected_rest and w2 == expected_w2
+    moved = [f'{RA04_DEMONSTRATION}::test_owned[{value}]' for value in RA04_PARAMETERS]
+    assert [node for node in w2 if node.split('::', 1)[0] == RA04_DEMONSTRATION] == moved
+    assert set(moved).isdisjoint(rest)
     assert ci.partition(full + ['test_new_root.py::test_added'], 'remaining')[-1] == 'test_new_root.py::test_added'
 
 
@@ -35,7 +52,9 @@ def test_partition_errors_fail_closed(change):
         elif change == 'swapped':w2[0], rest[0] = rest[0], w2[0]
         elif change == 'order':rest.reverse()
         elif change == 'empty':rest.clear()
-        elif change == 'missing_w2':ci.partition(full[1:], 'remaining')
+        elif change == 'missing_w2':
+            missing_file = sorted(ci.W2_FILES)[0]
+            ci.partition([node for node in full if node.split('::', 1)[0] != missing_file], 'remaining')
         elif change == 'unknown':ci.partition(full, 'other')
         ci.verify_collections(full, w2, rest)
 
@@ -84,12 +103,18 @@ def test_actual_collection_handles_added_parameters_and_collection_errors(tmp_pa
     helper = Path(ci.__file__).resolve()
     for path in ci.W2_FILES:
         file = tmp_path / path; file.parent.mkdir(parents=True, exist_ok=True)
-        file.write_text('from pathlib import Path\ndef test_owned(): Path("executed").touch()\n')
+        if path == RA04_DEMONSTRATION:
+            file.write_text('from pathlib import Path\nimport pytest\n'
+                f'@pytest.mark.parametrize("scenario", {list(RA04_PARAMETERS)!r})\n'
+                'def test_owned(scenario): Path("executed").touch()\n')
+        else:
+            file.write_text('from pathlib import Path\ndef test_owned(): Path("executed").touch()\n')
     (tmp_path / 'test_new.py').write_text('raise RuntimeError("owned collection failure")\n' if broken else
         'import pytest\n@pytest.mark.parametrize("n", [1,2])\ndef test_new(n): pass\n')
     # Different paths share basenames in the real suite, whose packages are
     # explicit; mirror that package structure in this independent tiny tree.
-    for directory in ('tests', 'tests/api', 'tests/services'):
+    packages = {parent for path in ci.W2_FILES for parent in Path(path).parents if parent != Path('.')}
+    for directory in packages:
         (tmp_path / directory / '__init__.py').touch()
     output = tmp_path / 'collection.json'
     result = subprocess.run([sys.executable, str(helper), 'check', '--output', str(output)],
@@ -100,8 +125,13 @@ def test_actual_collection_handles_added_parameters_and_collection_errors(tmp_pa
     else:
         assert result.returncode == 0, result.stdout + result.stderr
         data = json.loads(output.read_text())
-        assert data['summary']['full_count'] == 5
-        assert data['summary']['w2_count'] == 3 and data['summary']['remaining_count'] == 2
+        expected_assigned_count = len(ci.W2_FILES)-1+len(RA04_PARAMETERS)
+        assert data['summary']['full_count'] == expected_assigned_count+2
+        assert data['summary']['w2_count'] == expected_assigned_count and data['summary']['remaining_count'] == 2
+        moved = [f'{RA04_DEMONSTRATION}::test_owned[{value}]' for value in RA04_PARAMETERS]
+        assert [node for node in data['nodes']['w2'] if node.split('::', 1)[0] == RA04_DEMONSTRATION] == moved
+        assert set(moved).isdisjoint(data['nodes']['remaining'])
+        assert data['nodes']['w2'] == [node for node in data['nodes']['full'] if node.split('::', 1)[0] in ci.W2_FILES]
         marker = tmp_path / 'executed'
         assert not marker.exists()
         command = [sys.executable, str(helper), 'run', 'w2', '--expected-sha256', data['summary']['full_sha256']]

@@ -31,8 +31,11 @@ Set `FULL_COLLECTION_SHA256` to `summary.full_sha256` in the freshly produced `c
 - `tests/services/test_research_verification.py`
 - `tests/services/test_research_verification_expiry.py`
 - `tests/api/test_research_verification.py`
+- `tests/integration/test_ra04_local_demonstration.py`
 
-The helper preserves collected node IDs, parameter cases and their relative execution order. It changes no fixtures or test bodies. Each run emits its assigned count, exit code, elapsed seconds and pytest's 20 slowest durations. Collection prints counts, zero intersection and the full-list digest; its JSON file also retains all three exact lists. It is diagnostic evidence, never cached execution authority or reused across PR/main runs. The existing 3193 nodes are retained; the added helper tests are reported separately below.
+The User approved moving only the RA04 local demonstration file from `remaining` to `w2` after [PR #155's run 34733408073](https://github.com/runyiy/ai-api-security-platform/actions/runs/34733408073) reached the unchanged 20-minute limit in `remaining`. Every other assignment and all collection, isolation and gate behavior remain unchanged. The current rebalance's collection and execution evidence is in the [W2 runtime validation record](research-ai-w2-runtime-validation.md#approved-ci-shard-rebalance). Measurements below describe the original PR #146 partition.
+
+The helper preserves collected node IDs, parameter cases and their relative execution order. It changes no fixtures or test bodies. Each run emits its assigned count, exit code, elapsed seconds and pytest's 20 slowest durations. Collection prints counts, zero intersection and the full-list digest; its JSON file also retains all three exact lists. It is diagnostic evidence, never cached execution authority or reused across PR/main runs. The original PR #146 retained its existing 3193 nodes; its added helper tests are reported separately below.
 
 ## Local validation and timing
 

@@ -1,3 +1,4 @@
+from app.ai.w2.lifecycle import writer as w2_lifecycle_writer
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -26,6 +27,7 @@ router = APIRouter(
     response_model=TargetRead,
     status_code=status.HTTP_201_CREATED,
 )
+@w2_lifecycle_writer
 def create_target(
     payload: TargetCreate,
     db: Session = Depends(get_db),
@@ -48,6 +50,7 @@ def create_target(
     "/{target_id}/network-mode",
     response_model=TargetRead,
 )
+@w2_lifecycle_writer
 def update_target_network_mode(
     target_id: int,
     payload: TargetNetworkModeUpdate,
@@ -76,6 +79,7 @@ def update_target_network_mode(
     "/{target_id}/authorization-profile",
     response_model=TargetRead,
 )
+@w2_lifecycle_writer
 def update_target_authorization_profile(
     target_id: int,
     payload: TargetAuthorizationProfileUpdate,
@@ -131,6 +135,7 @@ def update_target_authorization_profile(
     "/{target_id}/authorization-revision",
     response_model=TargetRead,
 )
+@w2_lifecycle_writer
 def update_target_authorization_revision(
     target_id: int,
     payload: TargetAuthorizationRevisionUpdate,

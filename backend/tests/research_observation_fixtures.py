@@ -4,11 +4,12 @@ from unittest.mock import Mock
 import pytest
 from sqlalchemy import delete, select
 from app.db.models.research_observation import ObservationControl, ObservationPreparation, ObservationRecord, ObservationPayload, ObservationEvent
-from app.db.session import SessionLocal
+from app.db.session import SessionLocal, engine
 from app.services import research_observation as service
 from app.services.research_context import create_context
 from app.schemas.research_observation import canonical
 from tests.research_intake_fixtures import NOW, REF, intake, intake_target, two_intake_targets  # noqa: F401
+from tests.trusted_database import trusted_test_connections
 
 TABLES = {m.__tablename__ for m in (ObservationControl, ObservationPreparation, ObservationRecord, ObservationPayload, ObservationEvent)}
 
@@ -61,10 +62,11 @@ def cleanup(ctx):
 
 @pytest.fixture(autouse=True)
 def zero_capabilities(monkeypatch):
-    blocked = Mock(side_effect=AssertionError("observation crossed capability boundary"))
-    for path in ("app.credentials.bearer.BearerCredentialService.resolve", "app.credentials.bearer.BearerCredentialService.resolve_binding",
-                 "app.ai.mock_provider.MockAIProvider.analyze", "app.services.plan_execution.PlanExecutionService.execute",
-                 "app.network_safety.gateway.NetworkGateway.request", "socket.getaddrinfo"):
-        monkeypatch.setattr(path, blocked)
-    yield
-    blocked.assert_not_called()
+    with trusted_test_connections(engine):
+        blocked = Mock(side_effect=AssertionError("observation crossed capability boundary"))
+        for path in ("app.credentials.bearer.BearerCredentialService.resolve", "app.credentials.bearer.BearerCredentialService.resolve_binding",
+                     "app.ai.mock_provider.MockAIProvider.analyze", "app.services.plan_execution.PlanExecutionService.execute",
+                     "app.network_safety.gateway.NetworkGateway.request", "socket.getaddrinfo"):
+            monkeypatch.setattr(path, blocked)
+        yield
+        blocked.assert_not_called()

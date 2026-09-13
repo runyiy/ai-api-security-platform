@@ -5,6 +5,8 @@ import pytest
 from sqlalchemy import delete, select
 
 from app.db.base import Base
+from app.ai.w2.schema import TABLES as _AI_BUDGET_TABLES
+AI_BUDGET_TABLES = {t.name for t in _AI_BUDGET_TABLES}
 from app.db.models import AuthorizationProfile, AuthorizationRevision, Scope, Target
 from app.db.models.research_context import ResearchContext, ResearchContextVersion, ResearchTargetAssociation
 from app.db.session import SessionLocal, engine
@@ -38,7 +40,7 @@ def intake(ids):
 def snapshot(*, legacy=False):
     with engine.connect() as db:
         return {t.name: list(db.execute(select(t).order_by(*t.primary_key.columns)).mappings())
-                for t in Base.metadata.sorted_tables if not legacy or t.name not in (NEW_TABLES | OBSERVATION_TABLES | KNOWLEDGE_TABLES | RULE_VALIDATION_TABLES | INTENT_TABLES | VERIFICATION_TABLES | {"research_subject_versions"})}
+                for t in Base.metadata.sorted_tables if not legacy or t.name not in (AI_BUDGET_TABLES | NEW_TABLES | OBSERVATION_TABLES | KNOWLEDGE_TABLES | RULE_VALIDATION_TABLES | INTENT_TABLES | VERIFICATION_TABLES | {"research_subject_versions"})}
 
 
 @pytest.fixture

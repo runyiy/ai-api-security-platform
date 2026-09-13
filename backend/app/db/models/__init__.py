@@ -1,4 +1,5 @@
 from app.db.models.research_knowledge import KnowledgeVersion, KnowledgeEvent, KnowledgeAudit
+from app.ai.w2.schema import TABLES as RESEARCH_AI_BUDGET_TABLES
 from app.db.models.research_rule_validation import RuleValidation, RuleFeedback, RuleFeedbackReview
 from app.db.models.research_subject import ResearchSubjectVersion
 from app.db.models.research_observation import ObservationControl, ObservationPreparation, ObservationRecord, ObservationPayload, ObservationEvent

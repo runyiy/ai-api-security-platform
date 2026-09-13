@@ -9,6 +9,7 @@ from sqlalchemy import create_engine, inspect, select, text, delete
 from sqlalchemy.engine import make_url
 from app.core.config import settings
 from app.db.base import Base
+from tests.research_intake_fixtures import AI_BUDGET_TABLES
 from app.db.session import engine,SessionLocal
 from app.db.models import SecurityReport,TestCase as StoredCase
 from app.services.security_report import SecurityReportService
@@ -27,12 +28,12 @@ def legacy_snapshot():
     # is independently checked by test_research_intent_lifecycle_migration.
     with engine.connect() as db:
         return {t.name:list(db.execute(select(*[c for c in t.columns if c.name != 'hold_generation']).order_by(*t.primary_key.columns)).mappings())
-            for t in Base.metadata.sorted_tables if t.name not in VERIFICATION_TABLES | INTENT_TABLES}
+            for t in Base.metadata.sorted_tables if t.name not in AI_BUDGET_TABLES | VERIFICATION_TABLES | INTENT_TABLES}
 
 
 def test_fresh_additive_schema_and_empty_roundtrip(monkeypatch):
     config=Config('alembic.ini');scripts=ScriptDirectory.from_config(config)
-    assert scripts.get_heads()==['6a94cbd3f825'] and scripts.get_revision(REVISION).down_revision==PARENT
+    assert scripts.get_heads()==['7ba5dce4a936'] and scripts.get_revision(REVISION).down_revision==PARENT
     name='intent_migration_'+uuid4().hex
     with engine.begin() as db:db.execute(text(f'CREATE SCHEMA "{name}"'))
     url=make_url(settings.database_url).update_query_dict({'options':f'-csearch_path={name}'})
@@ -102,7 +103,7 @@ def test_populated_downgrade_refused_atomically(intent_graph):
     with pytest.raises(RuntimeError,match='research_intent_populated_downgrade_blocked'):
         command.downgrade(Config('alembic.ini'),PARENT)
     assert snapshot()==before
-    with engine.connect() as db:assert MigrationContext.configure(db).get_current_revision()=='6a94cbd3f825'
+    with engine.connect() as db:assert MigrationContext.configure(db).get_current_revision()=='7ba5dce4a936'
 
 
 def test_orphan_new_case_also_blocks_downgrade(evidence_pair):

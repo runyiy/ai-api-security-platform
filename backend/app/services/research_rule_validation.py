@@ -9,6 +9,8 @@ from app.services import research_knowledge as knowledge
 from app.services import research_rule_cases as suite, research_rule_engine as engine
 
 
+from app.ai.w2.lifecycle import writer as w2_lifecycle_writer
+
 def _content(row):
     content = s.validate(s.Content, row.content)
     if (s.digest(content.model_dump()) != row.digest or content.category != 'rule'
@@ -87,6 +89,7 @@ def _capacity(db, model, context, limit):
         raise s.KnowledgeError('knowledge_validation_storage_limit')
 
 
+@w2_lifecycle_writer
 def validate_rule(db, project, context_id, payload, *, now=None):
     data = s.validate(v.ValidateInput, payload)
     context = knowledge._locked(db, project, context_id)
@@ -135,6 +138,7 @@ def qualified(db, row, reference, at, *, passed=True):
     return evidence
 
 
+@w2_lifecycle_writer
 def read_validation(db, project, context_id, payload, *, now=None):
     data = s.validate(v.ValidationReadInput, payload)
     context = knowledge._locked(db, project, context_id)
@@ -148,6 +152,7 @@ def read_validation(db, project, context_id, payload, *, now=None):
             'audit_id': audit}, deadlines, now)
 
 
+@w2_lifecycle_writer
 def submit_feedback(db, project, context_id, payload, *, now=None):
     data = s.validate(v.FeedbackInput, payload)
     context = knowledge._locked(db, project, context_id)
@@ -181,6 +186,7 @@ def _feedback(db, row, number):
     return feedback, data
 
 
+@w2_lifecycle_writer
 def read_feedback(db, project, context_id, payload, *, now=None):
     data = s.validate(v.FeedbackReadInput, payload)
     context = knowledge._locked(db, project, context_id)
@@ -221,6 +227,7 @@ def read_feedback(db, project, context_id, payload, *, now=None):
             'review': review_body, 'audit_id': audit}, deadlines, now)
 
 
+@w2_lifecycle_writer
 def review_feedback(db, project, context_id, payload, *, now=None):
     data = s.validate(v.FeedbackReviewInput, payload)
     context = knowledge._locked(db, project, context_id)
@@ -254,6 +261,7 @@ def review_feedback(db, project, context_id, payload, *, now=None):
             'audit_id': audit}, deadlines, now)
 
 
+@w2_lifecycle_writer
 def invalidate_pending(db, context, now):
     """Catalog lock held: append invalidations without rewriting original evidence."""
     rows = list(db.scalars(select(KV).where(or_(KV.context_id == context.id,

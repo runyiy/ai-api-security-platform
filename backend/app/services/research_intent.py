@@ -26,6 +26,7 @@ from app.services.test_execution import build_test_case_url
 from app.services.test_case_planning import _build_scope_context
 from app.services.execution_plan import PlanActionInput, _create_execution_plan
 from app.services.execution_plan_approval import validate_persisted_plan_integrity
+from app.ai.w2.lifecycle import writer
 
 TEST_TYPE = 'ra_intent_get_v1'
 PROTOCOLS = {IntentMapping: 'ra-mapping/1', IntentManifest: 'ra-manifest/1'}
@@ -202,6 +203,7 @@ def _receipt(db,context,row,kind,deadlines,clock):
     return value
 
 
+@writer
 def confirm_mapping(db,project,context_id,number,payload,*,now=None):
     now=_clock(now)
     p=s.validate(s.MappingInput,payload);context=_locked(db,project,context_id)
@@ -316,6 +318,7 @@ def _manifest_snapshot(db,context,p,clock):
     return base,deadlines
 
 
+@writer
 def record_manifest(db,project,context_id,number,payload,*,now=None):
     now=_clock(now)
     p=s.validate(s.ManifestInput,payload);context=_locked(db,project,context_id)
@@ -342,6 +345,7 @@ def _manifest(db,context,ref,clock):
     return row,snapshot,[row.valid_until,*deadlines]
 
 
+@writer
 def decide_budget(db,project,context_id,payload,*,now=None):
     now=_clock(now)
     p=s.validate(s.BudgetDecision,payload);context=_locked(db,project,context_id)
@@ -451,6 +455,7 @@ def _selected_snapshot(snapshot,purpose):
     return {**snapshot,'actions':selected}
 
 
+@writer
 def convert(db,project,context_id,number,payload,*,now=None):
     now=_clock(now)
     p=s.validate(s.ConvertInput,payload);context=_locked(db,project,context_id)
@@ -506,6 +511,7 @@ def convert(db,project,context_id,number,payload,*,now=None):
         return _receipt(db,context,row,'intent',deadlines,now)
 
 
+@writer
 def read(db,project,context_id,kind,reference,*,now=None):
     now=_clock(now)
     ref=s.validate(s.Reference,reference);context=_locked(db,project,context_id)

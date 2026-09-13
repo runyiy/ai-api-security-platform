@@ -34,6 +34,8 @@ class InvalidRevisionTransitionError(Exception):
     pass
 
 
+from app.ai.w2.lifecycle import writer as w2_lifecycle_writer
+
 def lock_profile(db: Session, profile_id: int) -> AuthorizationProfile | None:
     return db.scalar(
         select(AuthorizationProfile)
@@ -42,6 +44,7 @@ def lock_profile(db: Session, profile_id: int) -> AuthorizationProfile | None:
     )
 
 
+@w2_lifecycle_writer
 def create_revision(db: Session, profile_id: int) -> AuthorizationRevision:
     profile = lock_profile(db, profile_id)
     if profile is None:
@@ -68,6 +71,7 @@ def create_revision(db: Session, profile_id: int) -> AuthorizationRevision:
     return revision
 
 
+@w2_lifecycle_writer
 def transition_revision(
     db: Session,
     profile_id: int,
