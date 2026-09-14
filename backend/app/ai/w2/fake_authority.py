@@ -462,6 +462,15 @@ class FakeAuthority:
     def events(self, key):
         return tuple(e for e in self.observations.values() if e.key_digest == key.fingerprint())
 
+    def proves_zero(self, key):
+        return self.calls.get(key.fingerprint(), {}).get('closed') is True and self.witness.accepted[key.fingerprint()] == 0
+
+    def proves_response(self, key):
+        return self.witness.accepted[key.fingerprint()] == 1
+
+    def proves_final(self, key, event):
+        return self.proves_response(key) and event.terminal in ('COMPLETED', 'INCOMPLETE', 'FAILED', 'CANCELLED')
+
     def observe_v1(self, read, event, timeout=3):
         with self.locked(timeout):
             known=self.observations.get(event.event_id)

@@ -100,6 +100,14 @@ def main():
         def coverage(self):
             return rpc('coverage')
 
+        def proves_zero(self, requested):
+            assert requested == key
+            return rpc('proves_zero')
+
+        def proves_final(self, requested, observation):
+            assert requested == key and observation.key_digest == key.fingerprint()
+            return rpc('proves_final', {'event': observation.document()})
+
         @property
         def witness(self):
             return SimpleNamespace(accepted={key.fingerprint(): rpc('accepted')})
