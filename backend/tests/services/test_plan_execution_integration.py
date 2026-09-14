@@ -31,6 +31,7 @@ from app.network_safety.gateway import NetworkGatewayError
 from app.policies.scope_policy import ScopePolicyEngine
 from app.services.execution_plan_approval import record_plan_decision
 from app.services.execution_plan_claim import (
+    ClaimHandle,
     ExecutionClaimCoordinationError,
     ExecutionPlanClaimService,
 )
@@ -594,24 +595,57 @@ def test_expired_claim_taken_over_during_rate_wait_fences_stale_worker(
 ) -> None:
     plan_id, _, _, _ = approved_plan
     claims = ExecutionPlanClaimService(bind=engine, attempt_timeout_seconds=0.1)
+    prepared_claims: list[ClaimHandle] = []
+
+    class TrackingProgress(ExecutionPlanProgressService):
+        def prepare_attempt(self, handle):
+            state = super().prepare_attempt(handle)
+            prepared_claims.append(handle)
+            return state
 
     def take_over() -> None:
-        import time
-
-        time.sleep(0.08)
+        assert len(prepared_claims) == 1
+        handle = prepared_claims[0]
+        assert handle.execution_plan_id == plan_id
+        with SessionLocal() as db:
+            progress = db.get(ExecutionPlanProgress, plan_id)
+            assert progress is not None
+            assert progress.phase == "pre_network"
+            assert progress.fencing_generation == handle.fencing_generation == 1
+            # Expire only this fixture's prepared, still-owned claim once rate
+            # waiting begins; preparation must not race a short setup lease.
+            updated = db.execute(
+                text(
+                    "UPDATE execution_plan_claims "
+                    "SET lease_expires_at=clock_timestamp() - INTERVAL '1 second' "
+                    "WHERE execution_plan_id=:plan_id AND owner_id=:owner_id "
+                    "AND fencing_generation=:generation "
+                    "AND lease_expires_at > clock_timestamp()"
+                ),
+                {
+                    "plan_id": plan_id,
+                    "owner_id": handle.owner_id,
+                    "generation": handle.fencing_generation,
+                },
+            )
+            assert updated.rowcount == 1
+            db.commit()
         claims.acquire(plan_id, "takeover-owner", lease_seconds=2)
 
+    limiter = MutatingRateLimiter(take_over)
     gateway = RecordingGateway()
     with pytest.raises(ExecutionBlockedError) as raised:
         execute(
             plan_id,
-            limiter=MutatingRateLimiter(take_over),
+            limiter=limiter,
             gateway=gateway,
             claim_service=claims,
-            claim_lease_seconds=0.05,
+            claim_lease_seconds=30,
+            progress_service=TrackingProgress(bind=engine),
         )
 
     assert raised.value.code == "execution_plan_claim_lost"
+    assert limiter.calls == 1
     assert gateway.target_ids == []
     with SessionLocal() as db:
         claim = db.get(ExecutionPlanClaim, plan_id)
