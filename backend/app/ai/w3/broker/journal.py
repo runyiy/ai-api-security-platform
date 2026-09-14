@@ -2,12 +2,14 @@
 import fcntl
 import os
 from pathlib import Path
+import re
 import stat
 import struct
 
 from app.ai.proposals.codec import bounded_json, canonical
 from app.ai.w2.records import require
 from .protocol import LIMIT, ZERO, acknowledgement, event, validate_event
+from .recovery import amount, liability, merge
 
 MAX_RECORD = 49152
 MAX_ROWS = 512  # one call, 64 invalidations/dispositions, and local ACK copies
@@ -122,8 +124,12 @@ class Witness:
 
     def status(self):
         require(self.journal.intact() and not self.conflict, 'OBSERVER_UNAVAILABLE')
-        return dict(format='ra-broker-witness-status/1', witness=self.identity,
-                    sequence=len(self.events), head=self.events[-1]['digest'] if self.events else ZERO)
+        # Existing authenticated inspection exposes a bounded floor from W's
+        # retained metadata, including when J was restored to an earlier tail.
+        return dict(format='ra-broker-witness-status/2', witness=self.identity,
+                    sequence=len(self.events), head=self.events[-1]['digest'] if self.events else ZERO,
+                    stream=self.events[0]['stream'] if self.events else None,
+                    recovery=liability(self.events))
 
 
 class Observations:
@@ -131,6 +137,7 @@ class Observations:
         self.journal, self.witness, self.stream, self.hook = journal, witness, stream, hook
         self.events, self.acks = [], []
         self.failed = False
+        self.retained = amount()
         for row in journal.rows:
             if row.get('format') == 'ra-broker-event/1':
                 validate_event(row)
@@ -147,14 +154,30 @@ class Observations:
                 self.acks.append(row)
 
     def coverage(self):
-        if self.failed or not self.journal.intact() or len(self.events) != len(self.acks):
-            return False
+        local_complete = not self.failed and self.journal.intact() and len(self.events) == len(self.acks)
         try:
             status = self.witness.status()
-            return status == dict(format='ra-broker-witness-status/1', witness=self.witness.identity,
-                sequence=len(self.events), head=self.events[-1]['digest'] if self.events else ZERO)
+            require(set(status) == {'format', 'witness', 'sequence', 'head', 'stream', 'recovery'}
+                    and status['format'] == 'ra-broker-witness-status/2'
+                    and status['witness'] == self.witness.identity
+                    and type(status['sequence']) is int and 0 <= status['sequence'] <= MAX_ROWS
+                    and type(status['head']) is str and re.fullmatch('[0-9a-f]{64}', status['head'])
+                    and (status['stream'] == self.stream or status['stream'] is None and status['sequence'] == 0),
+                    'OBSERVER_UNAVAILABLE')
+            if status['sequence'] == 0:
+                require(status['stream'] is None and status['head'] == ZERO and status['recovery'] == amount())
+            self.retained = merge(self.retained, status['recovery'])
+            return local_complete and status == dict(format='ra-broker-witness-status/2', witness=self.witness.identity,
+                sequence=len(self.events), head=self.events[-1]['digest'] if self.events else ZERO,
+                stream=self.stream if self.events else None, recovery=liability(self.events))
         except Exception:
             return False
+
+    def recovery_liability(self):
+        # Neither a failed fresh read nor a missing local file erases a floor
+        # already obtained from authenticated W. This grants no coverage.
+        self.retained = merge(self.retained, liability(self.events))
+        return self.retained
 
     def append(self, event_id, kind, data):
         old = next((v for v in self.events if v['event_id'] == event_id), None)

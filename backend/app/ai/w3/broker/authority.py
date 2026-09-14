@@ -370,6 +370,11 @@ class Broker:
         with self.locked():
             complete = self.J.coverage()
             if not complete: self.state = 'RECOVERY_REQUIRED'
+            try:
+                retained = self.J.recovery_liability()
+            except Exception:
+                self.state = 'RECOVERY_REQUIRED'
+                raise
             head = self.J.events[-1]['digest'] if self.J.events else '0'*64
             require(not data or data['head'] == head, 'OBSERVER_UNAVAILABLE')
             page, acks = [], []
@@ -382,7 +387,7 @@ class Broker:
             return dict(format='ra-broker-snapshot/1', state=self.state, epoch=self.epoch,
                 generation=self.generation, closed=self.closed, coverage_complete=complete,
                 coverage_deficit=None if complete else 'J_W_ACK_COVERAGE_UNRESOLVED',
-                liability_tokens=self.binding['reservation']['reserved_tokens'] if self.binding is not None else 0,
-                liability_microusd=self.binding['reservation']['reserved_microusd'] if self.binding is not None else 0,
+                liability_key_digest=retained['key_digest'],
+                liability_tokens=retained['tokens'], liability_microusd=retained['microusd'],
                 unknown_upper_bound=not complete, events=page, acknowledgements=acks,
                 head=head, total=len(self.J.events), offset=offset, next=offset + len(page))

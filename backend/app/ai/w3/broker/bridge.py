@@ -10,6 +10,7 @@ from app.ai.proposals.adapter import Usage
 from app.ai.proposals.codec import canonical
 from app.ai.w2.records import make, decode, require, PortError, usage_view, stamp
 from .protocol import acknowledgement, digest, peer_identity, receive, send, socket_identity, validate_event, ZERO
+from .recovery import amount, liability, merge
 
 
 class BrokerClient:
@@ -17,6 +18,7 @@ class BrokerClient:
         self.path, self.inode, self.pid, self.uid = str(path), inode, pid, uid
         self.available = False
         self.view = None
+        self.retained_liability = amount()
         self.calls, self.observations, self.core_evidence = {}, {}, {}
 
     def call(self, op, data, timeout=3):
@@ -46,7 +48,8 @@ class BrokerClient:
         require(view['offset'] == 0 and type(view['total']) is int and 0 <= view['total'] <= 256)
         while view['next'] < view['total']:
             page = self.call('snapshot', dict(offset=view['next'], head=view['head']), max(0, until - time.monotonic()))
-            require(all(page[field] == view[field] for field in ('head', 'total', 'epoch', 'generation', 'state', 'closed', 'coverage_complete'))
+            require(all(page[field] == view[field] for field in ('head', 'total', 'epoch', 'generation', 'state', 'closed',
+                    'coverage_complete', 'liability_key_digest', 'liability_tokens', 'liability_microusd', 'unknown_upper_bound'))
                     and page['offset'] == view['next'] and page['next'] > page['offset'], 'OBSERVER_UNAVAILABLE')
             events.extend(page['events']); acks.extend(page['acknowledgements'])
             view['next'] = page['next']
@@ -58,6 +61,11 @@ class BrokerClient:
             if index < len(acks):
                 require(acks[index] == acknowledgement(value, acks[index]['witness']), 'OBSERVER_UNAVAILABLE')
         if view['coverage_complete']: require(len(acks) == len(events), 'OBSERVER_UNAVAILABLE')
+        retained = merge(liability(events), amount(view['liability_key_digest'],
+            view['liability_tokens'], view['liability_microusd']))
+        self.retained_liability = merge(self.retained_liability, retained)
+        view.update(liability_key_digest=self.retained_liability['key_digest'],
+                    liability_tokens=self.retained_liability['tokens'], liability_microusd=self.retained_liability['microusd'])
         self.view = view
         self.calls, self.observations, self.core_evidence = {}, {}, {}
         binding = next((v['data'] for v in events if v['kind'] == 'BINDING'), None)
@@ -179,10 +187,17 @@ def audit_inventory(runtime, client):
     """Read independent evidence outside SQL; omissions pause, never reopen."""
     from sqlalchemy import select
     from app.ai.w2 import schema as t
-    view = client.refresh()
-    with runtime.store.transaction() as db:
-        rows = list(db.execute(select(t.core.c.key_digest, t.core.c.core_bytes).join(t.reservation)))
-        markers = list(db.execute(select(t.marker.c.key_digest, t.marker.c.event_id)))
+    try:
+        view = client.refresh()
+        retained = merge(client.retained_liability, amount(runtime.key.fingerprint(),
+            runtime.prepared.core.reserved_tokens, runtime.prepared.core.reserved_microusd))
+        with runtime.store.transaction() as db:
+            rows = list(db.execute(select(t.core.c.key_digest, t.core.c.core_bytes).join(t.reservation)))
+            markers = list(db.execute(select(t.marker.c.key_digest, t.marker.c.event_id)))
+    except Exception:
+        client.suspend()
+        runtime.store.writer.pause_admission()
+        raise
     expected = {k: canonical(v['core']) for k, v in client.core_evidence.items()}
     matching = {r.key_digest: bytes(r.core_bytes) for r in rows} == expected
     for value in view['events']:
@@ -195,7 +210,7 @@ def audit_inventory(runtime, client):
         runtime.store.writer.pause_admission()
         client.available = False
         return dict(complete=False, deficit='SQL_J_W_INVENTORY_UNRESOLVED', unknown_upper_bound=True,
-                    retained_tokens=5120, retained_microusd=22528)
+                    retained_tokens=retained['tokens'], retained_microusd=retained['microusd'])
     return dict(complete=True, deficit=None, unknown_upper_bound=False)
 
 
