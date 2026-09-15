@@ -42,6 +42,8 @@
 
 预算记录保留 `approval_reference`，但只表示**未验证声明**：此入口既不签署运行预算，也不解析批准文件。`budget_approval=unverified`、`budget_unapproved` 始终可见，即使字段全为零或提供引用，也不变成 approved。null 不当无限、零或缺省值；`budget_missing_fields` 区分未填写项与明确的零。未来 B/task 总 token/费用与可信 observer 的批准仍由 EGRESS/TASK 的依赖 gate 解决；没有复制 W2 的 synthetic 10240 tokens / 2000 microusd。
 
+后续 [RA-06/W1 local task persistence](research-assistant-roadmap.md#ra-06w1-local-task-persistence)提供独立、显式的 task budget 决定，进一步受本页 intake 草案上限约束；本页的 `budget_approval=unverified` 不变。该本地路径的 AI calls/tokens/spending 均为零，W1 不 dispatch；更广 AI 预算与运行许可仍按各自契约处理。
+
 | 准备度字段 | 现有含义及限制 |
 | --- | --- |
 | `permission_missing` | 至少一个选择缺 revision/source、已存引用不可用（不存在或绑定/profile 不匹配）、context 已关闭/关联已释放、draft/superseded/revoked、未生效/已过期、Target 停用/非 private_local、GET/automation 不允许、Scope 缺失/超限或快照相关元数据变化 |

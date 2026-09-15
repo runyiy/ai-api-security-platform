@@ -4,11 +4,11 @@ from alembic.migration import MigrationContext
 from sqlalchemy import inspect
 
 from app.db.session import engine
-from tests.research_intake_fixtures import VERIFICATION_TABLES, INTENT_TABLES, AI_BUDGET_TABLES
+from tests.research_intake_fixtures import VERIFICATION_TABLES, INTENT_TABLES, AI_BUDGET_TABLES, TASK_TABLES
 
 
 HEAD = "d5f7a9c1e3b5"
-LATEST = "7ba5dce4a936"
+LATEST = "8cb6edf5ba47"
 PARENT = "c3e5a7b9d1f2"
 
 
@@ -23,7 +23,7 @@ def test_m5_01_migration_round_trip() -> None:
         assert current_revision() == LATEST
         inspector = inspect(engine)
         pre_m5_tables = set(inspector.get_table_names()) - {
-            *INTENT_TABLES, *VERIFICATION_TABLES, *AI_BUDGET_TABLES,
+            *INTENT_TABLES, *VERIFICATION_TABLES, *AI_BUDGET_TABLES, *TASK_TABLES,
             "execution_plans",
             "plan_actions",
             "safety_decision_records",

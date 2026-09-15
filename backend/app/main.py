@@ -208,3 +208,6 @@ app.include_router(research_intents_router, prefix="/api")
 
 from app.api.routes.research_verification import router as research_verification_router
 app.include_router(research_verification_router, prefix="/api")
+
+from app.api.routes.research_tasks import router as research_tasks_router
+app.include_router(research_tasks_router, prefix="/api")

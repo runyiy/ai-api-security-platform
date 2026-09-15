@@ -9,7 +9,7 @@ from sqlalchemy import create_engine, inspect, select, text, delete, event
 from sqlalchemy.engine import make_url
 from app.core.config import settings
 from app.db.base import Base
-from tests.research_intake_fixtures import AI_BUDGET_TABLES
+from tests.research_intake_fixtures import AI_BUDGET_TABLES, TASK_TABLES
 from app.db.session import engine, SessionLocal
 from app.db.models import SecurityReport
 from app.services.security_report import SecurityReportService
@@ -27,12 +27,12 @@ def previous_snapshot():
     # Compare the schema at this historical revision; the additive hold column
     # is independently checked by test_research_intent_lifecycle_migration.
     with engine.connect() as db:
-        return {t.name:list(db.execute(select(*[c for c in t.columns if c.name != 'hold_generation']).order_by(*t.primary_key.columns)).mappings()) for t in Base.metadata.sorted_tables if t.name not in AI_BUDGET_TABLES | VERIFICATION_TABLES | INTENT_TABLES | RULE_VALIDATION_TABLES | KNOWLEDGE_TABLES}
+        return {t.name:list(db.execute(select(*[c for c in t.columns if c.name != 'hold_generation']).order_by(*t.primary_key.columns)).mappings()) for t in Base.metadata.sorted_tables if t.name not in TASK_TABLES | AI_BUDGET_TABLES | VERIFICATION_TABLES | INTENT_TABLES | RULE_VALIDATION_TABLES | KNOWLEDGE_TABLES}
 
 
 def test_fresh_exact_schema_and_empty_rollback(monkeypatch):
     config=Config('alembic.ini');scripts=ScriptDirectory.from_config(config)
-    assert scripts.get_heads()==['7ba5dce4a936'] and scripts.get_revision(REVISION).down_revision==PARENT
+    assert scripts.get_heads()==['8cb6edf5ba47'] and scripts.get_revision(REVISION).down_revision==PARENT
     schema='knowledge_migration_'+uuid4().hex
     with engine.begin() as db:db.execute(text(f'CREATE SCHEMA "{schema}"'))
     url=make_url(settings.database_url).update_query_dict({'options':f'-csearch_path={schema}'})
@@ -90,4 +90,4 @@ def test_nonempty_rollback_refused_without_history_loss(knowledge_pair):
     with pytest.raises(RuntimeError,match='research_knowledge_populated_downgrade_blocked'):
         command.downgrade(Config('alembic.ini'),PARENT)
     assert snapshot()==before
-    with engine.connect() as db:assert MigrationContext.configure(db).get_current_revision()=='7ba5dce4a936'
+    with engine.connect() as db:assert MigrationContext.configure(db).get_current_revision()=='8cb6edf5ba47'

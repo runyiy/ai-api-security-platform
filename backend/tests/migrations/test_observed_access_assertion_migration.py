@@ -16,7 +16,7 @@ def test_observed_access_assertion_migration_round_trip() -> None:
     config = Config("alembic.ini")
     scripts = ScriptDirectory.from_config(config)
     assert scripts.get_revision(REVISION).down_revision == PARENT
-    assert scripts.get_heads() == ["7ba5dce4a936"]
+    assert scripts.get_heads() == ["8cb6edf5ba47"]
     ids: dict[str, int] = {}
     try:
         command.downgrade(config, PARENT)

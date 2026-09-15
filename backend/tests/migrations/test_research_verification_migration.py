@@ -11,7 +11,7 @@ from app.core.config import settings
 from app.db.base import Base
 from app.db.session import engine,SessionLocal
 from app.db.models.research_verification import VerificationContract
-from tests.research_intake_fixtures import VERIFICATION_TABLES,AI_BUDGET_TABLES,snapshot
+from tests.research_intake_fixtures import VERIFICATION_TABLES,AI_BUDGET_TABLES,TASK_TABLES,snapshot
 from tests.research_intent_fixtures import intent_graph,subject_pair,two_intake_targets,call,NOW,REF
 from tests.finding_evidence_fixtures import evidence_pair
 from tests.api.test_finding_evidence_fingerprints import old_evidence
@@ -21,13 +21,13 @@ from app.services import research_verification as verify
 
 REVISION='6a94cbd3f825'
 PARENT='5f83bac2e714'
-HEAD='7ba5dce4a936'
+HEAD='8cb6edf5ba47'
 
 
 def previous():
     with engine.connect() as db:
         return {t.name:list(db.execute(select(t).order_by(*t.primary_key.columns)).mappings())
-            for t in Base.metadata.sorted_tables if t.name not in AI_BUDGET_TABLES | VERIFICATION_TABLES}
+            for t in Base.metadata.sorted_tables if t.name not in TASK_TABLES | AI_BUDGET_TABLES | VERIFICATION_TABLES}
 
 
 def test_fresh_additive_schema_and_empty_downgrade(monkeypatch):

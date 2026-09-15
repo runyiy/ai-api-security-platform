@@ -95,3 +95,7 @@ from app.db.models.research_verification import (
     VerificationContract, VerificationHealthSelection, VerificationAttempt,
     VerificationWitness, VerificationPair, VerificationAudit, VerificationClockFault,
 )
+
+from app.db.models.research_task import (
+    ResearchTask, ResearchTaskVersion, ResearchTaskMember, ResearchTaskEvent, ResearchTaskAllocation,
+)

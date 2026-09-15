@@ -43,6 +43,12 @@ class Dispatch:
     def validate(self,db,*,require_baseline=True,require_approval=True):
         context,core,manifest,contract,end=service.current_intent(db,self.project,self.context_id,self.reference,self.clock)
         member=service._member(db,core,self.plan_id)
+        # Any task-bound plan (including draft, superseded and cancelled versions)
+        # stays execution-closed until RA-06/W2 supplies task runtime enforcement.
+        # This check also runs under the existing context lock at the first write.
+        from app.db.models.research_task import ResearchTaskMember
+        if db.scalar(select(ResearchTaskMember.id).where(ResearchTaskMember.plan_id==self.plan_id).limit(1)) is not None:
+            raise c.IntentError('task_execution_disabled')
         selected=next(a for a in core.body['snapshot']['actions'] if a['role']==(core.body['purpose'] if member.role=='health' else member.role))
         plan=db.get(ExecutionPlan,self.plan_id,populate_existing=True)
         target,revision,scopes=load_execution_authorization(db,core.target_id)
