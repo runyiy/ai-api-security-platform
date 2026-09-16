@@ -10,7 +10,7 @@ from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import IntegrityError
 from app.core.config import settings
 from app.db.base import Base
-from tests.research_intake_fixtures import AI_BUDGET_TABLES
+from tests.research_intake_fixtures import AI_BUDGET_TABLES, TASK_TABLES
 from app.db.models import SecurityReport
 from app.db.models.research_observation import ObservationRecord, ObservationPayload, ObservationPreparation
 from app.db.session import engine, SessionLocal
@@ -29,13 +29,13 @@ REVISION, PARENT = "d8f0b2c4e6a8", "c7e9a1b3d5f7"
 def existing_snapshot():
     with engine.connect() as db:
         return {t.name: list(db.execute(select(t).order_by(*t.primary_key.columns)).mappings())
-                for t in Base.metadata.sorted_tables if t.name not in AI_BUDGET_TABLES | VERIFICATION_TABLES | INTENT_TABLES | TABLES | RULE_VALIDATION_TABLES | KNOWLEDGE_TABLES | {"research_subject_versions"}}
+                for t in Base.metadata.sorted_tables if t.name not in TASK_TABLES | AI_BUDGET_TABLES | VERIFICATION_TABLES | INTENT_TABLES | TABLES | RULE_VALIDATION_TABLES | KNOWLEDGE_TABLES | {"research_subject_versions"}}
 
 
 def test_fresh_upgrade_exact_schema_and_empty_downgrade(monkeypatch):
     config = Config("alembic.ini")
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["7ba5dce4a936"] and scripts.get_revision(REVISION).down_revision == PARENT
+    assert scripts.get_heads() == ["8cb6edf5ba47"] and scripts.get_revision(REVISION).down_revision == PARENT
     schema = "observation_migration_"+uuid4().hex
     with engine.begin() as db:
         db.execute(text(f'CREATE SCHEMA "{schema}"'))
@@ -114,7 +114,7 @@ def test_populated_rollback_protected_without_loss(observation_context):
         command.downgrade(Config("alembic.ini"), PARENT)
     assert snapshot() == before
     with engine.connect() as db:
-        assert MigrationContext.configure(db).get_current_revision() == "7ba5dce4a936"
+        assert MigrationContext.configure(db).get_current_revision() == "8cb6edf5ba47"
 
 
 def test_composite_fk_immutable_provenance_and_expiry_constraints(observation_context):

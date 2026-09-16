@@ -14,7 +14,7 @@ from tests.ai.w2_fixtures import w2,rule_pair,knowledge_pair,subject_pair,two_in
 def test_empty_round_trip_exact_metadata_and_no_seeded_authority(monkeypatch):
     config=Config('alembic.ini')
     scripts=ScriptDirectory.from_config(config)
-    assert scripts.get_heads()==['7ba5dce4a936']
+    assert scripts.get_heads()==['8cb6edf5ba47']
     assert scripts.get_revision('7ba5dce4a936').down_revision=='6a94cbd3f825'
     name='ai_budget_'+uuid4().hex
     with engine.begin() as db:db.execute(text('CREATE SCHEMA '+name))
@@ -24,10 +24,11 @@ def test_empty_round_trip_exact_metadata_and_no_seeded_authority(monkeypatch):
         monkeypatch.setattr(settings,'database_url',url.render_as_string(hide_password=False).replace('%','%%'))
         command.upgrade(config,'6a94cbd3f825')
         before=set(inspect(isolated).get_table_names())
-        command.upgrade(config,'head')
+        command.upgrade(config,'7ba5dce4a936')
         assert set(inspect(isolated).get_table_names())==before|{table.name for table in t.TABLES}
         with isolated.begin() as db:
             assert all(db.scalar(select(text('count(*)')).select_from(table))==0 for table in t.TABLES)
+        command.upgrade(config,'head')
         command.check(config)
         command.downgrade(config,'6a94cbd3f825')
         assert set(inspect(isolated).get_table_names())==before

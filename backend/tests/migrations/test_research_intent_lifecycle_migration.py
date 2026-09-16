@@ -24,7 +24,7 @@ TABLE='research_observation_records'
 
 def test_fresh_schema_and_empty_downgrade(monkeypatch):
     config=Config('alembic.ini');scripts=ScriptDirectory.from_config(config)
-    assert scripts.get_heads()==['7ba5dce4a936'] and scripts.get_revision(REVISION).down_revision==PARENT
+    assert scripts.get_heads()==['8cb6edf5ba47'] and scripts.get_revision(REVISION).down_revision==PARENT
     name='intent_lifecycle_'+uuid4().hex
     with engine.begin() as db:db.execute(text(f'CREATE SCHEMA "{name}"'))
     url=make_url(settings.database_url).update_query_dict({'options':f'-csearch_path={name}'})
@@ -78,4 +78,4 @@ def test_committed_hold_provenance_cannot_be_downgraded(subject_pair):
     with pytest.raises(RuntimeError,match='observation_lifecycle_populated_downgrade_blocked'):
         command.downgrade(Config('alembic.ini'),PARENT)
     assert snapshot()==before
-    with engine.connect() as db:assert MigrationContext.configure(db).get_current_revision()=='7ba5dce4a936'
+    with engine.connect() as db:assert MigrationContext.configure(db).get_current_revision()=='8cb6edf5ba47'

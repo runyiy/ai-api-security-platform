@@ -83,7 +83,7 @@ def no_reads(preview, monkeypatch, db):
 
 
 def test_signature_head_and_no_new_route_or_forbidden_dependencies(preview):
-    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["7ba5dce4a936"]
+    assert ScriptDirectory.from_config(Config("alembic.ini")).get_heads() == ["8cb6edf5ba47"]
     parameters = inspect.signature(preview.preview_bola_matrix).parameters
     assert list(parameters) == ["db", "endpoint_id", "resource_id", "test_identity_ids", "evaluation_time"]
     assert all(p.default is inspect.Parameter.empty for p in parameters.values())

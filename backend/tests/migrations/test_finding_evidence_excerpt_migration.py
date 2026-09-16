@@ -27,7 +27,7 @@ VALUES = dict(extractor_id="bola_matched_identifier_field", extractor_version="1
 def test_clean_postgres_round_trip_adds_only_bounded_excerpt_table(monkeypatch):
     config = Config("alembic.ini")
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["7ba5dce4a936"]
+    assert scripts.get_heads() == ["8cb6edf5ba47"]
     assert scripts.get_revision(REVISION).down_revision == PARENT
     schema = f"excerpt_migration_{uuid4().hex}"
     with engine.begin() as db:

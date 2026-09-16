@@ -1,8 +1,8 @@
 # Research Assistant v1 — 低人工参与、低 Token 的授权安全研究助手
 
-**当前状态（PR #155 集成后）：W2 fake-only 已集成；W3 cache 本地候选待独立审查。** [W2 运行时记录](research-ai-w2-runtime-validation.md)保留 preparation、persistent accounting、W1 coordination、permit/journal authority、lifecycle writers、recovery 与 N1 前提证据。当前 [W3 实现及验证](research-ai-provider-implementation.md#w3-application-analysis-cache)只包含合资格原始分析的有界内存复用与 fake 对抗性验收；独立审查、新 PR/main gates 和单独获批 live smoke 仍待完成。
+**当前状态：RA-06/W1 local AI-disabled task persistence 已本地实现，待独立审查；W2 task execution/recovery 与 W3 CLI 未实现。** User 已采纳 [TASK 六项决定](research-assistant-adr-decisions.md#task-后续采纳记录ra-06w1local-ai-disabled)，并批准本地路径先于 RA-05 real-provider acceptance 推进。本次增量不 dispatch，不改变运行许可。
 
-W1 fake-only adapter 已集成；B1–B8、具体 B1/B8 v0.1.1、N1、Linux/bubblewrap 和限定 CI AppArmor 决定均按各自[采纳记录](research-assistant-adr-decisions.md#1-决策与批准登记)生效。集成与本地测试不代表 production readiness 或 operational permission；RA-06 未获授权。
+RA-05 W1/W2 fake-only、W3 cache/broker 已分别经 PR #150/#155/#156/#157 集成；[offline 与 server-count 调查](research-ai-provider-implementation.md#complete-input-token-bound-feasibility-2026-09-14)经 PR #158/#159 集成。Provider guarantees 仍不足，live integration/counting 调查暂停；4096-input 要求、provider reserves、disabled admission 和独立 operational gates 保持。已有 B1–B8/N1/Linux/bubblewrap/限定 CI AppArmor 采纳仍适用，不能从本次 TASK 授权推导真实 AI 可用。
 
 [文档目录与权威层级](documentation-index.md)区分规范、采纳、实施和历史证据；本页第 5 节是阶段状态入口，第 6–9 节保留验收要求。测试通过、独立代码审阅、合并、阶段验收及运行许可分别记录，不用未限定的 PASS 互相替代。Issue #132 / PR #133 是已完成的规划历史，不要求为每个工作包新建 Issue。
 
@@ -114,13 +114,13 @@ AI 接收 typed data 并返回建议，不拥有 executor、shell、任意 fetch
 | RA-02 | 安全观察导入及身份/资源/预算上下文 | RA-01；数据 lifecycle 决策 | 为检索/规划提供安全输入 | W1–W3 经 PR #137–139 集成；synthetic-only 输入/观察/事实上下文，不授予私有数据或执行许可 |
 | RA-03 | 带版本和反例的已审规则 | RA-02；知识使用资格/隔离审查 | 可重复的受限检索 | K1–K4 已采纳；W1–W3 经 PR #140–142 集成；真实规则验证与独立 publish 决定仍分开 |
 | RA-04 | 最小本地候选→计划→验证→证据演示 | RA-03；bridge/intent/evidence ADR | 可靠验证窄请求形态 | I1–I7 已采纳；W1/W2 经 PR #144–145、W3 经 PR #147 集成；仅有界合成本地演示验收 |
-| RA-05 | 按需、预算内的真实 AI 建议 | RA-04；AI proposal 和 provider egress ADR | fake 回归及单独获准的真实验证 | W1 fake-only 经 PR #150 集成；B1–B8/N1 已采纳，具体契约经 PR #152 集成；N1 运行时前提经 PR #153 验收；W2 fake-only 经 PR #155 集成，W3 cache 本地候选待审，live acceptance/operational approvals 未完成 |
-| RA-06 | CLI 启动/暂停/取消/恢复持久任务 | RA-05；编排/审批/恢复 ADR | 日常使用无需 SQL/Python | NOT_STARTED / NOT_AUTHORIZED |
+| RA-05 | 按需、预算内的真实 AI 建议 | RA-04；AI proposal 和 provider egress ADR | fake 回归及单独获准的真实验证 | W1 fake-only 经 PR #150 集成；B1–B8/N1 已采纳，具体契约经 PR #152 集成；N1 运行时前提经 PR #153 验收；W2 fake-only 经 PR #155、W3 cache/broker 经 PR #156/#157 集成；PR #158/#159 证据仍不足，live acceptance/operational approvals 未完成 |
+| RA-06 | persistent local task/budget/progress；后续显式 worker 与 CLI | 本地 AI-disabled 路径：RA-04 + 已采纳 TASK 六项决定；AI 路径仍依赖 RA-05 | 日常使用无需 SQL/Python | W1 本地实现待独立审查；W2/W3 未实现；task execution 关闭 |
 | RA-07 | 验收包、报告、反馈及实测本地发布 | RA-06；冻结评测及费用批准 | 本地 go/no-go | NOT_STARTED / NOT_AUTHORIZED |
 | RA-08 | 公网控制差距审查及独立自有公网演练 | RA-07 go；公网 ADR 和专项范围 | 分别裁决控制就绪/演练 | NOT_STARTED / NOT_AUTHORIZED |
 | RA-09 | 一个获准小范围试点和收益复盘 | RA-07、RA-08、最新第三方许可 | STOP / RETAIN_AS_ASSISTANT / 明确新提案 | NOT_STARTED / NOT_AUTHORIZED |
 
-依赖 DAG：`RA-01 → RA-02 → RA-03 → RA-04 → RA-05 → RA-06 → RA-07 → RA-08 → RA-09`，另有显式 `RA-07 → RA-09` 效果门槛。适用 ADR、有效任务范围及未覆盖的 operational permission 是附加进入条件；已有授权不重复请求。RA-04 演示不依赖 RA-05/06/07。RA-01 定义未来接口与 oracle 作为设计输入，不宣称复用尚未实现的组件，因此不形成反向依赖。
+依赖 DAG：`RA-01 → RA-02 → RA-03 → RA-04 → RA-06(local AI-disabled) → RA-07 → RA-08 → RA-09`；AI 路径另依赖 `RA-04 → RA-05 → RA-06(AI)`，仍有显式 `RA-07 → RA-09` 效果门槛。这是 User 对本地路径的明确依赖调整，不宣告 RA-05 完成。适用 ADR、有效任务范围及未覆盖的 operational permission 是附加进入条件；已有授权不重复请求。RA-04 演示不依赖 RA-05/06/07。RA-01 定义未来接口与 oracle 作为设计输入，不宣称复用尚未实现的组件，因此不形成反向依赖。
 
 ## 6. 各阶段验收卡
 
@@ -184,7 +184,7 @@ AI 接收 typed data 并返回建议，不拥有 executor、shell、任意 fetch
 
 ### RA-05 — 有硬预算约束的真实 AI 辅助
 
-[W1 fake-only 实现](research-ai-provider-implementation.md)、[B1–B8 采纳](research-ai-budget-contract.md#w2-design-adoption-record)、[具体 W2 契约](research-ai-w2-implementation-contract.md)和 [W2 运行时验收](research-ai-w2-runtime-validation.md)分别记录设计、实现与证据。W2 已通过 PR #155 集成；[W3 application cache](research-ai-provider-implementation.md#w3-application-analysis-cache)随后由 PR #156 集成至 `75e7ac19cc62d3842a1078a233098e329d24f220`，User handoff 记录 PR/exact-main CI 各首次通过 4,105 tests。N1/Linux/bubblewrap 与限定 CI AppArmor 采纳继续生效。User 已采纳 B/J/W 设计及 restore/failure 假设；当前 [broker/observation 增量](research-ai-provider-implementation.md#w3-broker-and-observation-increment)仅为待独立审查的本地合成实现，完整本地回归因两个 shard 超时仍未通过；未证明 off-host failure independence，完整 input token bound 与 operational gates 仍未解决，live-disabled。RA-06 未获授权。
+[W1 fake-only 实现](research-ai-provider-implementation.md)、[B1–B8 采纳](research-ai-budget-contract.md#w2-design-adoption-record)、[具体 W2 契约](research-ai-w2-implementation-contract.md)和 [W2 运行时验收](research-ai-w2-runtime-validation.md)分别记录设计、实现与证据。W2 已通过 PR #155 集成；[W3 application cache](research-ai-provider-implementation.md#w3-application-analysis-cache)随后由 PR #156 集成至 `75e7ac19cc62d3842a1078a233098e329d24f220`，User handoff 记录 PR/exact-main CI 各首次通过 4,105 tests。N1/Linux/bubblewrap 与限定 CI AppArmor 采纳继续生效。User 已采纳 B/J/W 设计及 restore/failure 假设；[broker/observation 增量](research-ai-provider-implementation.md#w3-broker-and-observation-increment)已由 PR #157 集成；原超时与后续验证保留在实现证据中。完整 input token bound/provider guarantees 与 operational gates 仍未解决，live-disabled。User 已另外批准 RA-06 本地 AI-disabled 路径，不依赖本阶段真实 provider 验收。
 
 - **用户操作与进入条件：** RA-04 的适用阶段验收、有效工作范围，以及 AI proposal/provider-egress ADR 获批。操作者可显式启用一个 provider，处理合资格且有上限的建议任务，查看带引用的建议、拒绝判断和实际用量。真实调用验证还需要凭据、数据资格及获批费用上限。
 - **包含与排除：** 一个真实 provider adapter、一项模型选择策略，在该任务中依据届时官方文档选择；不静默更换 provider 或 fallback。先用已审查规则，再做受限检索，仅在解释或提议仍无法确定时升级至模型。类型化输出包含证据引用、不确定性和拒绝判断。AI 不能执行、批准、确认 Finding、访问凭据、获取任意 URL、使用 shell 工具或修改策略。
@@ -193,20 +193,83 @@ AI 接收 typed data 并返回建议，不拥有 executor、shell、任意 fetch
 - **正向、负向与边界测试：** fake 返回有效且带引用的建议；无依据声明和畸形输出须 fail closed 或拒绝判断。经 observation、检索文本和工具结果注入指令，拒绝执行、获取 secret、批准计划或发布规则的企图。检查调用禁用、错误 provider 目的地、redirect、secret/PII canary、跨项目 cache key、token/时间/费用恰好上限与超限、provider timeout、用量缺失、取消和部分结果。计费结果不明时不自动重试；用量不确定时保留预留额度并暂停后续调用。
 - **人工职责与验收证据：** 人工批准 provider/model/data/cost 策略，并审核实质性提议。证据包括证明禁止能力为零的 fake 负向轨迹、实际脱敏 payload 清单、预算预留/核销示例、缓存隔离/版本测试、模型/策略标识和官方来源访问日期。宣称真实 provider 可用，还必须有单独获批真实请求的成功/拒绝判断及实际用量/费用记录；仅 fake 成功不能关闭该验收项。
 - **失败处理、migration、ADR、隐私与费用：** 数据、传输、schema 或预算不确定时禁用 provider 调用；规则模式只在独立获准时继续。分析/用量记录可能需要增量 migration，并保持旧 FindingAIAnalysis 兼容。Provider secret 与 Target 凭据分开；Target 许可不授权 provider 外发。私有项目证据不得进入跨项目知识或模型输入。本文件任务不做真实调用；后续缺少费用批准时，真实验证保持 pending。
-- **退出门槛：** 建议能力受约束且用量可核算；真实 provider 验收需要独立真实调用证据。下一阶段：**RA-06 NOT_AUTHORIZED**。
+- **退出门槛：** 建议能力受约束且用量可核算；真实 provider 验收需要独立真实调用证据。RA-06 的本地 AI-disabled W1 已另行授权；AI 路径仍受本阶段未完成门槛约束。
 
 仅可缓存不可变分析，key 包含项目/隐私类别、合资格输入 digest、source/context/rule/prompt/schema/provider/model 版本及适用有效期。绝不缓存 authorization、approval、execution permission 或可变 access truth。上下文改变必须重新检查；分析缓存不改变 M14 的跨请求行为。Provider 侧缓存是独立的外发/retention 问题，不能作为许可缓存，也不自动赋予数据外发资格。
 
 ### RA-06 — 持久低人工参与流程和最小操作者入口
 
-- **用户操作与进入条件：** RA-05 的适用阶段验收、有效工作范围，以及 task/approval/recovery ADR 获批。操作者通过本地 CLI 创建、查看、批准、开始、暂停、取消及安全恢复有界研究任务，日常无需写 SQL/Python。
-- **包含与排除：** 持久任务状态和预算、对已验收能力的确定性组合，以及集中审批/异常。Proposed 状态：`DRAFT`、`NEEDS_INPUT`、`AWAITING_APPROVAL`、`RUNNING`、`PAUSED`、`READY_FOR_REVIEW`、`COMPLETED`、`CANCELLED`、`FAILED`；最终名称需设计审核。排除公网控制台、多租户 RBAC、自动获取账号/会话、默认引入 Redis/微服务及通用自主 agent。
+- **用户操作与进入条件：** 本地 AI-disabled 路径按 User 新决定从已集成 RA-04 和已采纳 TASK 六项决定进入；AI 路径仍需 RA-05 的适用验收。当前只授权 W1 persistence，不授权 task execution。操作者通过本地 CLI 创建、查看、批准、开始、暂停、取消及安全恢复有界研究任务，日常无需写 SQL/Python。
+- **包含与排除：** 持久任务状态和预算、对已验收能力的确定性组合，以及集中审批/异常。原完整流程 Proposed 状态保留为 W2/W3 设计输入；W1 只记录 `awaiting_budget_approval`、`budget_approved`、`budget_revoked`、`paused`、`cancelled` 和历史 `superseded`，不制造 RUNNING/COMPLETED。排除公网控制台、多租户 RBAC、自动获取账号/会话、默认引入 Redis/微服务及通用自主 agent。
 - **复用与新增：** 复用 M8 claims/leases/fencing、canonical results、取消、速率预留和共享网络控制；RA-02/03/04/05 产物验收后复用。新增任务状态、每任务预留、计划/结果引用、受限 worker 生命周期和 CLI 命令。任务所有权不能替代精确计划所有权或执行时检查。
 - **有序工作包：** (1) **RA-06/W1：** 有界任务转换与原子预算/进度持久化，绑定精确计划引用。(2) **RA-06/W2：** 安全恢复/取消及异常集中呈现；in-doubt 明确可见，绝不盲目重放。(3) **RA-06/W3：** 本地 CLI 输入/状态/审核/开始/停止/恢复流程，显式审核有限计划集合，并提供可用的集中缺失输入提示。
 - **正向、负向与边界测试：** 正常已批准任务无需逐请求点击即可进入 READY_FOR_REVIEW。并发 worker 不能重复同一精确请求或超支预留。检查网络标记前后崩溃、canonical result 读取、fencing 丢失、coordinator 失败、取消竞争、预算耗尽及操作者未答复。新动作或实质变化动作必须新审批。关键停止故障必须立即停止，不能等待批量通知。
 - **人工职责与验收证据：** 操作者完成设置、必要精确计划审核、集中异常决策和最终复核。证据包括从干净合成设置开始的完整 CLI 记录、命令帮助/错误、持久状态/计划/预算轨迹、崩溃/并发测试的真实本地服务端请求计数、零盲目重放的 in-doubt 恢复演示，以及含全部点击/时间的人工介入日志。精确有限计划集合获批后，正常运行不需要额外审批提示。
-- **失败处理、migration、ADR、隐私与费用：** 无输入时保持暂停；对受影响计划，取消是终态，恢复不能静默撤销取消。不发新请求即可读取已有结果。任务/预算表可能需要 migration 和重启/回退验证；保留 M8 语义及旧拓扑限制。CLI 凭据不得进入命令历史、日志或导出。AI 仍须主动启用并服从获批上限；默认不新增基础设施费用。
+- **失败处理、migration、ADR、隐私与费用：** 无输入时保持暂停；对受影响计划，取消是终态，恢复不能静默撤销取消。不发新请求即可读取已有结果。任务/预算表可能需要 migration 和重启/回退验证；保留 M8 语义及旧拓扑限制。CLI 凭据不得进入命令历史、日志或导出。本地路径 AI calls/tokens/spending 固定为零；将来 AI 路径仍需独立启用和批准。默认不新增基础设施费用。
 - **退出门槛：** 支持的本地流程持久、可操作，日常无需手动数据库/编程工作。下一阶段：**RA-07 NOT_AUTHORIZED**。
+
+#### RA-06/W1 local task persistence
+
+**LOCAL IMPLEMENTATION / PENDING INDEPENDENT REVIEW。** 基点 `78618123badb189a3df38320fd7a2690f4fc691f`；分支 `codex/ra-06-w1-local-task-persistence`。只有 typed local service/API 与 PostgreSQL persistence，无 worker、CLI 或 task dispatch；不宣告 RA-06 COMPLETE。权威决策见 [TASK 采纳记录](research-assistant-adr-decisions.md#task-后续采纳记录ra-06w1local-ai-disabled)。
+
+[Schema](../backend/app/schemas/research_task.py)、[service](../backend/app/services/research_task.py) 和 [routes](../backend/app/api/routes/research_tasks.py)复用 trusted-local 单操作者/project isolation、RA-04 current-intent/production interpreter、DATA/source/knowledge 资格与 M8 exact plans；不复制凭据、URL 或 response bodies。每版本保留 exact context/version、Target/revision/permission digest、intent/manifest refs、plan/digest/action refs，以及有序 health/baseline/probe GET 与显式依赖。Probe 需要集合内更早的 exact baseline；选用的 health proof 必须对应集合内更早的独立 GET，不把 health 并入 business 额度。Bearer business 仍要真实 RA-04 health evidence 才能转换；W1 可以先 review health-only task，不能预造未来 business plans，不能为扩大集合偷偷发送 health。
+
+| POST（共同前缀 `/api/research-projects/{project}/contexts/{context_id}/tasks`） | W1 操作 |
+| --- | --- |
+| `/versions/{number}` | `CreateVersion`：首次 `previous=null, expected_sequence=0`；exact context/revision、有限 `members`（intent ref、plan ID/digest、role）、`limits` 和 synthetic evidence。修订必须提交 previous exact task ref 与当前 sequence，产生新版本和新 review 边界 |
+| `/read` | exact task number/version/digest；返回 immutable core、events、GET holds 与最小 M8 observation。可在新 Session/process 读取；过期或失去当前数据/许可资格时仍只展示本项目已存 refs，资格为 false，不读取已释放/关闭 context 的 legacy Target/plan 数据 |
+| `/budget-decisions` | exact task ref、expected sequence、`approved`/`revoked`、evidence；这是独立 local-operator 决定，intake draft/approval reference 和 RA-04 manifest budget 都不能替代它 |
+| `/transitions` | exact ref/sequence/evidence；记录 pause/cancel；`start`、`resume`、`dispatch` 一律 `task_execution_disabled`，无隐式重试 |
+
+最小流程：由 RA-04 创建当前合资格的精确 plans → 创建 task version → 用返回的 exact ref 在新进程 read → 显式 budget approval → inspect roles/dependencies/held progress → revoke。每个必要的 exact-plan approval 仍通过既有 RA-04 approve 单独完成。`budget_current` 只描述当前预算决定；`blockers`、current dependency/plan approval observations 都不是可缓存发送许可，所有输出 `execution_authorized=false`、`runtime_enforcement=w2_not_implemented`。
+
+[Migration `8cb6edf5ba47`](../backend/alembic/versions/8cb6edf5ba47_add_research_tasks.py)在 `7ba5dce4a936` 后追加五表：task root、immutable versions、exact members、events、allocations。无 backfill/approval seed。UPDATE/DELETE triggers 保留冻结集合、决定和 liability；空域可回退，任一 task 数据存在即锁表拒绝 downgrade。旧 migration 不改；历史测试只更新 head 和后续表排除集合，旧逐字段比较仍保留。
+
+Context/catalog → task → plan 锁、expected sequence 与唯一约束保护事务；savepoint 包含所有本地写入、RA-04 audit、完整 typed response 编码和最后时间检查，caller 决定 commit。每个 plan 只能属于一个 task，跨版本仍只保留一个 GET hold；批准时一次原子预留当前有限集合。旧 holds 与新集合的并集必须在新版本 limits 内，重复 plan 不创造额度。Revocation/pause/cancel/supersession 不释放旧 holds；W1 **没有 release 操作**。`held_unreconciled` 和 `no_record` 不表示 unused，TestRun 缺失或 M8 `pre_network/network_started/in_doubt` 均不提供退款或 replay 证明。Task progress 是版本/审批/暂停/取消和 allocations；现有 M8 observations 描述单 plan，不宣称 task completion。已 cancelled task 和其 plans 不能通过新 task/version 复活。
+
+从首次 task membership 起，[RA-04 dedicated dispatcher](../backend/app/services/research_verification_dispatch.py)在既有初次资格检查和最终 first-write context lock 内也拒绝这些 plans；draft/撤回/取消后不能绕过 task budget 从旧入口执行。未绑定 task 的 RA-04 与 legacy/M8 路径继续保留原语义。此收口不实现 worker，不声称已有 W2 runtime accounting/cancellation/reconciliation。
+
+存储/输入有界：每 context ≤128 tasks，每 task ≤16 versions/64 events/100 distinct held GETs；command ≤32768 bytes、core ≤65536 bytes（同时受 DB JSONB 大小约束）、完整 response ≤131072 bytes，复用严格 JSON depth≤8/nodes≤8192、无重复 keys/float/coercion/额外字段、no-store/fixed errors。每个 RA-04 intent 保留原 clock/source/health/pair 上限，task 1800s 只是总 cap，不能延长 300/120/30s 或更短 manifest deadline。Rate ≤ intake/revision；当前 task 最大 1/s 也不超过现有 platform 2/s，W2 仍须逐次应用更严格的 manifest/运行时限制。AI 三项只能为零。
+
+**W2/W3 剩余边界：** W2 尚须显式 local serial worker、重启先核对、实际发送前 budget/time/rate 强制、M8 cancellation/recovery 与已发出/不确定结果处理；W3 尚须 CLI。任何真实 Target/provider 操作仍须其适用独立许可；本地测试不代签 hosted CI 或独立 reviewer PASS。
+
+W1 验证使用排除 `.env*`、`.venv` 和 caches 的 `/tmp/ra06-w1.QJCj6q/backend` 副本、仓库 backend virtualenv，以及 `env -i` runner（只设置 PATH、LANG、对应 TEST DATABASE_URL）。未读取 operator 配置或凭据。初次短命 sandbox 内的自有实例退出后，仅发生指向其测试端口的 connection-refused；随后新建下面两个可跨命令存活的独立 PostgreSQL 16 实例。各自首次 application import 前，独立 `psql -X` 验证 database/user、loopback 地址/端口、data_directory、UTF8、system identifier、空 public schema、零其他 clients，以及目录 owner `runyiy`/mode 0700；application settings 另验证 encryption key 为 None。
+
+| 用途 | 自有 TEST 实例（不使用共享服务） |
+| --- | --- |
+| focused / remaining | database/role `ra06_test`；`127.0.0.1:55497`；`/tmp/ra06-w1-test.agt6qH/data`；system identifier `7685558841960912250` |
+| W2 shard | database/role `ra06_w2_test`；`127.0.0.1:55498`；`/tmp/ra06-w1-w2-test.5L7HGD/data`；system identifier `7685565385434619697` |
+
+测试 suites 串行运行；W2 用 `run-w2`，其余用 `run`，两者都在上述隔离副本下运行。实际命令包括：
+
+```sh
+alembic upgrade head
+python -m pytest -q --tb=short tests/services/test_research_task.py tests/api/test_research_tasks.py tests/migrations
+python -m ci_shards check --output /tmp/ra06-w1.QJCj6q/collection-final.json
+python -m ci_shards run w2 --expected-sha256 c4a1dad23c1eb0eeb9df335087c0b1ec481cc760dbb572cb35b0505203790277
+python -m ci_shards run remaining --expected-sha256 c4a1dad23c1eb0eeb9df335087c0b1ec481cc760dbb572cb35b0505203790277
+alembic heads
+alembic current
+alembic check
+python -m evaluation.ra01 verify
+python -m pip check
+git diff --check
+git diff --cached --check
+```
+
+| 实际验证 | 结果 |
+| --- | --- |
+| 初始 task service；扩展 service/API/task migration | 40 passed；随后 62 passed / 1 failed：新测试误用不存在的 `PlanAction.request_url`，修正为实际 `url`，未改断言或生产行为 |
+| 最终 focused service/API + 全 migration suite | **135 passed**，1 warning，136.87s；fresh/populated compatibility、empty rollback/populated refusal、100 GET/1800s 边界、新进程 read、并发/CAS、撤回、失效和事务 rollback 均通过 |
+| 完整/互斥 collection（修正前后相同） | **4226 = 151 W2 + 4075 remaining**，intersection 0，含 35 helper tests；完整 digest 如命令所示，无改 CI/分片/collection 配置 |
+| W2 shard | **151 passed**，62 warnings，654.38s；其后仅修改 remaining shard 内九个旧 head literal；application code、W2 tests 逐字节不变，collection 完全相同 |
+| 首次 remaining shard | **4066 passed / 9 failed**，62 warnings，1040.92s；逐条均为预期 `7ba5dce4a936` 与实际新 head 不等。仅机械更新九个原 API/generator/service 测试的 head 期望，保留其他全部断言；无 runtime failure |
+| 最终 remaining shard | **4075 passed**，62 warnings，1049.10s；与已通过且源码未变的 W2 合计 **4226 passed**，各 shard 的 deselection 恰为另一 shard，零 skipped |
+| 两实例 final heads/current/check；freeze；pip | 单 head/current `8cb6edf5ba47`，无 metadata drift；freeze `692c33a321cc59e9799377ed512402ac33826dec06707d494b3d5853006a231a` VERIFIED；无 broken requirements |
+
+[W1 service tests](../backend/tests/services/test_research_task.py)、[API tests](../backend/tests/api/test_research_tasks.py)使用 production RA-04 interpreter 和 synthetic metadata，禁止 gateway/DNS/credential/provider capabilities；新操作前后 TestRun、M8 claims/progress、dispatch attempts/witnesses 与 exact-plan approval 历史不被制造或改写。专门的 interrupted-marker fixture 只注入明确的 M8 uncertainty，验证 hold 保留，未创建 TestRun 或网络结果。完整回归另包含既有自有 loopback RA-04/M8 网络测试，不能把它们说成 W1 dispatch。
+
+最终 backend 副本有 529 个 Python 文件，集合 SHA256 `bf804631c53cabbb81a58ef242edbbb3debb8640c43b7290b67a601be90937f0`；源码对应、文档链接/anchors 和 whitespace 已检查。两个自有 TEST 实例均在最终身份匹配、零其他 clients、无 operator key 后停止，`postmaster.pid` 均已移除；保留自有本地验证日志。没有推送、PR、部署、真实 provider 调用或公网 Target 执行。
 
 ### RA-07 — 漏洞验收包、报告、反馈及可度量的本地发布验收
 

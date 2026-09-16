@@ -1,8 +1,21 @@
 # Research Assistant ADR 决策材料与 RA-02 数据契约
 
-**当前决策登记：设计采纳、实现证据和 operational permission 分开。** DATA D1–D4、K1–K4、INTENT I1–I7、W1 P1–P6/E1–E6、W2 B1–B8 与后续 N1/Linux/bubblewrap/限定 CI AppArmor 决定均以各自精确采纳记录为准。N1 运行时前提已由 [PR #153](https://github.com/runyiy/ai-api-security-platform/pull/153) 集成并通过 PR/exact-main gate；[完整证据与未完成范围](research-ai-w2-runtime-validation.md)。W2 preparation/accounting/permit authority/lifecycle/recovery、broader TASK 和 operational permission 仍未完成。
+**当前决策登记：设计采纳、实现证据和 operational permission 分开。** DATA D1–D4、K1–K4、INTENT I1–I7、W1 P1–P6/E1–E6、W2 B1–B8 与后续 N1/Linux/bubblewrap/限定 CI AppArmor 决定均以各自精确采纳记录为准。N1 运行时前提已由 [PR #153](https://github.com/runyiy/ai-api-security-platform/pull/153) 集成并通过 PR/exact-main gate；[完整证据与未完成范围](research-ai-w2-runtime-validation.md)。W2 fake-only preparation/accounting/permit authority/lifecycle/recovery 已由 PR #155 集成；RA-06 local AI-disabled TASK 的六项决定按下节采纳。W1 本地实现待独立审查，W2 task runtime/W3 CLI 与 operational permission 未完成。
 
 本页保留 DATA 原始契约、决策理由、替代方案及 exact-base 引用。**C** 表示原 RA-01/W3 基点的代码事实；**P** 保留原推荐标识，采纳状态由第 1 节和精确后续记录决定，不再等于“全部未批准”。未采纳的产品/架构选择不因本次清理变成批准。规范 [architecture decisions](architecture-decisions.md) / [security model](security-model.md)继续优先；[文档目录](documentation-index.md)和 [roadmap](research-assistant-roadmap.md)提供状态导航。
+
+## TASK 后续采纳记录（RA-06/W1，local AI-disabled）
+
+**ADOPTED。** 来源为本次 User 的 RA-06/W1 implementation handoff，核验基点为 local/remote main `78618123badb189a3df38320fd7a2690f4fc691f`；不补造签名或消息时间。User 明确批准先推进 RA-06 的本地、AI-disabled 路径，因此该路径从 RA-04 进入，不再等待 RA-05 real-provider acceptance。RA-05 未完成，provider guarantees 仍不足，live/counting 调查暂停；4096-input 要求、provider reserves 和 disabled admission 不变。
+
+1. PostgreSQL 拥有 durable task、budget 和 progress；复用 RA-04 verifier 与 M8，不另建 executor。
+2. 一个 task 绑定一个 project context、一个 Target/authorization revision 和有限 exact plans；改变集合须重新 review，不自动扩展。冻结版本中的 context/version、revision、intent/manifest、plan/digest 和 limits 不就地修改。
+3. Task budget 必须由独立显式本地动作批准；intake budget draft/approval reference 不算证据。上限 **1800 秒、100 Target GET（含 health）、concurrency 1**，rate 服从更严格的 intake/revision/platform limits。此路径 **AI calls/tokens/spending 均为 0**；task budget 不代替 exact-plan approval。
+4. 将来的 worker 由操作者显式启动，本地串行；无 daemon/Redis/queue。重启先核对 durable records，不能自动恢复发送。
+5. Pause/cancel 停止新动作准入，保留已发出/不确定结果，不盲目 replay。Resume 重验 authorization、所有适用 approval、budget 和 validity；取消的 plans 不能复活。
+6. W1 persistence → W2 execution/cancellation/recovery → W3 CLI；本次只实施 W1，不开启 execution，不增加 operational permission。
+
+[Roadmap 的 W1 使用与验证记录](research-assistant-roadmap.md#ra-06w1-local-task-persistence)说明本地实现及保守限制。原第 9 节的 C/P 基点与备选方案保留为历史；上述明确采纳优先，未涵盖的 AI/TASK/PUBLIC 决定仍不能推定获批。
 
 ## INTENT 后续采纳记录（RA-04/W1）
 
@@ -38,7 +51,7 @@ INTENT W2 的 [verifier 和 dedicated dispatcher](research-response-verification
 | ADR-RA-INTENT | 第 6 节及后续 [INTENT v0.1.0 / I1–I7](research-intent-contract.md#9-待决定表)：精确协议、health120s/pair30s/intent300s、失效与兼容建议 | Tech Lead 批准协议/模型/兼容；操作者决定时间和操作可行性、确认业务事实。RA-04/W1 依赖代码前，health/verifier及预算依赖按I6检查 | **I1–I7 ADOPTED（见 INTENT 采纳记录）；实际请求/凭据/数据/费用未授权** |
 | ADR-RA-PROPOSAL | 第 7 节及后续 [W1契约§2/P1–P6](research-ai-provider-contract.md#2-proposal-protocol-p)：独立、无 authority 的 typed suggestion | Tech Lead 批准协议/消费边界；操作者确认解释与拒绝方式。RA-05 proposal 集成前 | **DESIGN ADOPTED for W1 fake-only（见 [W1 采纳记录](research-ai-provider-contract.md#w1-design-adoption-and-implementation-record)）；operational approvals PENDING** |
 | ADR-RA-EGRESS | 第 8 节及后续 [W1契约§3–7/E1–E6](research-ai-provider-contract.md#3-providermodel-比较与推荐-p)：默认关闭的独立 provider transport、资格与核算 | Tech Lead 批准边界/用量解释；操作者独立批准模型、账号、数据及费用。RA-05 provider 代码前；每次真实运行前再次核验许可 | **DESIGN ADOPTED for W1 fake-only（见 [W1 采纳记录](research-ai-provider-contract.md#w1-design-adoption-and-implementation-record)）；operational approvals PENDING** |
-| ADR-RA-TASK | 第 9 节及 [W2预算/观察提案](research-ai-budget-contract.md)：预算/观察与 M8 精确计划协调分工；B1–B8 中 PostgreSQL 协调设计已采纳，broader TASK 未决 | Tech Lead 批准状态/事务/恢复；操作者批准硬预算与审批操作。RA-06 实施前，若更早引入审批聚合则更早 | **B1–B8/N1/Linux isolation/限定 CI AppArmor ADOPTED；运行时前提已集成；W2 其余实现与 broader TASK 未完成** |
+| ADR-RA-TASK | 第 9 节保留原提案；上节六项 local AI-disabled TASK 决定已采纳，B1–B8 仍只支配其适用 AI 域 | 操作者显式批准每个 task budget；具体 exact-plan approval 与运行许可另行核验 | **六项 TASK 决定 ADOPTED；RA-06/W1 本地实现待独立审查；W2 task runtime/W3 CLI 未实现** |
 | ADR-RA-PUBLIC | 第 10 节：readiness、自有演练、第三方许可分开 | Tech Lead 批准控制和 go/no-go；操作者取得每项实际测试许可。RA-08 控制修改前；RA-08/09 各执行门槛单独审查 | **无；PENDING** |
 
 D1–D4 是 ADR-RA-DATA 内已采纳的设计项，不是新 ADR。下表保留方案/替代及适用条件；不重开采纳，但数据资格和操作许可不能从设计决定推导。
@@ -287,7 +300,7 @@ baseline 必须有独立 current allowed 事实和合资格完整对象证据；
 
 ## 9. ADR-RA-TASK：预算、审批集合和恢复
 
-**当前 W2 依赖：** [B1–B8](research-ai-budget-contract.md#w2-design-adoption-record)、[具体 B1/B8 v0.1.1](research-ai-w2-implementation-contract.md)、[N1/Linux/bubblewrap/限定 CI AppArmor](research-ai-w2-runtime-validation.md#adoption-and-scope)按各自记录生效。N1 运行时前提已通过集成；preparation/accounting/permit/lifecycle/recovery 及其验收仍未完成。Broader TASK/RA-06、operational budgets、真实运行和 account evidence access/retention 仍未决，M8 边界不变。
+**当前依赖：** [B1–B8](research-ai-budget-contract.md#w2-design-adoption-record)、[具体 B1/B8 v0.1.1](research-ai-w2-implementation-contract.md)、[N1/Linux/bubblewrap/限定 CI AppArmor](research-ai-w2-runtime-validation.md#adoption-and-scope)继续适用各自 AI 域，W2 fake-only 实现已集成。上节六项 TASK 决定已授权 RA-06 本地 AI-disabled 路径及本次 W1；不以未完成的 live-provider acceptance 阻塞它。Operational budgets、真实运行与 account evidence access/retention 仍独立，M8 不变。以下 C/P 是原提案历史，不推翻后续采纳。
 
 **具体问题：** 谁拥有任务状态、消费预算与观察账本，如何把有限精确 plans 组合成操作流程，而不把 M8 的 plan ownership 当作 research scheduler？
 
@@ -299,7 +312,7 @@ request/token/cost 在可发送前原子预留，observer 与结果声明分开�
 
 **替代与兼容：** 内存 task dict 不能跨进程/重启保证预算；用 TestCase.status 推断恢复会绕过现有 M8 fencing；自动把多个 action 放进一个可执行计划不受当前实现支持。推荐独立任务域引用旧 plans/canonical results，不新增 Redis、自动 worker 探测或放宽 single_process/multi_process 边界。
 
-**剩余决定/检查点：** B1–B8/N1 已限定 W2 的 budget/observer 与取消/恢复设计，不能标回待采纳；RA-06 的任务状态机、worker 生命周期、审批聚合和 local CLI 仍需在依赖实现前决定；操作者批准总预算、有限审批呈现及恢复步骤。拟议 30 分钟/100 Target GET（含 health）/并发 1/不超 revision/platform rate ；C 每案例最多 2 次调用，每次最多 4096 input tokens / 1024 total generated tokens（适用时含 reasoning），每案例模型累计墙钟时间最多 60 秒，保持 W2 数值，**task 总 token/费用与 B cap 仍不能从 synthetic 额度推导**。可信 observer 怎样捕获“两份账本都漏了一个现实事件”、如何对账 provider 的 delayed usage，在 N1 fake 机制内有已采纳的证据义务，live account 证据通道与 provider delayed usage 仍是未决操作/设计门槛。验收使用独立故障/多进程证据验证并发预留、崩溃各时点、取消和 in-doubt，不要求本包实现 scheduler。
+**历史提案与剩余检查点：** B1–B8/N1 的 AI budget/observer 决定保留。后续 TASK 六项决定已采纳 PostgreSQL、冻结集合、显式预算、worker 生命周期和恢复原则；W2/W3 实现与验收仍待完成，操作者实际预算/执行许可仍独立。30 分钟/100 Target GET（含 health）/并发 1/不超 intake/revision/platform rate 已成为 local AI-disabled 路径的硬上限，AI 调用/token/费用为零。下列 AI 数值只描述原 RA-05 域：C 每案例最多 2 次调用，每次最多 4096 input tokens / 1024 total generated tokens（适用时含 reasoning），每案例模型累计墙钟时间最多 60 秒，保持 W2 数值，**task 总 token/费用与 B cap 仍不能从 synthetic 额度推导**。可信 observer 怎样捕获“两份账本都漏了一个现实事件”、如何对账 provider 的 delayed usage，在 N1 fake 机制内有已采纳的证据义务，live account 证据通道与 provider delayed usage 仍是未决操作/设计门槛。验收使用独立故障/多进程证据验证并发预留、崩溃各时点、取消和 in-doubt，不要求本包实现 scheduler。
 
 ## 10. ADR-RA-PUBLIC：分开的发布与测试许可
 
@@ -323,8 +336,8 @@ request/token/cost 在可发送前原子预留，observer 与结果声明分开�
 | Knowledge K1–K4 | [已采纳](research-knowledge-contract.md#k1k4-后续采纳记录ra-03w2)；review/reuse/validation/publish 与项目数据许可分开 |
 | INTENT I1–I7 | 已采纳并有有界合成本地实现/演示；更广请求形态与实际执行许可不自动获批 |
 | W1 P1–P6 / E1–E6 | fake-only 设计/adapter 已集成；live-provider acceptance、账号/材料/retention/预算未完成 |
-| W2 B1–B8 / N1 与运行时决定 | 已采纳，运行时前提已集成；完整协议实现及 T/X/Y 验收未完成 |
-| Broader TASK / PUBLIC | RA-06 编排/审批/worker/CLI 及 RA-08 控制发布、自有公网演练、第三方许可仍须各自决定 |
+| W2 B1–B8 / N1 与运行时决定 | 已采纳，fake-only W2 已集成；真实 provider 证明与操作许可仍未完成 |
+| TASK / PUBLIC | 六项 local AI-disabled TASK 决定已采纳，W1 本地实现待独立审查，W2/W3 未实现；更广 TASK 与 RA-08 控制发布、自有公网演练、第三方许可仍须各自决定 |
 | 评测标签/阈值、B cap、总任务/账号额度 | 以独立明确记录为准；冻结 synthetic fixture 和工程 gate 不替代产品/预算批准 |
 | 阶段与生产/运营结论 | 已集成增量见 roadmap；不从 CI 成功推定完整 W2、production readiness 或 operational permission |
 

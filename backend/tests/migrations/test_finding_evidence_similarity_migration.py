@@ -26,7 +26,7 @@ VALUES = dict(comparator_id="sha256_exact_and_length_ratio", comparator_version=
 def test_clean_postgres_round_trip_adds_only_bounded_similarity_table(monkeypatch):
     config = Config("alembic.ini")
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["7ba5dce4a936"]
+    assert scripts.get_heads() == ["8cb6edf5ba47"]
     assert scripts.get_revision(REVISION).down_revision == PARENT
     schema = f"similarity_migration_{uuid4().hex}"
     with engine.begin() as db:

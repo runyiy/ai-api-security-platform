@@ -16,7 +16,7 @@ def test_endpoint_resource_binding_migration_contract_and_round_trip() -> None:
     config = Config("alembic.ini")
     scripts = ScriptDirectory.from_config(config)
     assert scripts.get_revision(REVISION).down_revision == PARENT
-    assert scripts.get_heads() == ["7ba5dce4a936"]
+    assert scripts.get_heads() == ["8cb6edf5ba47"]
     target_id = endpoint_id = None
     try:
         command.downgrade(config, PARENT)
